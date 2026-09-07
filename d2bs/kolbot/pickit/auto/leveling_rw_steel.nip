@@ -1,0 +1,3 @@
+// Non-sorc only — Steel (Tir+El) 2os swords/axes. Sorcs must NOT load this.
+
+([Name] == ShortSword || [Name] == Scimitar || [Name] == Saber || [Name] == Falchion || [Name] == CrystalSword || [Name] == HandAxe || [Name] == Axe) && [Flag] != Ethereal # [Sockets] == 2 # [MaxQuantity] == 1

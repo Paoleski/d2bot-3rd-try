@@ -1,0 +1,32 @@
+// Leveling merc scavenger (no player #tier). Pickit.wantToPick still requires
+// AutoEquipMerc upgrade when the right merc is hired — wrong-act weapons are dropped.
+// Act1 Rogue: bow / crossbow. Act2 Desert: spear (incl. pike) / polearm.
+// Armor slots: life, all-res, IAS, FHR, ED, life leech (LL).
+// Endgame merc.nip is NOT used on the AutoGear leveling path.
+
+// --- Act1 Rogue weapons ---
+[type] == bow && ([quality] == magic || [quality] == rare) # [enhanceddamage] >= 20 || [maxdamage] >= 10 || [ias] >= 10 || [lifeleech] >= 3 # [MaxQuantity] == 1
+[type] == crossbow && ([quality] == magic || [quality] == rare) # [enhanceddamage] >= 20 || [maxdamage] >= 10 || [ias] >= 10 || [lifeleech] >= 3 # [MaxQuantity] == 1
+[type] == bow && ([quality] == unique || [quality] == set) # # [MaxQuantity] == 1
+[type] == crossbow && ([quality] == unique || [quality] == set) # # [MaxQuantity] == 1
+
+// --- Act2 Desert weapons (pike = spear itemType) ---
+[type] == spear && ([quality] == magic || [quality] == rare) # [enhanceddamage] >= 20 || [maxdamage] >= 15 || [ias] >= 10 || [lifeleech] >= 3 # [MaxQuantity] == 1
+[type] == polearm && ([quality] == magic || [quality] == rare) # [enhanceddamage] >= 20 || [maxdamage] >= 15 || [ias] >= 10 || [lifeleech] >= 3 # [MaxQuantity] == 1
+[type] == spear && ([quality] == unique || [quality] == set) # # [MaxQuantity] == 1
+[type] == polearm && ([quality] == unique || [quality] == set) # # [MaxQuantity] == 1
+
+// --- Armor / helm / circlet / gloves / boots / belt ---
+[type] == armor && ([quality] == magic || [quality] == rare) && [Flag] != Ethereal # [maxhp] >= 10 || [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 15 || [ias] >= 10 || [fhr] >= 10 || [enhanceddamage] >= 10 || [lifeleech] >= 2 # [MaxQuantity] == 2
+[type] == helm && ([quality] == magic || [quality] == rare) && [Flag] != Ethereal # [maxhp] >= 10 || [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 15 || [ias] >= 10 || [fhr] >= 10 || [enhanceddamage] >= 10 || [lifeleech] >= 2 # [MaxQuantity] == 2
+[type] == circlet && ([quality] == magic || [quality] == rare) && [Flag] != Ethereal # [maxhp] >= 10 || [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 15 || [ias] >= 10 || [fhr] >= 10 || [enhanceddamage] >= 10 || [lifeleech] >= 2 # [MaxQuantity] == 1
+[type] == gloves && ([quality] == magic || [quality] == rare) && [Flag] != Ethereal # [maxhp] >= 10 || [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 15 || [ias] >= 10 || [fhr] >= 10 || [enhanceddamage] >= 10 || [lifeleech] >= 2 # [MaxQuantity] == 1
+[type] == boots && ([quality] == magic || [quality] == rare) && [Flag] != Ethereal # [maxhp] >= 10 || [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 15 || [ias] >= 10 || [fhr] >= 10 || [enhanceddamage] >= 10 || [lifeleech] >= 2 # [MaxQuantity] == 1
+[type] == belt && ([quality] == magic || [quality] == rare) && [Flag] != Ethereal # [maxhp] >= 10 || [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 15 || [ias] >= 10 || [fhr] >= 10 || [enhanceddamage] >= 10 || [lifeleech] >= 2 # [MaxQuantity] == 1
+
+[type] == armor && ([quality] == unique || [quality] == set) && [Flag] != Ethereal # # [MaxQuantity] == 1
+[type] == helm && ([quality] == unique || [quality] == set) && [Flag] != Ethereal # # [MaxQuantity] == 1
+[type] == circlet && ([quality] == unique || [quality] == set) && [Flag] != Ethereal # # [MaxQuantity] == 1
+[type] == gloves && ([quality] == unique || [quality] == set) && [Flag] != Ethereal # # [MaxQuantity] == 1
+[type] == boots && ([quality] == unique || [quality] == set) && [Flag] != Ethereal # # [MaxQuantity] == 1
+[type] == belt && ([quality] == unique || [quality] == set) && [Flag] != Ethereal # # [MaxQuantity] == 1

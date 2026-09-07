@@ -1,0 +1,10 @@
+// PD2 potions — use codes (classids shift; types from MPQ ItemTypes)
+[Name] == hp4
+[Name] == hp5
+[Name] == mp4
+[Name] == mp5
+[Name] == rvs
+[Name] == rvl
+[Name] == rejuvenationpotion
+[Name] == fullrejuvenationpotion
+[Type] == rejuvpotion

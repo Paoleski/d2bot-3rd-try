@@ -1,0 +1,39 @@
+// Sorceress FIRE / Hydra — prefer 2H staff; orb/wand lower tiers so staff wins on same mods.
+
+// FCR filler — staff first
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 10 # [tier] == 16
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 20 # [tier] == 19
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 10 # [tier] == 14
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 20 # [tier] == 17
+
+// +Fire Ball — staff outranks orb/wand
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillfireball] >= 1 # [tier] == 32
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillfireball] >= 2 # [tier] == 34
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillfireball] >= 3 # [tier] == 36
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillfireball] >= 1 && [fcr] >= 10 # [tier] == 38
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillfireball] >= 2 && [fcr] >= 10 # [tier] == 40
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillfireball] >= 3 && [fcr] >= 10 # [tier] == 42
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [skillfireball] >= 1 # [tier] == 30
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [skillfireball] >= 2 # [tier] == 32
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [skillfireball] >= 3 # [tier] == 34
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [skillfireball] >= 1 && [fcr] >= 10 # [tier] == 36
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [skillfireball] >= 2 && [fcr] >= 10 # [tier] == 38
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [skillfireball] >= 3 && [fcr] >= 10 # [tier] == 40
+
+// Fire tab / +sorc
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [fireskilltab] >= 1 # [tier] == 44
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [fireskilltab] >= 2 # [tier] == 46
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [fireskilltab] >= 3 # [tier] == 48
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [sorceressskills] >= 1 && [fcr] >= 10 # [tier] == 50
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [sorceressskills] >= 2 # [tier] == 52
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [fireskilltab] >= 1 # [tier] == 42
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [fireskilltab] >= 2 # [tier] == 44
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [fireskilltab] >= 3 # [tier] == 46
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [sorceressskills] >= 1 && [fcr] >= 10 # [tier] == 48
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [sorceressskills] >= 2 # [tier] == 50
+
+// Leaf (Tir+Ral staff)
+[type] == staff && [flag] == runeword # [fireskilltab] >= 3 # [tier] == 90
+
+// Spirit sword — enables shield slot (tier 100+)
+[type] == sword && [flag] == runeword # [itemallskills] == 2 && [fcr] >= 25 # [tier] == 100

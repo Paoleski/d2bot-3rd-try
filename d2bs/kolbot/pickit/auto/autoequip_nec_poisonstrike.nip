@@ -1,0 +1,149 @@
+// Necromancer POISON STRIKE — melee AutoEquip overlay
+// https://wiki.projectdiablo2.com/wiki/Starter_Poison_Strike_Necromancer
+// Prioritize IAS / FHR / resists / defense / life / AR. Do NOT chase FCR.
+// Loaded via Config.AutoGearBuild = "poisonstrike" (max tier wins over class nip).
+
+// =============================================================================
+// WEAPON — knife only (PS); +skill / IAS
+// =============================================================================
+[type] == knife && [quality] <= superior # # [tier] == 100
+[type] == knife && [quality] == magic # # [tier] == 110
+[type] == knife && [quality] == rare # # [tier] == 115
+[type] == knife && [quality] <= rare # [ias] >= 10 # [tier] == 118
+[type] == knife && [quality] <= rare # [ias] >= 20 # [tier] == 122
+[type] == knife && [quality] <= rare # [skillpoisondagger] >= 1 # [tier] == 125
+[type] == knife && [quality] <= rare # [skillpoisondagger] >= 2 # [tier] == 130
+[type] == knife && [quality] <= rare # [skillpoisondagger] >= 3 # [tier] == 135
+[type] == knife && [quality] <= rare # [skillpoisondagger] >= 1 && [ias] >= 10 # [tier] == 132
+[type] == knife && [quality] <= rare # [skillpoisondagger] >= 2 && [ias] >= 10 # [tier] == 138
+[type] == knife && [quality] <= rare # [skillpoisondagger] >= 3 && [ias] >= 10 # [tier] == 142
+
+[name] == kris && [quality] == unique # [skillpoisondagger] >= 2 # [maxquantity] == 1 && [tier] == 145 // Jade Tan Do
+[name] == cinquedeas && [quality] == unique # [ias] >= 30 && [skillpoisondagger] >= 2 # [maxquantity] == 1 && [tier] == 150 // Blackbog's
+
+// =============================================================================
+// OFFHAND — +Poison Strike heads/shields; else block / resists / FHR / defense
+// =============================================================================
+[type] == head && [quality] <= rare # [skillpoisondagger] >= 1 # [tier] == 100
+[type] == head && [quality] <= rare # [skillpoisondagger] >= 2 # [tier] == 115
+[type] == head && [quality] <= rare # [skillpoisondagger] >= 3 # [tier] == 130
+[type] == head && [quality] <= rare # [fireresist]+[lightresist]+[coldresist] >= 20 # [tier] == 70
+[type] == head && [quality] <= rare # [fireresist]+[lightresist]+[coldresist] >= 40 # [tier] == 85
+[type] == head && [quality] <= rare # [fhr] >= 10 # [tier] == 75
+[type] == head && [quality] <= rare # [enhanceddefense] >= 30 # [tier] == 65
+
+[type] == shield && [quality] <= rare # [skillpoisondagger] >= 1 # [tier] == 95
+[type] == shield && [quality] <= rare # [skillpoisondagger] >= 2 # [tier] == 110
+[type] == shield && [quality] <= rare # [skillpoisondagger] >= 3 # [tier] == 125
+[type] == shield && [quality] <= rare # [fireresist]+[lightresist]+[coldresist] >= 30 # [tier] == 70
+[type] == shield && [quality] <= rare # [fireresist]+[lightresist]+[coldresist] >= 50 # [tier] == 90
+[type] == shield && [quality] <= rare # [fhr] >= 10 # [tier] == 75
+[type] == shield && [quality] <= rare # [fbr] >= 20 # [tier] == 80
+[type] == shield && [quality] <= rare # [enhanceddefense] >= 40 # [tier] == 65
+
+// =============================================================================
+// HELM — Wormskull; else FHR / resists / defense / life (not FCR circlets)
+// =============================================================================
+[name] == bonehelm && [quality] == unique # [necromancerskills] >= 1 && [lifeleech] >= 5 # [maxquantity] == 1 && [tier] == 120 // Wormskull
+[type] == helm && [flag] == runeword # [lightresist] >= 25 # [tier] == 95 // Lore (res)
+[type] == helm && [quality] <= rare # [fhr] >= 10 # [tier] == 70
+[type] == helm && [quality] <= rare # [fhr] >= 20 # [tier] == 85
+[type] == helm && [quality] <= rare # [ias] >= 10 # [tier] == 75
+[type] == helm && [quality] <= rare # [maxhp] >= 20 # [tier] == 70
+[type] == helm && [quality] <= rare # [fireresist]+[lightresist]+[coldresist] >= 20 # [tier] == 75
+[type] == helm && [quality] <= rare # [fireresist]+[lightresist]+[coldresist] >= 40 # [tier] == 90
+[type] == helm && [quality] <= rare # [enhanceddefense] >= 40 # [tier] == 65
+[type] == helm && [quality] <= rare # [enhanceddefense] >= 80 # [tier] == 80
+[type] == helm && [quality] <= rare # [fhr] >= 10 && [fireresist]+[lightresist] >= 20 # [tier] == 95
+[type] == helm && [quality] <= rare # [maxhp] >= 20 && [fireresist]+[lightresist] >= 20 # [tier] == 100
+
+// =============================================================================
+// ARMOR — Stealth (FHR); else defense / resists / life (ignore FCR)
+// =============================================================================
+[type] == armor && [flag] == runeword # [fhr] == 30 # [tier] == 100 // Stealth — FHR for melee
+[type] == armor && [quality] <= rare # [maxhp] >= 20 # [tier] == 70
+[type] == armor && [quality] <= rare # [maxhp] >= 40 # [tier] == 85
+[type] == armor && [quality] <= rare # [fireresist]+[lightresist]+[coldresist] >= 20 # [tier] == 75
+[type] == armor && [quality] <= rare # [fireresist]+[lightresist]+[coldresist] >= 40 # [tier] == 90
+[type] == armor && [quality] <= rare # [enhanceddefense] >= 40 # [tier] == 70
+[type] == armor && [quality] <= rare # [enhanceddefense] >= 80 # [tier] == 85
+[type] == armor && [quality] <= rare # [fhr] >= 10 # [tier] == 80
+[type] == armor && [quality] <= rare # [maxhp] >= 30 && [fireresist]+[lightresist] >= 20 # [tier] == 95
+[type] == armor && [quality] <= rare # [enhanceddefense] >= 50 && [fireresist]+[lightresist] >= 20 # [tier] == 100
+
+// =============================================================================
+// GLOVES — Sigon's / IAS (beat Magefist FCR)
+// =============================================================================
+[name] == gauntlets && [quality] == set # [strength] > 10 # [maxquantity] == 1 && [tier] == 130 // Sigon's Gage
+[type] == gloves && [quality] <= rare # [ias] >= 10 # [tier] == 100
+[type] == gloves && [quality] <= rare # [ias] >= 20 # [tier] == 115
+[type] == gloves && [quality] <= rare # [ias] >= 10 && [fireresist]+[lightresist] >= 10 # [tier] == 120
+[type] == gloves && [quality] <= rare # [fireresist]+[lightresist]+[coldresist] >= 20 # [tier] == 80
+[type] == gloves && [quality] <= rare # [strength]+[dexterity] >= 10 # [tier] == 75
+[type] == gloves && [quality] <= rare # [maxhp] >= 10 # [tier] == 70
+// Demote FCR gloves (Magefist etc.) below IAS
+[type] == gloves && [quality] == unique # [fcr] > 0 # [tier] == 40
+
+// =============================================================================
+// BOOTS — Sigon's / IAS / FHR / resists / FRW
+// =============================================================================
+[name] == greaves && [quality] == set # # [maxquantity] == 1 && [tier] == 130 // Sigon's Sabot
+[type] == boots && [quality] <= rare # [ias] >= 10 # [tier] == 100
+[type] == boots && [quality] <= rare # [ias] >= 20 # [tier] == 115
+[type] == boots && [quality] <= rare # [fhr] >= 10 # [tier] == 95
+[type] == boots && [quality] <= rare # [fhr] >= 20 # [tier] == 110
+[type] == boots && [quality] <= rare # [frw] >= 20 && [fireresist]+[lightresist] >= 20 # [tier] == 105
+[type] == boots && [quality] <= rare # [fireresist]+[lightresist]+[coldresist] >= 30 # [tier] == 90
+[type] == boots && [quality] <= rare # [ias] >= 10 && [fireresist]+[lightresist] >= 10 # [tier] == 120
+
+// =============================================================================
+// BELT — FHR / IAS / life / resists (not caster mana)
+// =============================================================================
+[type] == belt && [quality] <= rare # [fhr] >= 10 # [tier] == 90
+[type] == belt && [quality] <= rare # [fhr] >= 20 # [tier] == 105
+[type] == belt && [quality] <= rare # [ias] >= 10 # [tier] == 95
+[type] == belt && [quality] <= rare # [maxhp] >= 30 # [tier] == 85
+[type] == belt && [quality] <= rare # [maxhp] >= 40 # [tier] == 100
+[type] == belt && [quality] <= rare # [fireresist]+[lightresist]+[coldresist] >= 20 # [tier] == 80
+[type] == belt && [quality] <= rare # [fhr] >= 10 && [maxhp] >= 20 # [tier] == 110
+[type] == belt && [quality] <= rare # [fhr] >= 10 && [fireresist]+[lightresist] >= 20 # [tier] == 115
+[name] == platedbelt && [quality] == set # [fireresist] == 20 # [tier] == 100 // Sigon's Warp
+
+// =============================================================================
+// AMULET — Angelics / life / AR / resists / necro skills (not FCR)
+// =============================================================================
+[type] == amulet && [quality] == set # [itemdamagetomana] == 20 # [maxquantity] == 1 && [tier] == 125 // Angelic Wings
+[type] == amulet && [quality] <= rare # [tohit] >= 50 # [tier] == 90
+[type] == amulet && [quality] <= rare # [tohit] >= 100 # [tier] == 105
+[type] == amulet && [quality] <= rare # [maxhp] >= 20 # [tier] == 85
+[type] == amulet && [quality] <= rare # [maxhp] >= 40 # [tier] == 100
+[type] == amulet && [quality] <= rare # [fireresist]+[lightresist]+[coldresist] >= 20 # [tier] == 90
+[type] == amulet && [quality] <= rare # [fireresist]+[lightresist]+[coldresist] >= 40 # [tier] == 110
+[type] == amulet && [quality] <= rare # [maxhp] >= 20 && [tohit] >= 50 # [tier] == 115
+[type] == amulet && [quality] <= rare # [maxhp] >= 20 && [fireresist]+[lightresist] >= 20 # [tier] == 118
+[type] == amulet && [quality] <= rare # [necromancerskills] >= 1 # [tier] == 120
+[type] == amulet && [quality] <= rare # [necromancerskills] >= 2 # [tier] == 130
+[type] == amulet && [quality] <= rare # [skillpoisondagger] >= 1 # [tier] == 125
+[type] == amulet && [quality] == unique # [fireresist] >= 50 # [tier] == 100
+// FCR amulets stay low for this build
+[type] == amulet && [quality] <= rare # [fcr] >= 10 && [maxhp] == 0 && [tohit] == 0 # [tier] == 30
+
+// =============================================================================
+// RINGS — Angelics / life / AR / resists (beat FCR ring ladder in base nip)
+// =============================================================================
+// Floor so any rare/magic still equips empty slots (base nec junk-rare lines can lose to overlay)
+[type] == ring && [quality] == magic # # [tier] == 20
+[type] == ring && [quality] == rare # # [tier] == 25
+[type] == ring && [quality] == set # [maxhp] == 20 # [maxquantity] == 2 && [tier] == 125 // Angelic Halo
+[type] == ring && [quality] <= rare # [tohit] >= 50 # [tier] == 90
+[type] == ring && [quality] <= rare # [tohit] >= 100 # [tier] == 105
+[type] == ring && [quality] <= rare # [maxhp] >= 20 # [tier] == 95
+[type] == ring && [quality] <= rare # [maxhp] >= 40 # [tier] == 115
+[type] == ring && [quality] <= rare # [fireresist]+[lightresist]+[coldresist] >= 20 # [tier] == 90
+[type] == ring && [quality] <= rare # [fireresist]+[lightresist]+[coldresist] >= 30 # [tier] == 110
+[type] == ring && [quality] <= rare # [maxhp] >= 20 && [tohit] >= 50 # [tier] == 120
+[type] == ring && [quality] <= rare # [maxhp] >= 20 && [fireresist]+[lightresist] >= 20 # [tier] == 122
+[type] == ring && [quality] <= rare # [lifeleech] >= 3 # [tier] == 100
+[type] == ring && [quality] <= rare # [strength]+[dexterity] >= 10 # [tier] == 85
+// Pure FCR rings — keep below melee life/AR/res
+[type] == ring && [quality] <= rare # [fcr] >= 10 && [maxhp] == 0 && [tohit] == 0 # [tier] == 35

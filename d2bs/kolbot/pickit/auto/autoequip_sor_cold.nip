@@ -1,0 +1,57 @@
+// Sorceress COLD — prefer 2H staff; orb/wand lower tiers.
+// Leveling main skill: Frost Nova (+skillfrostnova). FO later.
+
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 10 # [tier] == 16
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 20 # [tier] == 19
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 10 # [tier] == 14
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 20 # [tier] == 17
+
+// Ice Bolt — early filler before FN
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillicebolt] >= 1 # [tier] == 22
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillicebolt] >= 2 # [tier] == 24
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillicebolt] >= 3 # [tier] == 26
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillicebolt] >= 1 && [fcr] >= 10 # [tier] == 28
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [skillicebolt] >= 1 # [tier] == 20
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [skillicebolt] >= 2 # [tier] == 22
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [skillicebolt] >= 3 # [tier] == 24
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [skillicebolt] >= 1 && [fcr] >= 10 # [tier] == 26
+
+// Frost Nova — primary leveling attack
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillfrostnova] >= 1 # [tier] == 32
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillfrostnova] >= 2 # [tier] == 34
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillfrostnova] >= 3 # [tier] == 36
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillfrostnova] >= 1 && [fcr] >= 10 # [tier] == 38
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillfrostnova] >= 2 && [fcr] >= 10 # [tier] == 40
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillfrostnova] >= 3 && [fcr] >= 10 # [tier] == 42
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [skillfrostnova] >= 1 # [tier] == 30
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [skillfrostnova] >= 2 # [tier] == 32
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [skillfrostnova] >= 3 # [tier] == 34
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [skillfrostnova] >= 1 && [fcr] >= 10 # [tier] == 36
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [skillfrostnova] >= 2 && [fcr] >= 10 # [tier] == 38
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [skillfrostnova] >= 3 && [fcr] >= 10 # [tier] == 40
+
+// Frozen Orb / GS / Blizzard — late
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillglacialspike] >= 1 # [tier] == 43
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillblizzard] >= 1 # [tier] == 44
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillblizzard] >= 2 # [tier] == 46
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillfrozenorb] >= 1 # [tier] == 48
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillfrozenorb] >= 2 # [tier] == 50
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillfrozenorb] >= 1 && [fcr] >= 10 # [tier] == 52
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [skillglacialspike] >= 1 # [tier] == 41
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [skillblizzard] >= 1 # [tier] == 42
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [skillfrozenorb] >= 1 # [tier] == 46
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [skillfrozenorb] >= 2 # [tier] == 48
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [skillfrozenorb] >= 1 && [fcr] >= 10 # [tier] == 50
+
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [coldskilltab] >= 1 # [tier] == 54
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [coldskilltab] >= 2 # [tier] == 56
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [coldskilltab] >= 3 # [tier] == 58
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [sorceressskills] >= 1 && [fcr] >= 10 # [tier] == 60
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [sorceressskills] >= 2 # [tier] == 62
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [coldskilltab] >= 1 # [tier] == 52
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [coldskilltab] >= 2 # [tier] == 54
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [coldskilltab] >= 3 # [tier] == 56
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [sorceressskills] >= 1 && [fcr] >= 10 # [tier] == 58
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [sorceressskills] >= 2 # [tier] == 60
+
+[type] == sword && [flag] == runeword # [itemallskills] == 2 && [fcr] >= 25 # [tier] == 100

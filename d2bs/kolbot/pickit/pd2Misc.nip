@@ -1,0 +1,51 @@
+// PD2 misc pickit — names match NTIPAliasClassID from pd2data.mpq Misc.txt
+// Enable in config: Config.PickitFiles.push("pd2Misc.nip");
+
+[Type] == Gold # [Gold] >= 7000
+
+// Rejuvs (PD2 codes + type rpot=78) — keep for RejuvBuffer / UseRejuvHP
+[Name] == rvs
+[Name] == rvl
+[Name] == rejuvpotion
+[Name] == fullrejuvpotion
+[Name] == rejuvenationpotion
+[Name] == fullrejuvenationpotion
+[Type] == rejuvpotion
+[Type] == rejuvenationpotion
+
+// Essences / tokens (use short codes from NTItemAlias — avoids spelling mismatches)
+[Name] == tes # # [MaxQuantity] == 2
+[Name] == ceh # # [MaxQuantity] == 2
+[Name] == bet # # [MaxQuantity] == 2
+[Name] == fed # # [MaxQuantity] == 2
+[Name] == toa # # [MaxQuantity] == 5
+
+// Runes El–Zod (+ PD2 stacks) live in auto/all_runes.nip (AutoGear)
+
+// Perfect gems
+[Name] == perfectamethyst # # [MaxQuantity] == 3
+[Name] == perfectdiamond # # [MaxQuantity] == 3
+[Name] == perfectemerald # # [MaxQuantity] == 3
+[Name] == perfectruby # # [MaxQuantity] == 3
+[Name] == perfectsaphire # # [MaxQuantity] == 3
+[Name] == perfectskull # # [MaxQuantity] == 3
+[Name] == perfecttopaz # # [MaxQuantity] == 3
+
+// PD2 currency / events (use code aliases)
+[Name] == wss
+[Name] == worldstoneshard
+[Name] == cwss
+[Name] == lbox
+[Name] == puzzlebox
+[Name] == lpp
+[Name] == puzzlepiece
+[Name] == lmal
+[Name] == larzuksmalus
+
+// Sample maps (classid names from MPQ) — keep rare for value
+[Name] == kurastmap && [Quality] == Rare
+[Name] == arcanemap && [Quality] == Rare
+[Name] == fortressmap && [Quality] == Rare
+[Name] == desertmap && [Quality] == Rare
+[Name] == rathmamap && [Quality] == Rare
+[Name] == ubermap && [Quality] == Rare

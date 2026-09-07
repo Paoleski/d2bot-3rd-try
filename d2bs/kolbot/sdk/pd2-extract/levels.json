@@ -1,0 +1,2157 @@
+{
+  "source": "pd2data.mpq data/global/excel/Levels.txt",
+  "count": 197,
+  "levels": [
+    {
+      "id": 0,
+      "name": "Null",
+      "levelName": "",
+      "levelWarp": "",
+      "waypoint": null,
+      "vis": [],
+      "act": null
+    },
+    {
+      "id": 1,
+      "name": "Act 1 - Town",
+      "levelName": "Rogue Encampment",
+      "levelWarp": "To The Rogue Encampment",
+      "waypoint": 0,
+      "vis": [],
+      "act": null
+    },
+    {
+      "id": 2,
+      "name": "Act 1 - Wilderness 1",
+      "levelName": "Blood Moor",
+      "levelWarp": "To The Blood Moor",
+      "waypoint": null,
+      "vis": [
+        8,
+        8,
+        8,
+        8
+      ],
+      "act": null
+    },
+    {
+      "id": 3,
+      "name": "Act 1 - Wilderness 2",
+      "levelName": "Cold Plains",
+      "levelWarp": "To The Cold Plains",
+      "waypoint": 1,
+      "vis": [
+        9,
+        9,
+        9,
+        9
+      ],
+      "act": null
+    },
+    {
+      "id": 4,
+      "name": "Act 1 - Wilderness 3",
+      "levelName": "Stony Field",
+      "levelWarp": "To The Stony Field",
+      "waypoint": 2,
+      "vis": [
+        10,
+        10,
+        10,
+        10
+      ],
+      "act": null
+    },
+    {
+      "id": 5,
+      "name": "Act 1 - Wilderness 4",
+      "levelName": "Dark Wood",
+      "levelWarp": "To The Dark Wood",
+      "waypoint": 3,
+      "vis": [
+        10,
+        10,
+        10,
+        10
+      ],
+      "act": null
+    },
+    {
+      "id": 6,
+      "name": "Act 1 - Wilderness 5",
+      "levelName": "Black Marsh",
+      "levelWarp": "To The Black Marsh",
+      "waypoint": 4,
+      "vis": [
+        20,
+        11,
+        11,
+        11,
+        11
+      ],
+      "act": null
+    },
+    {
+      "id": 7,
+      "name": "Act 1 - Wilderness 6",
+      "levelName": "Tamoe Highland",
+      "levelWarp": "To The Tamoe Highland",
+      "waypoint": null,
+      "vis": [
+        12,
+        12,
+        12,
+        12
+      ],
+      "act": null
+    },
+    {
+      "id": 8,
+      "name": "Act 1 - Cave 1",
+      "levelName": "Den of Evil",
+      "levelWarp": "To The Den of Evil",
+      "waypoint": null,
+      "vis": [
+        2
+      ],
+      "act": null
+    },
+    {
+      "id": 9,
+      "name": "Act 1 - Cave 2",
+      "levelName": "Cave Level 1",
+      "levelWarp": "To The Cave Level 1",
+      "waypoint": null,
+      "vis": [
+        3,
+        13
+      ],
+      "act": null
+    },
+    {
+      "id": 10,
+      "name": "Act 1 - Cave 3",
+      "levelName": "Underground Passage Level 1",
+      "levelWarp": "To Underground Passage Level 1",
+      "waypoint": null,
+      "vis": [
+        4,
+        5,
+        14
+      ],
+      "act": null
+    },
+    {
+      "id": 11,
+      "name": "Act 1 - Cave 4",
+      "levelName": "Hole Level 1",
+      "levelWarp": "To The Hole Level 1",
+      "waypoint": null,
+      "vis": [
+        6,
+        15
+      ],
+      "act": null
+    },
+    {
+      "id": 12,
+      "name": "Act 1 - Cave 5",
+      "levelName": "Pit Level 1",
+      "levelWarp": "To The Pit Level 1",
+      "waypoint": null,
+      "vis": [
+        7,
+        16
+      ],
+      "act": null
+    },
+    {
+      "id": 13,
+      "name": "Act 1 - Cave 2 Treasure",
+      "levelName": "Cave Level 2",
+      "levelWarp": "To The Cave Level 2",
+      "waypoint": null,
+      "vis": [
+        9
+      ],
+      "act": null
+    },
+    {
+      "id": 14,
+      "name": "Act 1 - Cave 3 Treasure",
+      "levelName": "Underground Passage Level 2",
+      "levelWarp": "To Underground Passage Level 2",
+      "waypoint": null,
+      "vis": [
+        10
+      ],
+      "act": null
+    },
+    {
+      "id": 15,
+      "name": "Act 1 - Cave 4 Treasure",
+      "levelName": "Hole Level 2",
+      "levelWarp": "To The Hole Level 2",
+      "waypoint": null,
+      "vis": [
+        11
+      ],
+      "act": null
+    },
+    {
+      "id": 16,
+      "name": "Act 1 - Cave 5 Treasure",
+      "levelName": "Pit Level 2",
+      "levelWarp": "To The Pit Level 2",
+      "waypoint": null,
+      "vis": [
+        12
+      ],
+      "act": null
+    },
+    {
+      "id": 17,
+      "name": "Act 1 - Graveyard",
+      "levelName": "Burial Grounds",
+      "levelWarp": "To The Burial Grounds",
+      "waypoint": null,
+      "vis": [
+        18,
+        19
+      ],
+      "act": null
+    },
+    {
+      "id": 18,
+      "name": "Act 1 - Crypt 1 A",
+      "levelName": "Crypt",
+      "levelWarp": "To The Crypt",
+      "waypoint": null,
+      "vis": [
+        17
+      ],
+      "act": null
+    },
+    {
+      "id": 19,
+      "name": "Act 1 - Crypt 2 A",
+      "levelName": "Mausoleum",
+      "levelWarp": "To The Mausoleum",
+      "waypoint": null,
+      "vis": [
+        17
+      ],
+      "act": null
+    },
+    {
+      "id": 20,
+      "name": "Act 1 - Tower 2",
+      "levelName": "Forgotten Tower",
+      "levelWarp": "To The Forgotten Tower",
+      "waypoint": null,
+      "vis": [
+        6,
+        21
+      ],
+      "act": null
+    },
+    {
+      "id": 21,
+      "name": "Act 1 - Crypt 3 A",
+      "levelName": "Tower Cellar Level 1",
+      "levelWarp": "To The Tower Cellar Level 1",
+      "waypoint": null,
+      "vis": [
+        20,
+        22
+      ],
+      "act": null
+    },
+    {
+      "id": 22,
+      "name": "Act 1 - Crypt 3 B",
+      "levelName": "Tower Cellar Level 2",
+      "levelWarp": "To The Tower Cellar Level 2",
+      "waypoint": null,
+      "vis": [
+        21,
+        23
+      ],
+      "act": null
+    },
+    {
+      "id": 23,
+      "name": "Act 1 - Crypt 3 C",
+      "levelName": "Tower Cellar Level 3",
+      "levelWarp": "To The Tower Cellar Level 3",
+      "waypoint": null,
+      "vis": [
+        22,
+        24
+      ],
+      "act": null
+    },
+    {
+      "id": 24,
+      "name": "Act 1 - Crypt 3 D",
+      "levelName": "Tower Cellar Level 4",
+      "levelWarp": "To The Tower Cellar Level 4",
+      "waypoint": null,
+      "vis": [
+        23,
+        25
+      ],
+      "act": null
+    },
+    {
+      "id": 25,
+      "name": "Act 1 - Crypt 3 E",
+      "levelName": "Tower Cellar Level 5",
+      "levelWarp": "To The Tower Cellar Level 5",
+      "waypoint": null,
+      "vis": [
+        24
+      ],
+      "act": null
+    },
+    {
+      "id": 26,
+      "name": "Act 1 - Monastery",
+      "levelName": "Monastery Gate",
+      "levelWarp": "To The Monastery Gate",
+      "waypoint": null,
+      "vis": [
+        27
+      ],
+      "act": null
+    },
+    {
+      "id": 27,
+      "name": "Act 1 - Courtyard 1",
+      "levelName": "Outer Cloister",
+      "levelWarp": "To The Outer Cloister",
+      "waypoint": 5,
+      "vis": [
+        26,
+        28
+      ],
+      "act": null
+    },
+    {
+      "id": 28,
+      "name": "Act 1 - Barracks",
+      "levelName": "Barracks",
+      "levelWarp": "To The Barracks",
+      "waypoint": null,
+      "vis": [
+        27,
+        29
+      ],
+      "act": null
+    },
+    {
+      "id": 29,
+      "name": "Act 1 - Jail 1",
+      "levelName": "Jail Level 1",
+      "levelWarp": "To The Jail Level 1",
+      "waypoint": 6,
+      "vis": [
+        28,
+        30
+      ],
+      "act": null
+    },
+    {
+      "id": 30,
+      "name": "Act 1 - Jail 2",
+      "levelName": "Jail Level 2",
+      "levelWarp": "To The Jail Level 2",
+      "waypoint": null,
+      "vis": [
+        29,
+        31
+      ],
+      "act": null
+    },
+    {
+      "id": 31,
+      "name": "Act 1 - Jail 3",
+      "levelName": "Jail Level 3",
+      "levelWarp": "To The Jail Level 3",
+      "waypoint": null,
+      "vis": [
+        30,
+        32
+      ],
+      "act": null
+    },
+    {
+      "id": 32,
+      "name": "Act 1 - Courtyard 2",
+      "levelName": "Inner Cloister",
+      "levelWarp": "To The Inner Cloister",
+      "waypoint": 7,
+      "vis": [
+        31,
+        33
+      ],
+      "act": null
+    },
+    {
+      "id": 33,
+      "name": "Act 1 - Cathedral",
+      "levelName": "Cathedral",
+      "levelWarp": "To The Cathedral",
+      "waypoint": null,
+      "vis": [
+        32,
+        34
+      ],
+      "act": null
+    },
+    {
+      "id": 34,
+      "name": "Act 1 - Catacombs 1",
+      "levelName": "Catacombs Level 1",
+      "levelWarp": "To The Catacombs Level 1",
+      "waypoint": null,
+      "vis": [
+        33,
+        35
+      ],
+      "act": null
+    },
+    {
+      "id": 35,
+      "name": "Act 1 - Catacombs 2",
+      "levelName": "Catacombs Level 2",
+      "levelWarp": "To The Catacombs Level 2",
+      "waypoint": 8,
+      "vis": [
+        34,
+        36
+      ],
+      "act": null
+    },
+    {
+      "id": 36,
+      "name": "Act 1 - Catacombs 3",
+      "levelName": "Catacombs Level 3",
+      "levelWarp": "To The Catacombs Level 3",
+      "waypoint": null,
+      "vis": [
+        35,
+        37
+      ],
+      "act": null
+    },
+    {
+      "id": 37,
+      "name": "Act 1 - Catacombs 4",
+      "levelName": "Catacombs Level 4",
+      "levelWarp": "To The Catacombs Level 4",
+      "waypoint": null,
+      "vis": [
+        36
+      ],
+      "act": null
+    },
+    {
+      "id": 38,
+      "name": "Act 1 - Tristram",
+      "levelName": "Tristram",
+      "levelWarp": "To Tristram",
+      "waypoint": null,
+      "vis": [],
+      "act": null
+    },
+    {
+      "id": 39,
+      "name": "Act 1 - Moo Moo Farm",
+      "levelName": "Moo Moo Farm",
+      "levelWarp": "To The Moo Moo Farm",
+      "waypoint": null,
+      "vis": [],
+      "act": null
+    },
+    {
+      "id": 40,
+      "name": "Act 2 - Town",
+      "levelName": "Lut Gholein",
+      "levelWarp": "To Lut Gholein",
+      "waypoint": 9,
+      "vis": [
+        47,
+        47,
+        50
+      ],
+      "act": 1
+    },
+    {
+      "id": 41,
+      "name": "Act 2 - Desert 1",
+      "levelName": "Rocky Waste",
+      "levelWarp": "To The Rocky Waste",
+      "waypoint": null,
+      "vis": [
+        55,
+        55,
+        55,
+        55
+      ],
+      "act": 1
+    },
+    {
+      "id": 42,
+      "name": "Act 2 - Desert 2",
+      "levelName": "Dry Hills",
+      "levelWarp": "To The Dry Hills",
+      "waypoint": 11,
+      "vis": [
+        56,
+        56,
+        56,
+        56
+      ],
+      "act": 1
+    },
+    {
+      "id": 43,
+      "name": "Act 2 - Desert 3",
+      "levelName": "Far Oasis",
+      "levelWarp": "To The Far Oasis",
+      "waypoint": 13,
+      "vis": [
+        62
+      ],
+      "act": 1
+    },
+    {
+      "id": 44,
+      "name": "Act 2 - Desert 4",
+      "levelName": "Lost City",
+      "levelWarp": "To The Lost City",
+      "waypoint": 14,
+      "vis": [
+        65
+      ],
+      "act": 1
+    },
+    {
+      "id": 45,
+      "name": "Act 2 - Desert 5",
+      "levelName": "Valley of Snakes",
+      "levelWarp": "To The Valley of Snakes",
+      "waypoint": null,
+      "vis": [
+        58
+      ],
+      "act": 1
+    },
+    {
+      "id": 46,
+      "name": "Act 2 - Valley of the Kings",
+      "levelName": "Canyon of the Magi",
+      "levelWarp": "To The Canyon of the Magi",
+      "waypoint": 17,
+      "vis": [
+        66,
+        67,
+        68,
+        69,
+        70,
+        71,
+        72
+      ],
+      "act": 1
+    },
+    {
+      "id": 47,
+      "name": "Act 2 - Sewer 1 A",
+      "levelName": "Sewers Level 1",
+      "levelWarp": "To The Sewers Level 1",
+      "waypoint": null,
+      "vis": [
+        40,
+        40,
+        48
+      ],
+      "act": 1
+    },
+    {
+      "id": 48,
+      "name": "Act 2 - Sewer 1 B",
+      "levelName": "Sewers Level 2",
+      "levelWarp": "To The Sewers Level 2",
+      "waypoint": 10,
+      "vis": [
+        47,
+        49
+      ],
+      "act": 1
+    },
+    {
+      "id": 49,
+      "name": "Act 2 - Sewer 1 C",
+      "levelName": "Sewers Level 3",
+      "levelWarp": "To The Sewers Level 3",
+      "waypoint": null,
+      "vis": [
+        48
+      ],
+      "act": 1
+    },
+    {
+      "id": 50,
+      "name": "Act 2 - Harem",
+      "levelName": "Harem Level 1",
+      "levelWarp": "To The Harem Level 1",
+      "waypoint": null,
+      "vis": [
+        40,
+        51,
+        51
+      ],
+      "act": 1
+    },
+    {
+      "id": 51,
+      "name": "Act 2 - Corrupt Harem 1",
+      "levelName": "Harem Level 2",
+      "levelWarp": "To The Harem Level 2",
+      "waypoint": null,
+      "vis": [
+        50,
+        50,
+        52,
+        52
+      ],
+      "act": 1
+    },
+    {
+      "id": 52,
+      "name": "Act 2 - Basement 1",
+      "levelName": "Palace Cellar Level 1 ",
+      "levelWarp": "To The Palace Cellar Level 1 ",
+      "waypoint": 15,
+      "vis": [
+        51,
+        51,
+        53,
+        53
+      ],
+      "act": 1
+    },
+    {
+      "id": 53,
+      "name": "Act 2 - Basement 2",
+      "levelName": "Palace Cellar Level 2",
+      "levelWarp": "To The Palace Cellar Level 2",
+      "waypoint": null,
+      "vis": [
+        52,
+        52,
+        54,
+        54
+      ],
+      "act": 1
+    },
+    {
+      "id": 54,
+      "name": "Act 2 - Basement 3",
+      "levelName": "Palace Cellar Level 3",
+      "levelWarp": "To The Palace Cellar Level 3",
+      "waypoint": null,
+      "vis": [
+        53,
+        53
+      ],
+      "act": 1
+    },
+    {
+      "id": 55,
+      "name": "Act 2 - Tomb 1 A",
+      "levelName": "Stony Tomb Level 1",
+      "levelWarp": "To The Stony Tomb Level 1",
+      "waypoint": null,
+      "vis": [
+        41,
+        59
+      ],
+      "act": 1
+    },
+    {
+      "id": 56,
+      "name": "Act 2 - Tomb 2 A",
+      "levelName": "Halls of the Dead Level 1",
+      "levelWarp": "To The Halls of the Dead Level 1",
+      "waypoint": null,
+      "vis": [
+        42,
+        57
+      ],
+      "act": 1
+    },
+    {
+      "id": 57,
+      "name": "Act 2 - Tomb 2 B",
+      "levelName": "Halls of the Dead Level 2",
+      "levelWarp": "To The Halls of the Dead Level 2",
+      "waypoint": 12,
+      "vis": [
+        56,
+        60
+      ],
+      "act": 1
+    },
+    {
+      "id": 58,
+      "name": "Act 2 - Tomb 3 A",
+      "levelName": "Claw Viper Temple Level 1",
+      "levelWarp": "To The Claw Viper Temple Level 1",
+      "waypoint": null,
+      "vis": [
+        45,
+        61
+      ],
+      "act": 1
+    },
+    {
+      "id": 59,
+      "name": "Act 2 - Tomb 1 Treasure",
+      "levelName": "Stony Tomb Level 2",
+      "levelWarp": "To The Stony Tomb Level 2",
+      "waypoint": null,
+      "vis": [
+        55
+      ],
+      "act": 1
+    },
+    {
+      "id": 60,
+      "name": "Act 2 - Tomb 2 Treasure",
+      "levelName": "Halls of the Dead Level 3",
+      "levelWarp": "To The Halls of the Dead Level 3",
+      "waypoint": null,
+      "vis": [
+        57
+      ],
+      "act": 1
+    },
+    {
+      "id": 61,
+      "name": "Act 2 - Tomb 3 Treasure",
+      "levelName": "Claw Viper Temple Level 2",
+      "levelWarp": "To The Claw Viper Temple Level 2",
+      "waypoint": null,
+      "vis": [
+        58
+      ],
+      "act": 1
+    },
+    {
+      "id": 62,
+      "name": "Act 2 - Lair 1 A",
+      "levelName": "Maggot Lair Level 1",
+      "levelWarp": "To The Maggot Lair Level 1",
+      "waypoint": null,
+      "vis": [
+        43,
+        63
+      ],
+      "act": 1
+    },
+    {
+      "id": 63,
+      "name": "Act 2 - Lair 1 B",
+      "levelName": "Maggot Lair Level 2",
+      "levelWarp": "To The Maggot Lair Level 2",
+      "waypoint": null,
+      "vis": [
+        62,
+        64
+      ],
+      "act": 1
+    },
+    {
+      "id": 64,
+      "name": "Act 2 - Lair 1 Treasure",
+      "levelName": "Maggot Lair Level 3",
+      "levelWarp": "To The Maggot Lair Level 3",
+      "waypoint": null,
+      "vis": [
+        63
+      ],
+      "act": 1
+    },
+    {
+      "id": 65,
+      "name": "Act 2 - Sewer 2 A",
+      "levelName": "Ancient Tunnels",
+      "levelWarp": "To The Ancient Tunnels",
+      "waypoint": null,
+      "vis": [
+        44
+      ],
+      "act": 1
+    },
+    {
+      "id": 66,
+      "name": "Act 2 - Tomb Tal 1",
+      "levelName": "Tal Rasha's Tomb",
+      "levelWarp": "To Tal Rasha's Tomb",
+      "waypoint": null,
+      "vis": [
+        46
+      ],
+      "act": 1
+    },
+    {
+      "id": 67,
+      "name": "Act 2 - Tomb Tal 2",
+      "levelName": "Tal Rasha's Tomb",
+      "levelWarp": "To Tal Rasha's Tomb",
+      "waypoint": null,
+      "vis": [
+        46
+      ],
+      "act": 1
+    },
+    {
+      "id": 68,
+      "name": "Act 2 - Tomb Tal 3",
+      "levelName": "Tal Rasha's Tomb",
+      "levelWarp": "To Tal Rasha's Tomb",
+      "waypoint": null,
+      "vis": [
+        46
+      ],
+      "act": 1
+    },
+    {
+      "id": 69,
+      "name": "Act 2 - Tomb Tal 4",
+      "levelName": "Tal Rasha's Tomb",
+      "levelWarp": "To Tal Rasha's Tomb",
+      "waypoint": null,
+      "vis": [
+        46
+      ],
+      "act": 1
+    },
+    {
+      "id": 70,
+      "name": "Act 2 - Tomb Tal 5",
+      "levelName": "Tal Rasha's Tomb",
+      "levelWarp": "To Tal Rasha's Tomb",
+      "waypoint": null,
+      "vis": [
+        46
+      ],
+      "act": 1
+    },
+    {
+      "id": 71,
+      "name": "Act 2 - Tomb Tal 6",
+      "levelName": "Tal Rasha's Tomb",
+      "levelWarp": "To Tal Rasha's Tomb",
+      "waypoint": null,
+      "vis": [
+        46
+      ],
+      "act": 1
+    },
+    {
+      "id": 72,
+      "name": "Act 2 - Tomb Tal 7",
+      "levelName": "Tal Rasha's Tomb",
+      "levelWarp": "To Tal Rasha's Tomb",
+      "waypoint": null,
+      "vis": [
+        46
+      ],
+      "act": 1
+    },
+    {
+      "id": 73,
+      "name": "Act 2 - Duriel's Lair",
+      "levelName": "Duriel's Lair",
+      "levelWarp": "To Duriel's Lair",
+      "waypoint": null,
+      "vis": [],
+      "act": 1
+    },
+    {
+      "id": 74,
+      "name": "Act 2 - Arcane",
+      "levelName": "Arcane Sanctuary",
+      "levelWarp": "To The Arcane Sanctuary",
+      "waypoint": 16,
+      "vis": [],
+      "act": 1
+    },
+    {
+      "id": 75,
+      "name": "Act 3 - Town",
+      "levelName": "Kurast Docktown",
+      "levelWarp": "To The Kurast Docktown",
+      "waypoint": 18,
+      "vis": [],
+      "act": 2
+    },
+    {
+      "id": 76,
+      "name": "Act 3 - Jungle 1",
+      "levelName": "Spider Forest",
+      "levelWarp": "To The Spider Forest",
+      "waypoint": 19,
+      "vis": [
+        84,
+        85
+      ],
+      "act": 2
+    },
+    {
+      "id": 77,
+      "name": "Act 3 - Jungle 2",
+      "levelName": "Great Marsh",
+      "levelWarp": "To The Great Marsh",
+      "waypoint": 20,
+      "vis": [],
+      "act": 2
+    },
+    {
+      "id": 78,
+      "name": "Act 3 - Jungle 3",
+      "levelName": "Flayer Jungle",
+      "levelWarp": "To The Flayer Jungle",
+      "waypoint": 21,
+      "vis": [
+        86,
+        88
+      ],
+      "act": 2
+    },
+    {
+      "id": 79,
+      "name": "Act 3 - Kurast 1",
+      "levelName": "Lower Kurast",
+      "levelWarp": "To Lower Kurast",
+      "waypoint": 22,
+      "vis": [],
+      "act": 2
+    },
+    {
+      "id": 80,
+      "name": "Act 3 - Kurast 2",
+      "levelName": "Kurast Bazaar",
+      "levelWarp": "To The Kurast Bazaar",
+      "waypoint": 23,
+      "vis": [
+        92,
+        92,
+        94,
+        95
+      ],
+      "act": 2
+    },
+    {
+      "id": 81,
+      "name": "Act 3 - Kurast 3",
+      "levelName": "Upper Kurast",
+      "levelWarp": "To Upper Kurast",
+      "waypoint": 24,
+      "vis": [
+        92,
+        92,
+        96,
+        97
+      ],
+      "act": 2
+    },
+    {
+      "id": 82,
+      "name": "Act 3 - Kurast 4",
+      "levelName": "Kurast Causeway",
+      "levelWarp": "To The Kurast Causeway",
+      "waypoint": null,
+      "vis": [
+        98,
+        99
+      ],
+      "act": 2
+    },
+    {
+      "id": 83,
+      "name": "Act 3 - Travincal",
+      "levelName": "Travincal",
+      "levelWarp": "To Travincal",
+      "waypoint": 25,
+      "vis": [
+        100
+      ],
+      "act": 2
+    },
+    {
+      "id": 84,
+      "name": "Act 3 - Spider 1",
+      "levelName": "Spider Cave",
+      "levelWarp": "To The Spider Cave",
+      "waypoint": null,
+      "vis": [
+        76
+      ],
+      "act": 2
+    },
+    {
+      "id": 85,
+      "name": "Act 3 - Spider 2",
+      "levelName": "Spider Cavern",
+      "levelWarp": "To The Spider Cavern",
+      "waypoint": null,
+      "vis": [
+        76
+      ],
+      "act": 2
+    },
+    {
+      "id": 86,
+      "name": "Act 3 - Dungeon 1 A",
+      "levelName": "Swampy Pit Level 1",
+      "levelWarp": "To The Swampy Pit Level 1",
+      "waypoint": null,
+      "vis": [
+        87,
+        78
+      ],
+      "act": 2
+    },
+    {
+      "id": 87,
+      "name": "Act 3 - Dungeon 1 B",
+      "levelName": "Swampy Pit Level 2",
+      "levelWarp": "To The Swampy Pit Level 2",
+      "waypoint": null,
+      "vis": [
+        90,
+        86
+      ],
+      "act": 2
+    },
+    {
+      "id": 88,
+      "name": "Act 3 - Dungeon 2 A",
+      "levelName": "Flayer Dungeon Level 1",
+      "levelWarp": "To The Flayer Dungeon Level 1",
+      "waypoint": null,
+      "vis": [
+        89,
+        78
+      ],
+      "act": 2
+    },
+    {
+      "id": 89,
+      "name": "Act 3 - Dungeon 2 B",
+      "levelName": "Flayer Dungeon Level 2",
+      "levelWarp": "To The Flayer Dungeon Level 2",
+      "waypoint": null,
+      "vis": [
+        91,
+        88
+      ],
+      "act": 2
+    },
+    {
+      "id": 90,
+      "name": "Act 3 - Dungeon 1 Treasure",
+      "levelName": "Swampy Pit Level 3",
+      "levelWarp": "To The Swampy Pit Level 3",
+      "waypoint": null,
+      "vis": [
+        87
+      ],
+      "act": 2
+    },
+    {
+      "id": 91,
+      "name": "Act 3 - Dungeon 2 Treasure",
+      "levelName": "Flayer Dungeon Level 3",
+      "levelWarp": "To The Flayer Dungeon Level 3",
+      "waypoint": null,
+      "vis": [
+        89
+      ],
+      "act": 2
+    },
+    {
+      "id": 92,
+      "name": "Act 3 - Sewer 1",
+      "levelName": "Sewers Level 1",
+      "levelWarp": "To The Sewers Level 1",
+      "waypoint": null,
+      "vis": [
+        80,
+        80,
+        81,
+        81,
+        93
+      ],
+      "act": 2
+    },
+    {
+      "id": 93,
+      "name": "Act 3 - Sewer 2",
+      "levelName": "Sewers Level 2",
+      "levelWarp": "To The Sewers Level 2",
+      "waypoint": null,
+      "vis": [
+        92
+      ],
+      "act": 2
+    },
+    {
+      "id": 94,
+      "name": "Act 3 - Temple 1",
+      "levelName": "Ruined Temple",
+      "levelWarp": "To The Ruined Temple",
+      "waypoint": null,
+      "vis": [
+        80,
+        80
+      ],
+      "act": 2
+    },
+    {
+      "id": 95,
+      "name": "Act 3 - Temple 2",
+      "levelName": "Disused Fane",
+      "levelWarp": "To The Disused Fane",
+      "waypoint": null,
+      "vis": [
+        80,
+        80
+      ],
+      "act": 2
+    },
+    {
+      "id": 96,
+      "name": "Act 3 - Temple 3",
+      "levelName": "Forgotten Reliquary",
+      "levelWarp": "To The Forgotten Reliquary",
+      "waypoint": null,
+      "vis": [
+        81,
+        81
+      ],
+      "act": 2
+    },
+    {
+      "id": 97,
+      "name": "Act 3 - Temple 4",
+      "levelName": "Forgotten Temple",
+      "levelWarp": "To The Forgotten Temple",
+      "waypoint": null,
+      "vis": [
+        81,
+        81
+      ],
+      "act": 2
+    },
+    {
+      "id": 98,
+      "name": "Act 3 - Temple 5",
+      "levelName": "Ruined Fane",
+      "levelWarp": "To The Ruined Fane",
+      "waypoint": null,
+      "vis": [
+        82,
+        82
+      ],
+      "act": 2
+    },
+    {
+      "id": 99,
+      "name": "Act 3 - Temple 6",
+      "levelName": "Disused Reliquary",
+      "levelWarp": "To The Disused Reliquary",
+      "waypoint": null,
+      "vis": [
+        82,
+        82
+      ],
+      "act": 2
+    },
+    {
+      "id": 100,
+      "name": "Act 3 - Mephisto 1",
+      "levelName": "Durance of Hate Level 1",
+      "levelWarp": "To The Durance of Hate Level 1",
+      "waypoint": null,
+      "vis": [
+        101,
+        101,
+        83,
+        83
+      ],
+      "act": 2
+    },
+    {
+      "id": 101,
+      "name": "Act 3 - Mephisto 2",
+      "levelName": "Durance of Hate Level 2",
+      "levelWarp": "To The Durance of Hate Level 2",
+      "waypoint": 26,
+      "vis": [
+        102,
+        102,
+        100,
+        100
+      ],
+      "act": 2
+    },
+    {
+      "id": 102,
+      "name": "Act 3 - Mephisto 3",
+      "levelName": "Durance of Hate Level 3",
+      "levelWarp": "To The Durance of Hate Level 3",
+      "waypoint": null,
+      "vis": [
+        101,
+        101
+      ],
+      "act": 2
+    },
+    {
+      "id": 103,
+      "name": "Act 4 - Town",
+      "levelName": "The Pandemonium Fortress",
+      "levelWarp": "To The Pandemonium Fortress",
+      "waypoint": 27,
+      "vis": [],
+      "act": 3
+    },
+    {
+      "id": 104,
+      "name": "Act 4 - Mesa 1",
+      "levelName": "Outer Steppes",
+      "levelWarp": "To The Outer Steppes",
+      "waypoint": null,
+      "vis": [],
+      "act": 3
+    },
+    {
+      "id": 105,
+      "name": "Act 4 - Mesa 2",
+      "levelName": "Plains of Despair",
+      "levelWarp": "To The Plains of Despair",
+      "waypoint": null,
+      "vis": [],
+      "act": 3
+    },
+    {
+      "id": 106,
+      "name": "Act 4 - Mesa 3",
+      "levelName": "City of the Damned",
+      "levelWarp": "To The City of the Damned",
+      "waypoint": 28,
+      "vis": [
+        107
+      ],
+      "act": 3
+    },
+    {
+      "id": 107,
+      "name": "Act 4 - Lava 1",
+      "levelName": "River of Flame",
+      "levelWarp": "To The River of Flame",
+      "waypoint": 29,
+      "vis": [
+        106,
+        108
+      ],
+      "act": 3
+    },
+    {
+      "id": 108,
+      "name": "Act 4 - Diablo 1",
+      "levelName": "Chaos Sanctum",
+      "levelWarp": "To Chaos Sanctum",
+      "waypoint": null,
+      "vis": [
+        107
+      ],
+      "act": 3
+    },
+    {
+      "id": 109,
+      "name": "Act 5 - Town",
+      "levelName": "Harrogath",
+      "levelWarp": "To Harrogath",
+      "waypoint": 30,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 110,
+      "name": "Act 5 - Siege 1",
+      "levelName": "Bloody Foothills",
+      "levelWarp": "To The Bloody Foothills",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 111,
+      "name": "Act 5 - Barricade 1",
+      "levelName": "Rigid Highlands",
+      "levelWarp": "To The Rigid Highlands",
+      "waypoint": 31,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 112,
+      "name": "Act 5 - Barricade 2",
+      "levelName": "Arreat Plateau",
+      "levelWarp": "To The Arreat Plateau",
+      "waypoint": 32,
+      "vis": [
+        113
+      ],
+      "act": 4
+    },
+    {
+      "id": 113,
+      "name": "Act 5 - Ice Cave 1",
+      "levelName": "Crystalized Cavern Level 1",
+      "levelWarp": "To The Crystalized Cavern Level 1",
+      "waypoint": 33,
+      "vis": [
+        112,
+        115,
+        114
+      ],
+      "act": 4
+    },
+    {
+      "id": 114,
+      "name": "Act 5 - Ice Cave 1A",
+      "levelName": "Cellar of Pity",
+      "levelWarp": "To The Cellar of Pity",
+      "waypoint": null,
+      "vis": [
+        113
+      ],
+      "act": 4
+    },
+    {
+      "id": 115,
+      "name": "Act 5 - Ice Cave 2",
+      "levelName": "Crystalized Cavern Level 2",
+      "levelWarp": "To The Crystalized Cavern Level 2",
+      "waypoint": 34,
+      "vis": [
+        113,
+        117,
+        116
+      ],
+      "act": 4
+    },
+    {
+      "id": 116,
+      "name": "Act 5 - Ice Cave 2A",
+      "levelName": "Echo Chamber",
+      "levelWarp": "To The Echo Chamber",
+      "waypoint": null,
+      "vis": [
+        115
+      ],
+      "act": 4
+    },
+    {
+      "id": 117,
+      "name": "Act 5 - Barricade Snow",
+      "levelName": "Tundra Wastelands",
+      "levelWarp": "To The Tundra Wastelands",
+      "waypoint": 36,
+      "vis": [
+        115,
+        118
+      ],
+      "act": 4
+    },
+    {
+      "id": 118,
+      "name": "Act 5 - Ice Cave 3",
+      "levelName": "Glacial Caves Level 1",
+      "levelWarp": "To The Glacier Caves Level 1",
+      "waypoint": 37,
+      "vis": [
+        117,
+        120,
+        119
+      ],
+      "act": 4
+    },
+    {
+      "id": 119,
+      "name": "Act 5 - Ice Cave 3A",
+      "levelName": "Glacial Caves Level 2",
+      "levelWarp": "To The Glacier Caves Level 2",
+      "waypoint": null,
+      "vis": [
+        118
+      ],
+      "act": 4
+    },
+    {
+      "id": 120,
+      "name": "Act 5 - Mountain Top",
+      "levelName": "Rocky Summit",
+      "levelWarp": "To The Rocky Summit",
+      "waypoint": null,
+      "vis": [
+        118,
+        128
+      ],
+      "act": 4
+    },
+    {
+      "id": 121,
+      "name": "Act 5 - Temple Entrance",
+      "levelName": "Nihlathaks Temple",
+      "levelWarp": "To Nihlathaks Temple",
+      "waypoint": null,
+      "vis": [
+        122
+      ],
+      "act": 4
+    },
+    {
+      "id": 122,
+      "name": "Act 5 - Temple 1",
+      "levelName": "Halls of Anguish",
+      "levelWarp": "To The Halls of Anguish",
+      "waypoint": null,
+      "vis": [
+        121,
+        123
+      ],
+      "act": 4
+    },
+    {
+      "id": 123,
+      "name": "Act 5 - Temple 2",
+      "levelName": "Halls of Death's Calling",
+      "levelWarp": "To The Halls of Death's Calling",
+      "waypoint": 35,
+      "vis": [
+        122,
+        124
+      ],
+      "act": 4
+    },
+    {
+      "id": 124,
+      "name": "Act 5 - Temple Boss",
+      "levelName": "Halls of Vaught",
+      "levelWarp": "To The Halls of Vaught",
+      "waypoint": null,
+      "vis": [
+        123
+      ],
+      "act": 4
+    },
+    {
+      "id": 125,
+      "name": "Act 5 - Hell 1",
+      "levelName": "Hell1",
+      "levelWarp": "To Hell1",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 126,
+      "name": "Act 5 - Hell 2",
+      "levelName": "Hell2",
+      "levelWarp": "To Hell2",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 127,
+      "name": "Act 5 - Hell 3",
+      "levelName": "Hell3",
+      "levelWarp": "To Hell3",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 128,
+      "name": "Act 5 - Baal Temple 1",
+      "levelName": "The Worldstone Keep Level 1",
+      "levelWarp": "To The Worldstone Keep Level 1",
+      "waypoint": null,
+      "vis": [
+        120,
+        129
+      ],
+      "act": 4
+    },
+    {
+      "id": 129,
+      "name": "Act 5 - Baal Temple 2",
+      "levelName": "The Worldstone Keep Level 2",
+      "levelWarp": "To The Worldstone Keep Level 2",
+      "waypoint": 38,
+      "vis": [
+        128,
+        130
+      ],
+      "act": 4
+    },
+    {
+      "id": 130,
+      "name": "Act 5 - Baal Temple 3",
+      "levelName": "The Worldstone Keep Level 3",
+      "levelWarp": "To The Worldstone Keep Level 3",
+      "waypoint": null,
+      "vis": [
+        129,
+        131
+      ],
+      "act": 4
+    },
+    {
+      "id": 131,
+      "name": "Act 5 - Throne Room",
+      "levelName": "Throne of Destruction",
+      "levelWarp": "To The Throne of Destruction",
+      "waypoint": null,
+      "vis": [
+        130,
+        132
+      ],
+      "act": 4
+    },
+    {
+      "id": 132,
+      "name": "Act 5 - World Stone",
+      "levelName": "The Worldstone Chamber",
+      "levelWarp": "To The Worldstone Chamber",
+      "waypoint": null,
+      "vis": [
+        131
+      ],
+      "act": 4
+    },
+    {
+      "id": 133,
+      "name": "Act 5 - Pandemonium 1",
+      "levelName": "Pandemonium Run 1",
+      "levelWarp": "To The Pandemonium Run 1",
+      "waypoint": null,
+      "vis": [
+        17
+      ],
+      "act": 4
+    },
+    {
+      "id": 134,
+      "name": "Act 5 - Pandemonium 2",
+      "levelName": "Pandemonium Run 2",
+      "levelWarp": "To The Pandemonium Run 2",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 135,
+      "name": "Act 5 - Pandemonium 3",
+      "levelName": "Pandemonium Run 3",
+      "levelWarp": "To The Pandemonium Run 3",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 136,
+      "name": "Act 5 - Pandemonium Finale",
+      "levelName": "Tristram",
+      "levelWarp": "To Tristram",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 137,
+      "name": "UberDiabloLvl",
+      "levelName": "The Pandemonium Fortress",
+      "levelWarp": "To The Pandemonium Fortress",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 138,
+      "name": "Mesa",
+      "levelName": "Mesa",
+      "levelWarp": "To Mesa",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 139,
+      "name": "Siege Map",
+      "levelName": "Siege Map",
+      "levelWarp": "To The Arreat Battlefield",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 140,
+      "name": "Palace",
+      "levelName": "Palace",
+      "levelWarp": "To Palace",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 141,
+      "name": "Sewers",
+      "levelName": "Sewers",
+      "levelWarp": "To Sewers",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 142,
+      "name": "Arcane",
+      "levelName": "ArcaneMap",
+      "levelWarp": "To Horazon's Memory",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 143,
+      "name": "Kurast",
+      "levelName": "Kurast",
+      "levelWarp": "To Kurast",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 144,
+      "name": "River Of Blood",
+      "levelName": "River Of Blood",
+      "levelWarp": "To The River of Blood",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 145,
+      "name": "Lava",
+      "levelName": "Lava",
+      "levelWarp": "To Lava",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 146,
+      "name": "Ice Map",
+      "levelName": "Ice Map",
+      "levelWarp": "To The Ancestral Trial",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 147,
+      "name": "Desert Map",
+      "levelName": "Desert Map",
+      "levelWarp": "To The Kehjistan Marketplace",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 148,
+      "name": "Jungle Map",
+      "levelName": "Jungle Map",
+      "levelWarp": "To The Torajan Jungle",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 149,
+      "name": "Fortress Map",
+      "levelName": "Fortress Map",
+      "levelWarp": "To Bastion Keep",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 150,
+      "name": "Throne Map",
+      "levelName": "Throne Map",
+      "levelWarp": "To The Throne of Insanity",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 151,
+      "name": "Tomb Map",
+      "levelName": "Tomb Map",
+      "levelWarp": "To The Tomb of Zoltun Kulle",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 152,
+      "name": "Monastery Map",
+      "levelName": "Monastery Map",
+      "levelWarp": "To The Cathedral of Light",
+      "waypoint": null,
+      "vis": [
+        153
+      ],
+      "act": 4
+    },
+    {
+      "id": 153,
+      "name": "Monastery Map Basement",
+      "levelName": "Monastery Map Basement",
+      "levelWarp": "To The Cathedral Basement",
+      "waypoint": null,
+      "vis": [
+        152
+      ],
+      "act": 4
+    },
+    {
+      "id": 154,
+      "name": "Graveyard Map",
+      "levelName": "Graveyard Map",
+      "levelWarp": "To The Blood Moon",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 155,
+      "name": "Caldeum Map",
+      "levelName": "Fall of Caldeum",
+      "levelWarp": "To The Fall of Caldeum",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 156,
+      "name": "Pandemonium Map",
+      "levelName": "Pandemonium Citadel",
+      "levelWarp": "To The Pandemonium Citadel",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 157,
+      "name": "Pvp Map",
+      "levelName": "Pvp Map",
+      "levelWarp": "To Pvp Map",
+      "waypoint": null,
+      "vis": [],
+      "act": 0
+    },
+    {
+      "id": 158,
+      "name": "Spider Map",
+      "levelName": "Lost Temple",
+      "levelWarp": "To The Lost Temple",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 159,
+      "name": "Pvp Map 2",
+      "levelName": "Pvp Map 2",
+      "levelWarp": "To Pvp Map",
+      "waypoint": null,
+      "vis": [],
+      "act": 0
+    },
+    {
+      "id": 160,
+      "name": "Frozen Forest Map",
+      "levelName": "Canyon Map",
+      "levelWarp": "To The Canyon of Sescheron",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 161,
+      "name": "Necropolis Jungle",
+      "levelName": "RathmaMap2",
+      "levelWarp": "To RathmaMap2",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 162,
+      "name": "Necropolis Swamp",
+      "levelName": "RathmaMap1",
+      "levelWarp": "To RathmaMap1",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 163,
+      "name": "Necropolis Void",
+      "levelName": "RathmaMap3",
+      "levelWarp": "To RathmaMap3",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 164,
+      "name": "Realm of Terror",
+      "levelName": "Torment Map",
+      "levelWarp": "To The Plains Of Torment",
+      "waypoint": null,
+      "vis": [
+        165
+      ],
+      "act": 4
+    },
+    {
+      "id": 165,
+      "name": "Hole of Terror",
+      "levelName": "Hole Map",
+      "levelWarp": "To The Pit Of Despair",
+      "waypoint": null,
+      "vis": [
+        164
+      ],
+      "act": 4
+    },
+    {
+      "id": 166,
+      "name": "BR Arena",
+      "levelName": "Pvp Map 2",
+      "levelWarp": "To Pvp Map",
+      "waypoint": null,
+      "vis": [],
+      "act": 0
+    },
+    {
+      "id": 167,
+      "name": "Library Map",
+      "levelName": "LibraryMap",
+      "levelWarp": "To The Sanatorium",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 168,
+      "name": "Uber Ancients",
+      "levelName": "Rocky Summit",
+      "levelWarp": "To The Rocky Summit",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 169,
+      "name": "Westmarch Map",
+      "levelName": "WestmarchMap",
+      "levelWarp": "To WestmarchMap",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 170,
+      "name": "Crypts Map",
+      "levelName": "CryptsMap",
+      "levelWarp": "To CryptsMap",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 171,
+      "name": "Sanctuary Of Sin Map",
+      "levelName": "SanctuaryOfSinMap",
+      "levelWarp": "To SanctuaryOfSinMap",
+      "waypoint": null,
+      "vis": [
+        172
+      ],
+      "act": 4
+    },
+    {
+      "id": 172,
+      "name": "Black Abyss Map",
+      "levelName": "BlackAbyssMap",
+      "levelWarp": "To BlackAbyssMap",
+      "waypoint": null,
+      "vis": [
+        171
+      ],
+      "act": 4
+    },
+    {
+      "id": 173,
+      "name": "Butcher Event Map",
+      "levelName": "Throne of Destruction",
+      "levelWarp": "To The Throne of Destruction",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 174,
+      "name": "Ruined Cistern Map",
+      "levelName": "Ruined Cistern",
+      "levelWarp": "To The Ruined Cistern",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 175,
+      "name": "Ashen Plains Map",
+      "levelName": "Ashen Plains",
+      "levelWarp": "To The Ashen Plains",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 176,
+      "name": "Zhar Library",
+      "levelName": "ZharLibraryMap",
+      "levelWarp": "ToZharLibraryMap",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 177,
+      "name": "Zhar Rivers",
+      "levelName": "ZharRiversMap",
+      "levelWarp": "ToZharRiversMap",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 178,
+      "name": "Zhar Ice",
+      "levelName": "ZharIceMap",
+      "levelWarp": "ToZharIceMap",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 179,
+      "name": "Zhar Kurast",
+      "levelName": "ZharKurastMap",
+      "levelWarp": "ToZharKurastMap",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 180,
+      "name": "Outer Void Map",
+      "levelName": "OuterVoidMap",
+      "levelWarp": "ToOuterVoidMap",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 181,
+      "name": "Hellcaves",
+      "levelName": "HellcavesMap",
+      "levelWarp": "ToHellcavesMap",
+      "waypoint": null,
+      "vis": [
+        182
+      ],
+      "act": 4
+    },
+    {
+      "id": 182,
+      "name": "Hellcave Fortress",
+      "levelName": "HellcavesFortressMap",
+      "levelWarp": "ToHellcavesFortressMap",
+      "waypoint": null,
+      "vis": [
+        181
+      ],
+      "act": 4
+    },
+    {
+      "id": 183,
+      "name": "Fallen Gardens",
+      "levelName": "FallenGardensMap",
+      "levelWarp": "ToFallenGardensMap",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 184,
+      "name": "Diamond Gate",
+      "levelName": "DiamondGateMap",
+      "levelWarp": "ToDiamondGateMap",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 185,
+      "name": "PD2 Pandemonium Finale",
+      "levelName": "Tristram",
+      "levelWarp": "To Tristram",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 186,
+      "name": "Kanemith Outside",
+      "levelName": "KanemithOutside",
+      "levelWarp": "ToKanemithOutside",
+      "waypoint": null,
+      "vis": [
+        187
+      ],
+      "act": 4
+    },
+    {
+      "id": 187,
+      "name": "Kanemith Dungeon",
+      "levelName": "KanemithDungeon",
+      "levelWarp": "ToKanemithDungeon",
+      "waypoint": null,
+      "vis": [
+        186
+      ],
+      "act": 4
+    },
+    {
+      "id": 188,
+      "name": "Lucion Arena",
+      "levelName": "LucionArenaMap",
+      "levelWarp": "ToLucionArenaMap",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 189,
+      "name": "Lucion Vault",
+      "levelName": "LucionVaultMap",
+      "levelWarp": "ToLucionVaultMap",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 190,
+      "name": "Skovos Stronghold Map",
+      "levelName": "Skovos Stronghold",
+      "levelWarp": "ToSkovosStronghold",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 191,
+      "name": "Demon Road Map",
+      "levelName": "Demon Road",
+      "levelWarp": "ToDemonRoad",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 192,
+      "name": "Imperial Palace Map",
+      "levelName": "ImperialPalaceMap",
+      "levelWarp": "ToImperialPalaceMap",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 193,
+      "name": "Halls of Torture Map",
+      "levelName": "HallsOfTortureMap",
+      "levelWarp": "ToHallsOfTortureMap",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 194,
+      "name": "Imperial Boss Map",
+      "levelName": "ImperialPalaceBossMap",
+      "levelWarp": "ToImperialPalaceBoss",
+      "waypoint": null,
+      "vis": [],
+      "act": 4
+    },
+    {
+      "id": 195,
+      "name": "Ureh City Map",
+      "levelName": "UrehCityMap",
+      "levelWarp": "ToUrehCityMap",
+      "waypoint": null,
+      "vis": [
+        196,
+        196
+      ],
+      "act": 4
+    },
+    {
+      "id": 196,
+      "name": "Nemyr Monastery Map",
+      "levelName": "NemyrMonasteryMap",
+      "levelWarp": "ToNemyrMonasteryMap",
+      "waypoint": null,
+      "vis": [
+        195,
+        195
+      ],
+      "act": 4
+    }
+  ]
+}

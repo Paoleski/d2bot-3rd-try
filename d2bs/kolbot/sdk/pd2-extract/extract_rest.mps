@@ -1,0 +1,9 @@
+open "C:\Games\Diablo II\ProjectD2-Realm\pd2data.mpq"
+extract "data\global\excel\Skilldesc.txt" "C:\Games\Diablo II\ProjectD2-Realm\d2bot_3rd_try\d2bs\kolbot\sdk\pd2-extract\data\global\excel\"
+extract "data\global\excel\Weapons.txt" "C:\Games\Diablo II\ProjectD2-Realm\d2bot_3rd_try\d2bs\kolbot\sdk\pd2-extract\data\global\excel\"
+extract "data\global\excel\Armor.txt" "C:\Games\Diablo II\ProjectD2-Realm\d2bot_3rd_try\d2bs\kolbot\sdk\pd2-extract\data\global\excel\"
+extract "data\global\excel\Misc.txt" "C:\Games\Diablo II\ProjectD2-Realm\d2bot_3rd_try\d2bs\kolbot\sdk\pd2-extract\data\global\excel\"
+extract "data\global\excel\ItemTypes.txt" "C:\Games\Diablo II\ProjectD2-Realm\d2bot_3rd_try\d2bs\kolbot\sdk\pd2-extract\data\global\excel\"
+extract "data\global\excel\MonStats.txt" "C:\Games\Diablo II\ProjectD2-Realm\d2bot_3rd_try\d2bs\kolbot\sdk\pd2-extract\data\global\excel\"
+extract "data\global\excel\States.txt" "C:\Games\Diablo II\ProjectD2-Realm\d2bot_3rd_try\d2bs\kolbot\sdk\pd2-extract\data\global\excel\"
+close

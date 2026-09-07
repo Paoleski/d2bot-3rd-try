@@ -1,0 +1,27 @@
+// PD2 quest items — use 3-letter codes (classids shift vs LoD; see QuestItems.js)
+// hdm=89 hfh=90 bks=541 bkd=542 vip=538 box=566 ass=569 xyz=562 j34=563 g34=564
+// bbb=565 mss=568 qey=570 qhr=571 qbr=572 qf1=173 qf2=174 g33=87 ice=662 tr2=664
+
+[Name] == g34
+[Name] == box
+[Name] == j34
+[Name] == bbb
+[Name] == mss
+[Name] == ass
+[Name] == bks
+[Name] == bkd
+[Name] == xyz
+[Name] == ice
+[Name] == g33
+[Name] == hdm
+[Name] == hfh
+[Name] == msf
+[Name] == vip // Viper Amulet (staff headpiece)
+[Name] == hst
+[Name] == qey
+[Name] == qhr
+[Name] == qbr
+[Name] == qf1
+[Name] == qf2
+[Name] == leg
+[Name] == tr2

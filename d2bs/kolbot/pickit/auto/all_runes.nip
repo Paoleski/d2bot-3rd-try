@@ -1,0 +1,8 @@
+// All runes El–Zod (singles + PD2 stacks). Loaded by AutoGear.
+// No MaxQuantity — always pick; Pickit.isRuneItem also force-keeps.
+// PD2: singles type rune=75; stacks type runs=138.
+
+[Type] == rune
+[Type] == runs
+[Name] >= ElRune && [Name] <= ZodRune
+[Name] >= ElRuneStack && [Name] <= ZodRuneStack

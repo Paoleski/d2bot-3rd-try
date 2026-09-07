@@ -1,0 +1,42 @@
+# Binaries / injected DLLs
+*.exe
+*.dll
+*.pdb
+*.ilk
+*.obj
+
+# Runtime logs / dumps
+*.log
+*.dmp
+*.mdmp
+logs/
+d2bs/logs/
+d2bs/kolbot/logs/
+d2bs/kolbot/crash/
+**/ItemLog.txt
+**/ConsoleLog.txt
+
+# Local account / profile credentials (never commit)
+d2bs/d2bs.ini
+d2bs/kolbot/data/secure/
+**/accounts.txt
+**/passwords.txt
+.env
+.env.*
+
+# Character / mule runtime data
+d2bs/kolbot/data/*.json
+d2bs/kolbot/mules/
+data/
+
+# OS / editor junk
+Thumbs.db
+Desktop.ini
+.DS_Store
+*.swp
+*~
+.vscode/
+.idea/
+
+# Optional empty / external submodule checkout
+limedrop/

@@ -1,0 +1,163 @@
+// Campaign leveling keep — replaces LLD.nip for this lab.
+// AutoEquip class nips handle wearables/tiers. Charms stay in leveling_charms.nip.
+// Goal: pick useful early upgrades / stashables without LLD duel fluff.
+
+// Rejuvs (PD2 rpot type 78)
+[Name] == rvs
+[Name] == rvl
+[Type] == rejuvpotion
+
+// ---------------------------------------------------------------------------
+// Jewelry — always keep rare/set/unique (early rares are cheap sell-bait AND
+// often fail AutoEquip floors). Unid magic = ID in town. Identified magic =
+// modest keeps; AutoEquip tiers still decide wear vs sell.
+// ---------------------------------------------------------------------------
+[type] == amulet && [quality] == rare
+[type] == amulet && [quality] == set
+[type] == amulet && [quality] == unique
+[type] == ring && [quality] == rare
+[type] == ring && [quality] == set
+[type] == ring && [quality] == unique
+
+[type] == amulet && [quality] == magic && [flag] != identified
+[type] == ring && [quality] == magic && [flag] != identified
+
+[type] == amulet && [quality] == magic # [fcr] >= 10
+[type] == amulet && [quality] == magic # [maxhp] >= 20
+[type] == amulet && [quality] == magic # [maxmana] >= 20
+[type] == amulet && [quality] == magic # [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 15
+
+[type] == ring && [quality] == magic # [fcr] >= 10
+[type] == ring && [quality] == magic # [maxhp] >= 20
+[type] == ring && [quality] == magic # [maxmana] >= 20
+[type] == ring && [quality] == magic # [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 15
+
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Jewels — always pick magic/rare/unique (ID in town; cube/socket/sell later).
+// Old thresholds left most identified jewels on the ground (not sell-bait either).
+// ---------------------------------------------------------------------------
+[name] == jewel && [quality] == magic
+[name] == jewel && [quality] == rare
+[name] == jewel && [quality] == unique
+[type] == jewel && [quality] == magic
+[type] == jewel && [quality] == rare
+[type] == jewel && [quality] == unique
+
+// ---------------------------------------------------------------------------
+// Staves — Teleport charges before hard Teleport @18
+// ---------------------------------------------------------------------------
+[type] == staff && [quality] <= rare && [flag] != ethereal # [itemchargedskill] == 54
+[type] == staff && [quality] <= rare && [flag] != ethereal # [fcr] >= 10 && ([fireskilltab]+[coldskilltab]+[lightningskilltab] >= 1 || [sorceressskills] >= 1)
+
+// ---------------------------------------------------------------------------
+// Early armor pieces that are easy to miss if autoequip gate is strict
+// ---------------------------------------------------------------------------
+[type] == boots && [quality] == magic && [flag] != identified
+[type] == gloves && [quality] == magic && [flag] != identified
+[type] == belt && [quality] == magic && [flag] != identified
+[type] == boots && [quality] == rare && [flag] != identified
+[type] == gloves && [quality] == rare && [flag] != identified
+[type] == belt && [quality] == rare && [flag] != identified
+
+[type] == boots && [quality] == magic # [frw] >= 10 || [fhr] >= 10
+[type] == boots && [quality] == magic # [fireresist]+[lightresist]+[coldresist] >= 15
+[type] == boots && [quality] == rare # [frw] >= 10 || [fhr] >= 10
+[type] == boots && [quality] == rare # [fireresist]+[lightresist]+[coldresist] >= 20
+[type] == boots && [quality] == unique
+[type] == boots && [quality] == set
+
+[type] == gloves && [quality] == magic # [fcr] >= 10 || [ias] >= 10
+[type] == gloves && [quality] == magic # [fireresist]+[lightresist]+[coldresist] >= 15
+[type] == gloves && [quality] == rare # [fcr] >= 10 || [ias] >= 10
+[type] == gloves && [quality] == rare # [fireresist]+[lightresist]+[coldresist] >= 20
+[type] == gloves && [quality] == unique
+[type] == gloves && [quality] == set
+
+[type] == belt && [quality] == magic # [maxhp] >= 20 || [fhr] >= 10
+[type] == belt && [quality] == magic # [fireresist]+[lightresist]+[coldresist] >= 15
+[type] == belt && [quality] == rare # [maxhp] >= 30 || [fhr] >= 17
+[type] == belt && [quality] == rare # [fireresist]+[lightresist]+[coldresist] >= 20
+[type] == belt && [quality] == unique
+[type] == belt && [quality] == set
+
+// ---------------------------------------------------------------------------
+// Gems — leveling cube recipes (chipped→flawless). Perfects also in pd2Misc.
+// Prefer type + short codes (PD2 stacks / classid shifts break long names).
+// ---------------------------------------------------------------------------
+[type] == chippedgem
+[type] == flawedgem
+[type] == standardgem
+[type] == flawlessgem
+[type] == perfectgem
+[type] == stackgem
+[type] == stackflawlessgem
+[type] == stackperfectgem
+
+// Flawless (codes — most important for craft/socket upgrades)
+[name] == gzv
+[name] == gly
+[name] == glb
+[name] == glg
+[name] == glr
+[name] == glw
+[name] == skl
+[name] == gzvs
+[name] == glys
+[name] == glbs
+[name] == glgs
+[name] == glrs
+[name] == glws
+[name] == skls
+
+// Chipped / flawed / normal (cube ladder)
+[name] == gcv
+[name] == gcy
+[name] == gcb
+[name] == gcg
+[name] == gcr
+[name] == gcw
+[name] == skc
+[name] == gfv
+[name] == gfy
+[name] == gfb
+[name] == gfg
+[name] == gfr
+[name] == gfw
+[name] == skf
+[name] == gsv
+[name] == gsy
+[name] == gsb
+[name] == gsg
+[name] == gsr
+[name] == gsw
+[name] == sku
+
+[name] == flawlessamethyst
+[name] == flawlesstopaz
+[name] == flawlesssaphire
+[name] == flawlessemerald
+[name] == flawlessruby
+[name] == flawlessdiamond
+[name] == flawlessskull
+[name] == chippedamethyst
+[name] == chippedtopaz
+[name] == chippedsaphire
+[name] == chippedemerald
+[name] == chippedruby
+[name] == chippeddiamond
+[name] == chippedskull
+[name] == flawedamethyst
+[name] == flawedtopaz
+[name] == flawedsaphire
+[name] == flawedemerald
+[name] == flawedruby
+[name] == flaweddiamond
+[name] == flawedskull
+[name] == amethyst
+[name] == topaz
+[name] == saphire
+[name] == emerald
+[name] == ruby
+[name] == diamond
+[name] == skull

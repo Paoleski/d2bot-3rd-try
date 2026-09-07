@@ -1,0 +1,382 @@
+{
+  "source": "pd2data.mpq data/global/excel/LvlWarp.txt",
+  "count": 94,
+  "warps": [
+    {
+      "id": 0,
+      "name": "Act 1 Wilderness to Cave Cliff L"
+    },
+    {
+      "id": 1,
+      "name": "Act 1 Wilderness to Cave Cliff R"
+    },
+    {
+      "id": 2,
+      "name": "Act 1 Wilderness to Cave Floor L"
+    },
+    {
+      "id": 3,
+      "name": "Act 1 Wilderness to Cave Floor R"
+    },
+    {
+      "id": 4,
+      "name": "Act 1 Cave Up"
+    },
+    {
+      "id": 5,
+      "name": "Act 1 Cave Down"
+    },
+    {
+      "id": 6,
+      "name": "Act 1 Graveyard to Crypt 1"
+    },
+    {
+      "id": 7,
+      "name": "Act 1 Graveyard to Crypt 2"
+    },
+    {
+      "id": 8,
+      "name": "Act 1 Crypt Up"
+    },
+    {
+      "id": 9,
+      "name": "Act 1 Crypt Down"
+    },
+    {
+      "id": 10,
+      "name": "Act 1 Wilderness to Tower"
+    },
+    {
+      "id": 11,
+      "name": "Act 1 Tower to Wilderness"
+    },
+    {
+      "id": 12,
+      "name": "Act 1 Tower to Crypt"
+    },
+    {
+      "id": 13,
+      "name": "Act 1 Jail Up"
+    },
+    {
+      "id": 14,
+      "name": "Act 1 Jail Down"
+    },
+    {
+      "id": 15,
+      "name": "Act 1 Cathedral To Catacombs"
+    },
+    {
+      "id": 16,
+      "name": "Act 1 Catacombs to Cathedral"
+    },
+    {
+      "id": 17,
+      "name": "Act 1 Catacombs Up"
+    },
+    {
+      "id": 18,
+      "name": "Act 1 Catacombs Down"
+    },
+    {
+      "id": 19,
+      "name": "Act 2 Town to Sewer Trap"
+    },
+    {
+      "id": 20,
+      "name": "Act 2 Town to Sewer Dock"
+    },
+    {
+      "id": 21,
+      "name": "Act 2 Sewer Dock to Town"
+    },
+    {
+      "id": 22,
+      "name": "Act 2 Sewer Up"
+    },
+    {
+      "id": 23,
+      "name": "Act 2 Sewer Down"
+    },
+    {
+      "id": 24,
+      "name": "Act 2 Town to Harem"
+    },
+    {
+      "id": 25,
+      "name": "Act 2 Harem to Town"
+    },
+    {
+      "id": 26,
+      "name": "Act 2 Harem Up 1"
+    },
+    {
+      "id": 27,
+      "name": "Act 2 Harem Up 2"
+    },
+    {
+      "id": 28,
+      "name": "Act 2 Harem Down 1"
+    },
+    {
+      "id": 29,
+      "name": "Act 2 Harem Down 2"
+    },
+    {
+      "id": 30,
+      "name": "Act 2 Basement Up 1"
+    },
+    {
+      "id": 31,
+      "name": "Act 2 Basement Up 2"
+    },
+    {
+      "id": 32,
+      "name": "Act 2 Basement Down"
+    },
+    {
+      "id": 33,
+      "name": "Act 2 Desert to Tomb L 1"
+    },
+    {
+      "id": 34,
+      "name": "Act 2 Desert to Tomb L 2"
+    },
+    {
+      "id": 35,
+      "name": "Act 2 Desert to Tomb R 1"
+    },
+    {
+      "id": 36,
+      "name": "Act 2 Desert to Tomb R 2"
+    },
+    {
+      "id": 37,
+      "name": "Act 2 Desert to Tomb Viper"
+    },
+    {
+      "id": 38,
+      "name": "Act 2 Desert to Tomb Tal 1"
+    },
+    {
+      "id": 39,
+      "name": "Act 2 Desert to Tomb Tal 2"
+    },
+    {
+      "id": 40,
+      "name": "Act 2 Desert to Tomb Tal 3"
+    },
+    {
+      "id": 41,
+      "name": "Act 2 Desert to Tomb Tal 4"
+    },
+    {
+      "id": 42,
+      "name": "Act 2 Desert to Tomb Tal 5"
+    },
+    {
+      "id": 43,
+      "name": "Act 2 Desert to Tomb Tal 6"
+    },
+    {
+      "id": 44,
+      "name": "Act 2 Desert to Tomb Tal 7"
+    },
+    {
+      "id": 45,
+      "name": "Act 2 Tomb Up"
+    },
+    {
+      "id": 46,
+      "name": "Act 2 Tomb Down"
+    },
+    {
+      "id": 47,
+      "name": "Act 2 Desert to Lair"
+    },
+    {
+      "id": 48,
+      "name": "Act 2 Lair Up"
+    },
+    {
+      "id": 49,
+      "name": "Act 2 Lair Down"
+    },
+    {
+      "id": 50,
+      "name": "Act 2 Desert to Sewer Trap"
+    },
+    {
+      "id": 51,
+      "name": "Act 3 Jungle to Spider"
+    },
+    {
+      "id": 52,
+      "name": "Act 3 Spider to Jungle"
+    },
+    {
+      "id": 53,
+      "name": "Act 3 Jungle to Dungeon Fort"
+    },
+    {
+      "id": 54,
+      "name": "Act 3 Jungle to Dungeon Hole"
+    },
+    {
+      "id": 55,
+      "name": "Act 3 Dungeon Up"
+    },
+    {
+      "id": 56,
+      "name": "Act 3 Dungeon Down"
+    },
+    {
+      "id": 57,
+      "name": "Act 3 Kurast to Sewer"
+    },
+    {
+      "id": 58,
+      "name": "Act 3 Sewer Up L"
+    },
+    {
+      "id": 59,
+      "name": "Act 3 Sewer Up R"
+    },
+    {
+      "id": 60,
+      "name": "Act 3 Sewer Down"
+    },
+    {
+      "id": 61,
+      "name": "Act 3 Kurast to Temple"
+    },
+    {
+      "id": 62,
+      "name": "Act 3 Temple Up L"
+    },
+    {
+      "id": 63,
+      "name": "Act 3 Temple Up R"
+    },
+    {
+      "id": 64,
+      "name": "Act 3 Travincal to Mephisto"
+    },
+    {
+      "id": 65,
+      "name": "Act 3 Mephisto Up L"
+    },
+    {
+      "id": 66,
+      "name": "Act 3 Mephisto Up R"
+    },
+    {
+      "id": 67,
+      "name": "Act 3 Mephisto Down L"
+    },
+    {
+      "id": 68,
+      "name": "Act 3 Mephisto Down R"
+    },
+    {
+      "id": 69,
+      "name": "Act 4 Mesa to Lava"
+    },
+    {
+      "id": 70,
+      "name": "Act 4 Lava to Mesa"
+    },
+    {
+      "id": 71,
+      "name": "Act 5 Barricade Down Wall"
+    },
+    {
+      "id": 71,
+      "name": "Act 5 Barricade Down Wall"
+    },
+    {
+      "id": 72,
+      "name": "Act 5 Barricade Down Floor"
+    },
+    {
+      "id": 73,
+      "name": "Act 5 Ice Caves Up"
+    },
+    {
+      "id": 73,
+      "name": "Act 5 Ice Caves Up"
+    },
+    {
+      "id": 74,
+      "name": "Act 5 Ice Caves Down"
+    },
+    {
+      "id": 74,
+      "name": "Act 5 Ice Caves Down"
+    },
+    {
+      "id": 75,
+      "name": "Act 5 Ice Caves Down Floor"
+    },
+    {
+      "id": 76,
+      "name": "Act 5 Temple Entrance"
+    },
+    {
+      "id": 77,
+      "name": "Act 5 Temple Down"
+    },
+    {
+      "id": 78,
+      "name": "Act 5 Temple Up"
+    },
+    {
+      "id": 79,
+      "name": "Act 5 Mountain Top To Ice"
+    },
+    {
+      "id": 80,
+      "name": "Act 5 Mountain Top To Baal"
+    },
+    {
+      "id": 81,
+      "name": "Act 5 Baal Temple Up"
+    },
+    {
+      "id": 81,
+      "name": "Act 5 Baal Temple Up"
+    },
+    {
+      "id": 82,
+      "name": "Act 5 Baal Temple Down"
+    },
+    {
+      "id": 82,
+      "name": "Act 5 Baal Temple Down"
+    },
+    {
+      "id": 83,
+      "name": "Act 4 Mesa to Hellcaves"
+    },
+    {
+      "id": 84,
+      "name": "Act 4 Hellcaves to Mesa"
+    },
+    {
+      "id": 85,
+      "name": "Act 5 Barricade Down Wall Block"
+    },
+    {
+      "id": 85,
+      "name": "Act 5 Barricade Down Wall Block"
+    },
+    {
+      "id": 86,
+      "name": "UrehCityToNemyrMonastery"
+    },
+    {
+      "id": 87,
+      "name": "NemyrMonasteryToUrehCity"
+    }
+  ]
+}

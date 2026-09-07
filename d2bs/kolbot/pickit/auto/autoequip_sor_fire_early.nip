@@ -1,0 +1,12 @@
+// Fire early (< lvl 12): prefer 2H staff with +Fire Bolt. No shield until orb/Spirit.
+
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillfirebolt] >= 1 # [tier] == 22
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillfirebolt] >= 2 # [tier] == 24
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillfirebolt] >= 3 # [tier] == 26
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillfirebolt] >= 1 && [fcr] >= 10 # [tier] == 28
+[type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillfirebolt] >= 2 && [fcr] >= 10 # [tier] == 30
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [skillfirebolt] >= 1 # [tier] == 20
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [skillfirebolt] >= 2 # [tier] == 22
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [skillfirebolt] >= 3 # [tier] == 24
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [skillfirebolt] >= 1 && [fcr] >= 10 # [tier] == 26
+([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [skillfirebolt] >= 2 && [fcr] >= 10 # [tier] == 28
