@@ -1544,7 +1544,7 @@ function AutoSmurf() {
 	
 	this.changeAct = function (act) {
 		this.status("change Act " + act);
-		var npc, time, tpTome,
+		var npc, time, tpTome, portal,
 			preArea = me.area;
 		if (me.act === act) {
 			return true;
@@ -1608,16 +1608,26 @@ function AutoSmurf() {
 					break;
 				}
 				Town.move("tyrael");
-				npc = getUnit(1, "tyrael");				
-				if (!npc || !npc.openMenu()) {
-					return false;
-				}
-				delay(me.ping + 1);
-				if (getUnit(2, 566)) {
+				portal = getUnit(2, 566); // red portal to Harrogath (exists once Tyrael has been talked to)
+				if (!portal) {
+					npc = getUnit(1, "tyrael");
+					if (!npc || !npc.openMenu()) {
+						return false;
+					}
+					delay(me.ping + 300);
+					portal = getUnit(2, 566);
+					if (!portal) {
+						Misc.useMenu(0x58D2); // "Travel to Harrogath" menu fallback
+						break;
+					}
 					me.cancel();
-					Pather.useUnit(2, 566, 109);
-				} else {
-					Misc.useMenu(0x58D2);
+					delay(200 + me.ping);
+				}
+				// Use the portal like a TP (usePortal waits for the area change).
+				// Pather.useUnit → openUnit spammed interact and kept reading the freed portal unit
+				// during the act load → client crash every time.
+				if (!Pather.usePortal(109, null, portal)) {
+					return false;
 				}
 				break;
 			}
@@ -1625,6 +1635,7 @@ function AutoSmurf() {
 			while (!me.area) {
 				delay(500);
 			}
+			delay(act === 5 ? 1500 : 0); // let Harrogath finish loading before touching units
 			if (me.area === preArea) {
 				me.cancel();
 				Town.move("portalspot");
@@ -4830,6 +4841,121 @@ function AutoSmurf() {
 		return true;
 	};
 
+	// Arcane Sanctuary without Teleport: two of the four arms are "telepad" layouts where the
+	// platforms are only linked by teleporter pads — getPath returns nothing / walking gets stuck.
+	// Follow the arm's pad chain (offsets from the Arcane WP) and interact each pad. Returns true
+	// when the journal is reachable on foot afterwards (or already was).
+	this.arcaneTelepads = function () {
+		var stand, sx, sy, chain, i, h, k, pad, used, tx, ty, p,
+			wpX = 25449, wpY = 5449,
+			padIds = [192, 304, 305, 306],
+			north = [[53, 2], [103, -3], [113, -68], [173, -58], [243, -73], [293, -58], [353, -68], [372, -62], [342, -17]],
+			south = [[-56, 2], [-128, -7], [-98, 78], [-176, 62], [-243, 58], [-296, 62], [-372, 62], [-366, 12]],
+			east = [[28, 52], [-12, 92], [53, 112], [72, 118], [88, 172], [54, 227], [43, 247], [88, 292], [82, 378], [-16, 332], [2, 353]],
+			west = [[-26, -63], [2, -121], [3, -133], [62, -117], [34, -183], [54, -228], [43, -243], [34, -303], [72, -351], [64, -368], [23, -338]];
+
+		if (me.area !== 74) {
+			return true;
+		}
+
+		if (Pather.teleport && Pather.canTeleport()) {
+			return true; // TP chars cross the gaps
+		}
+
+		stand = getPresetUnit(74, 2, 357);
+
+		if (!stand) {
+			return false;
+		}
+
+		sx = stand.roomx * 5 + stand.x;
+		sy = stand.roomy * 5 + stand.y;
+
+		switch (sx) {
+		case 25011:
+			chain = north;
+			break;
+		case 25866:
+			chain = south;
+			break;
+		case 25431:
+			chain = sy === 5011 ? east : (sy === 5861 ? west : null);
+			break;
+		default:
+			chain = null;
+			break;
+		}
+
+		if (!chain) {
+			return false;
+		}
+
+		// Bridge layouts path straight to the journal — nothing to do
+		try {
+			p = getPath(me.area, me.x, me.y, sx, sy, 0, 10);
+		} catch (ePath) {
+			p = null;
+		}
+
+		if (p && p.length) {
+			return true;
+		}
+
+		this.status("Summoner — Arcane telepad arm, hopping pads (" + chain.length + ")");
+
+		for (i = 0; i < chain.length; i += 1) {
+			tx = wpX - chain[i][0];
+			ty = wpY - chain[i][1];
+
+			for (h = 0; h < 5; h += 1) {
+				if (getDistance(me, tx, ty) > 5) {
+					try {
+						// clearPath=true — walkers must kill packs between pads
+						Pather.moveTo(tx, ty, 3, true);
+					} catch (eMove) {}
+				}
+
+				Attack.clear(10);
+				used = false;
+
+				for (k = 0; k < padIds.length; k += 1) {
+					pad = getUnit(2, padIds[k]);
+
+					if (!pad) {
+						continue;
+					}
+
+					do {
+						if (getDistance(pad, tx, ty) <= 6) {
+							delay(100 + me.ping);
+							pad.interact();
+							delay(600 + me.ping);
+							used = true;
+							break;
+						}
+					} while (pad.getNext());
+
+					if (used) {
+						break;
+					}
+				}
+
+				// Pad taken (we're elsewhere now) or plain walk node reached → next node
+				if (used || getDistance(me, tx, ty) <= 5) {
+					break;
+				}
+			}
+		}
+
+		try {
+			p = getPath(me.area, me.x, me.y, sx, sy, 0, 10);
+		} catch (ePath2) {
+			p = null;
+		}
+
+		return !!(p && p.length);
+	};
+
 	this.summoner = function () {
 		var i, journal, boss, tick, canTP, attackCount;
 		var questTry, quest = true;
@@ -4853,7 +4979,26 @@ function AutoSmurf() {
 		if (teleportingSorc) {
 			Pather.useWaypoint(74);
 			Precast.doPrecast(true);
-			Pather.moveToPreset(me.area, 2, 357, -3, -3);
+
+			// No Teleport (necro etc.): cross telepad arms first, then walk to the journal
+			if (!canTP) {
+				this.arcaneTelepads();
+			}
+
+			for (i = 0; i < 3; i += 1) {
+				// clearPath=true for walkers — TP chars keep false (speed). 6th arg = clearPath.
+				if (Pather.moveToPreset(me.area, 2, 357, -3, -3, !canTP)) {
+					break;
+				}
+
+				this.status("Summoner — walk to journal failed (" + (i + 1) + "/3)");
+				Attack.clear(15);
+
+				if (!canTP) {
+					this.arcaneTelepads();
+				}
+			}
+
 			Pather.makePortal();
 		} else {
 			Town.move("portalspot");
@@ -4878,8 +5023,14 @@ function AutoSmurf() {
 			}
 
 			if (!boss) {
-				this.status("Summoner not found — clearing journal room");
-				Attack.clear(20);
+				journal = getPresetUnit(74, 2, 357);
+
+				if (journal && getDistance(me, journal.roomx * 5 + journal.x, journal.roomy * 5 + journal.y) > 40) {
+					this.status("Summoner not found — never reached the journal platform");
+				} else {
+					this.status("Summoner not found — clearing journal room");
+					Attack.clear(20);
+				}
 			} else {
 				this.status(canTP ? "Summoner — telestomp" : "Summoner — walk-stomp (no TP)");
 				Pather.teleport = canTP;
@@ -4942,9 +5093,15 @@ function AutoSmurf() {
 		}
 
 		// Open Horazon's journal → red portal to Canyon of the Magi
-		if (!Pather.moveToPreset(74, 2, 357, -3, -3, false)) {
+		if (!Pather.moveToPreset(74, 2, 357, -3, -3, !canTP)) {
 			this.status("Summoner — move to journal failed, retrying");
-			Pather.moveToPreset(me.area, 2, 357, -3, -3);
+			Attack.clear(15);
+
+			if (!canTP) {
+				this.arcaneTelepads();
+			}
+
+			Pather.moveToPreset(me.area, 2, 357, -3, -3, !canTP);
 		}
 
 		for (i = 0; i < 12; i += 1) {
@@ -6872,13 +7029,14 @@ function AutoSmurf() {
 		// If boss is visible but won't come — TP onto him and re-anchor hold there (no bait loop)
 		this.getBoss = function (name, pullFight, holdX, holdY, baitX, baitY, walkBait) {
 			var i, boss, dist, waitTicks, engageDist, glow, mon, best, bestD, d,
-				idle, farIdle, engaged, sawBoss, baitPulses, self = this;
+				idle, farIdle, outRange, engaged, sawBoss, baitPulses, self = this;
 
 			glow = getUnit(2, 131);
 			waitTicks = pullFight ? 72 : 16;
 			engageDist = pullFight ? 34 : 40;
 			idle = 0;
 			farIdle = 0;
+			outRange = 0;
 			engaged = false;
 			sawBoss = false;
 			baitPulses = 0;
@@ -7025,6 +7183,87 @@ function AutoSmurf() {
 				}
 			}
 
+			// This char's cast range (Charged Bolt 6, Lightning ~15, FO 15, …) — clamped 4..20
+			function ownRange() {
+				var sk, r;
+
+				sk = Config.AttackSkill[1] > 0 ? Config.AttackSkill[1] : Config.AttackSkill[2];
+
+				if (!sk || sk <= 0) {
+					return 6;
+				}
+
+				r = (typeof ClassAttack !== "undefined" && typeof ClassAttack.castRangeFor === "function") ? ClassAttack.castRangeFor(sk) : Skill.getRange(sk);
+
+				return Math.max(4, Math.min(r || 6, 20));
+			}
+
+			// Boss visible but outside OUR cast range / LOS — TP to a spot at cast range, re-anchor hold there
+			function approachBoss(unit) {
+				var r, d, tx, ty, k, cand;
+
+				if (!unit || !Attack.checkMonster(unit)) {
+					return false;
+				}
+
+				r = Math.max(3, ownRange() - 1);
+				d = getDistance(me, unit);
+
+				if (d <= r && !checkCollision(me, unit, 0x4)) {
+					return false;
+				}
+
+				cand = [
+					[unit.x + (me.x - unit.x) * r / Math.max(d, 1), unit.y + (me.y - unit.y) * r / Math.max(d, 1)],
+					[unit.x, unit.y + r],
+					[unit.x - r, unit.y],
+					[unit.x + r, unit.y],
+					[unit.x, unit.y - r]
+				];
+
+				tx = undefined;
+
+				for (k = 0; k < cand.length; k += 1) {
+					if (Attack.validSpot(Math.round(cand[k][0]), Math.round(cand[k][1]))) {
+						tx = Math.round(cand[k][0]);
+						ty = Math.round(cand[k][1]);
+						break;
+					}
+				}
+
+				if (tx === undefined) {
+					return false;
+				}
+
+				if (typeof self.status === "function") {
+					self.status("Seal pull — approach boss @ " + tx + "," + ty + " (range " + r + ")");
+				} else {
+					print("Seal pull — approach boss @ " + tx + "," + ty + " (range " + r + ")");
+				}
+
+				if (typeof Pather.forceTeleportTo === "function" && Pather.canTeleport()) {
+					Pather.forceTeleportTo(tx, ty, 4);
+				} else {
+					Pather.teleport = true;
+					Pather._lastTeleTick = 0;
+					Pather.moveTo(tx, ty, 3);
+				}
+
+				delay(150 + me.ping);
+				holdX = me.x;
+				holdY = me.y;
+
+				if (typeof ClassAttack !== "undefined") {
+					ClassAttack._sealHoldX = holdX;
+					ClassAttack._sealHoldY = holdY;
+				}
+
+				engaged = true;
+				sawBoss = true;
+
+				return true;
+			}
+
 			// Aggro failed — TP to boss, re-anchor hold nearby (stops bait↔hold loop)
 			function tpToBoss(unit) {
 				var tx, ty;
@@ -7155,7 +7394,17 @@ function AutoSmurf() {
 							farIdle = 0;
 
 							if (!ClassAttack.doAttack(boss, i % 15 === 0)) {
+								// Out of our cast range / no LOS (doCast returns 0 for seal bosses) — close the gap
+								outRange += 1;
+
+								if (outRange >= 2) {
+									approachBoss(boss);
+									outRange = 0;
+								}
+
 								holdCast(16);
+							} else {
+								outRange = 0;
 							}
 
 							snapHold();
@@ -7249,7 +7498,7 @@ function AutoSmurf() {
 		};
 		this.seisSeal = function () {
 			var seal, pullX, pullY, baitX, baitY, i, savedTele, savedDelay, opened,
-				dx, dy, dist, step;
+				dx, dy, dist, step, path;
 
 			this.status("Seis layout " + this.seisLayout);
 			this.followPath(this.seisLayout === 1 ? this.starToSeisA : this.starToSeisB);
@@ -7312,8 +7561,33 @@ function AutoSmurf() {
 				}
 			}
 
-			// Bait ~16y from hold toward seal (shorten to 10y if invalid)
+			// Bait ~18y from hold ALONG THE WALKABLE PATH to the seal (straight line hits the nest wall)
 			if (seal) {
+				try {
+					path = getPath(me.area, Math.round(seal.x), Math.round(seal.y), pullX, pullY, 0, 4);
+				} catch (ePath) {
+					path = null;
+				}
+
+				if (path && path.length) {
+					path.reverse(); // hold → seal
+
+					for (i = 0; i < path.length; i += 1) {
+						if (getDistance(pullX, pullY, path[i].x, path[i].y) >= 18) {
+							baitX = Math.round(path[i].x);
+							baitY = Math.round(path[i].y);
+							break;
+						}
+					}
+
+					if (baitX === undefined && path.length > 1) {
+						baitX = Math.round(path[path.length - 2].x);
+						baitY = Math.round(path[path.length - 2].y);
+					}
+				}
+			}
+
+			if (seal && baitX === undefined) {
 				dx = seal.x - pullX;
 				dy = seal.y - pullY;
 				dist = Math.sqrt(dx * dx + dy * dy);
@@ -7332,7 +7606,7 @@ function AutoSmurf() {
 					baitX = pullX;
 					baitY = pullY - 16;
 				}
-			} else {
+			} else if (baitX === undefined) {
 				baitX = pullX;
 				baitY = pullY - 16;
 			}
@@ -9319,7 +9593,7 @@ function AutoSmurf() {
 	}
 
 	//act4
-	var runDiablo = 0; // Dark-f: for running baal
+	var runDiablo = 0, dWait; // Dark-f: for running baal
 	if (me.getQuest(23, 0) && !me.getQuest(28, 0)) { // Have been to Act 4 and Diablo is not done or haven't reached the difficulty specific level requirement.
 		Town.goToTown(4);
 		if (teleportingSorc) { // I am the Teleporting Sorc
@@ -9335,11 +9609,39 @@ function AutoSmurf() {
 			}
 			this.travel(8);	// Travel to all waypoints up to and including River of Flame if I don't have them.
 		}
-		if (!me.getQuest(25, 0) || me.getQuest(25, 1)) { // The Fallen Angel is not done or it has been started.
-			this.izual();
-		}		
-		runDiablo = 1; // Dark-f: kill diablo first.		
-		this.diablo();
+		// Quest 26 = Terror's End (Diablo dead); quest 28 = "Able to go to Act V" (only set after Tyrael portal).
+		// Never re-run Diablo when he is already dead but we haven't crossed to Act 5 yet.
+		if (!(me.getQuest(26, 0) || me.getQuest(26, 1))) {
+			if (!me.getQuest(25, 0) || me.getQuest(25, 1)) { // The Fallen Angel is not done or it has been started.
+				this.izual();
+			}
+			runDiablo = 1; // Dark-f: kill diablo first.
+			this.diablo();
+		}
+
+		// Diablo just died → go straight to Tyrael → Act 5 in THIS game (was: return → new game)
+		for (dWait = 0; dWait < 40 && !(me.getQuest(26, 0) || me.getQuest(26, 1)); dWait += 1) {
+			delay(250);
+		}
+
+		if (me.getQuest(26, 0) || me.getQuest(26, 1)) {
+			this.status("Diablo done — Tyrael → Act 5");
+
+			if (!me.inTown) {
+				Town.goToTown();
+			}
+
+			if (me.act !== 4) {
+				Town.goToTown(4);
+			}
+
+			Pickit.pickItems();
+
+			if (!this.changeAct(5) && me.act < 5) {
+				Town.goToTown(4);
+				this.changeAct(5);
+			}
+		}
 	}
 
 	//act5
@@ -9365,7 +9667,7 @@ function AutoSmurf() {
 		this.baal();
 		this.diablo(false); // true: start at Entrance. if empty or false: start at Star.
 		//this.worldstone();
-	} else if (me.gametype === 1 && me.getQuest(28, 0)){ //Dark-f
+	} else if (me.gametype === 1 && (me.getQuest(28, 0) || me.act === 5)) { //Dark-f — act 5 reached this game counts too
 		Town.goToTown(5);
 		if(!me.getQuest(37,1) && teleportingSorc){
 			this.travel(9);

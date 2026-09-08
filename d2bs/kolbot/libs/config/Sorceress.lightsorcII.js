@@ -656,9 +656,9 @@ function LoadConfig() {
 
 	} else if (SORC_BUILD === "light") {
 		/* Lightning / Charged Bolt
-		 * Early: Warmth → CB dump (skip Static/TK) → Static@12 → TK@13 → CB dump → Teleport@18.
-		 * Then Shiver path, max CB / Lightning / TK / LM.
-		 * IDs: CB 38, Lightning 49, TK 43, LM 63, TP 54, Warmth 37, Shiver 50, Static 42
+		 * Early: Warmth → CB dump → Static@12 → TK@13 → Teleport@18 → Shiver.
+		 * Nova@23 → Lightning@23 (TS prereq) → Thunder Storm@24 → LM@30 → max CB / Lightning / TK / LM.
+		 * IDs: CB 38, Nova 48, Lightning 49, TS 57, TK 43, LM 63, TP 54, Warmth 37, Shiver 50, Static 42
 		 * Build[i][3] = min charlvl (optional). DumpSkill fills CB between gates.
 		 */
 		Config.AttackSkill[0] = -1;
@@ -680,6 +680,10 @@ function LoadConfig() {
 			[54, 1, true],         // Teleport @18 (natural req)
 			[40, 1, false, 18],    // Cold Enchant — after Teleport
 			[50, 1, false, 18],    // Shiver Armor
+			[48, 1, false, 23],    // Nova @23
+			[49, 1, false, 23],    // Lightning @23 (Thunder Storm prereq)
+			[57, 1, false, 24],    // Thunder Storm @24
+			[63, 1, true, 30],     // Lightning Mastery @30 — then CB synergies
 			[38, 20, false],       // max Charged Bolt
 			[49, 20, false],       // max Lightning
 			[43, 20, false],       // max Telekinesis

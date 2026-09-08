@@ -681,6 +681,10 @@ function LoadConfig() {
 			[54, 1, true],     // Teleport — MAX priority at 18 only (skip until then)
 			[40, 1, false],    // Cold Enchant — Shiver Armor prereq (PD2)
 			[50, 1, false],    // Shiver Armor
+			[48, 1, false, 23], // Nova @23
+			[49, 1, false, 23], // Lightning @23 (Thunder Storm prereq)
+			[57, 1, false, 24], // Thunder Storm @24
+			[63, 1, true, 30],  // Lightning Mastery @30 — then CB synergies
 			[38, 20, false],   // max Charged Bolt
 			[49, 20, false],   // max Lightning
 			[43, 20, false],   // max Telekinesis

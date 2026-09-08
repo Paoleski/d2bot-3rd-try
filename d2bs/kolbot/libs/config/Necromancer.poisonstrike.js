@@ -511,14 +511,14 @@ function LoadConfig() {
 	 */
 	Config.AttackSkill[0] = -1;
 	Config.AttackSkill[1] = 73; // Poison Strike bosses
-	Config.AttackSkill[2] = 0;  // normal attack fallback
+	Config.AttackSkill[2] = -1; // no untimed companion — normal attack is LowMana only
 	Config.AttackSkill[3] = 73; // Poison Strike others
-	Config.AttackSkill[4] = 0;
+	Config.AttackSkill[4] = -1;
 	Config.AttackSkill[5] = -1; // no Teeth fallback after PS
 	Config.AttackSkill[6] = -1;
 
-	Config.LowManaSkill[0] = 0;
-	Config.LowManaSkill[1] = 0;
+	Config.LowManaSkill[0] = 0; // OOM → normal attack only
+	Config.LowManaSkill[1] = -1;
 
 	Config.CustomAttack = {};
 

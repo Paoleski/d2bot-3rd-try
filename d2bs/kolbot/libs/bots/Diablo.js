@@ -196,13 +196,14 @@ function Diablo() {
 
 	this.getBoss = function (name, pullFight, holdX, holdY, baitX, baitY, walkBait) {
 		var i, boss, dist, waitTicks, engageDist, glow, mon, best, bestD, d,
-			idle, farIdle, engaged, sawBoss, baitPulses, self = this;
+			idle, farIdle, outRange, engaged, sawBoss, baitPulses, self = this;
 
 		glow = getUnit(2, 131);
 		waitTicks = pullFight ? 72 : 16;
 		engageDist = pullFight ? 34 : 40;
 		idle = 0;
 		farIdle = 0;
+		outRange = 0;
 		engaged = false;
 		sawBoss = false;
 		baitPulses = 0;
@@ -336,6 +337,83 @@ function Diablo() {
 			}
 		}
 
+		// This char's cast range — clamped 4..20
+		function ownRange() {
+			var sk, r;
+
+			sk = Config.AttackSkill[1] > 0 ? Config.AttackSkill[1] : Config.AttackSkill[2];
+
+			if (!sk || sk <= 0) {
+				return 6;
+			}
+
+			r = (typeof ClassAttack !== "undefined" && typeof ClassAttack.castRangeFor === "function") ? ClassAttack.castRangeFor(sk) : Skill.getRange(sk);
+
+			return Math.max(4, Math.min(r || 6, 20));
+		}
+
+		// Boss visible but outside OUR cast range / LOS — TP to a spot at cast range, re-anchor hold there
+		function approachBoss(unit) {
+			var r, d, tx, ty, k, cand;
+
+			if (!unit || !Attack.checkMonster(unit)) {
+				return false;
+			}
+
+			r = Math.max(3, ownRange() - 1);
+			d = getDistance(me, unit);
+
+			if (d <= r && !checkCollision(me, unit, 0x4)) {
+				return false;
+			}
+
+			cand = [
+				[unit.x + (me.x - unit.x) * r / Math.max(d, 1), unit.y + (me.y - unit.y) * r / Math.max(d, 1)],
+				[unit.x, unit.y + r],
+				[unit.x - r, unit.y],
+				[unit.x + r, unit.y],
+				[unit.x, unit.y - r]
+			];
+
+			tx = undefined;
+
+			for (k = 0; k < cand.length; k += 1) {
+				if (Attack.validSpot(Math.round(cand[k][0]), Math.round(cand[k][1]))) {
+					tx = Math.round(cand[k][0]);
+					ty = Math.round(cand[k][1]);
+					break;
+				}
+			}
+
+			if (tx === undefined) {
+				return false;
+			}
+
+			print("Seal pull — approach boss @ " + tx + "," + ty + " (range " + r + ")");
+
+			if (typeof Pather.forceTeleportTo === "function" && Pather.canTeleport()) {
+				Pather.forceTeleportTo(tx, ty, 4);
+			} else {
+				Pather.teleport = true;
+				Pather._lastTeleTick = 0;
+				Pather.moveTo(tx, ty, 3);
+			}
+
+			delay(150 + me.ping);
+			holdX = me.x;
+			holdY = me.y;
+
+			if (typeof ClassAttack !== "undefined") {
+				ClassAttack._sealHoldX = holdX;
+				ClassAttack._sealHoldY = holdY;
+			}
+
+			engaged = true;
+			sawBoss = true;
+
+			return true;
+		}
+
 		function tpToBoss(unit) {
 			var tx, ty;
 
@@ -459,7 +537,16 @@ function Diablo() {
 						farIdle = 0;
 
 						if (!ClassAttack.doAttack(boss, i % 15 === 0)) {
+							outRange += 1;
+
+							if (outRange >= 2) {
+								approachBoss(boss);
+								outRange = 0;
+							}
+
 							holdCast(16);
+						} else {
+							outRange = 0;
 						}
 
 						snapHold();
@@ -556,7 +643,7 @@ function Diablo() {
 
 	this.seisSeal = function () {
 		var seal, pullX, pullY, baitX, baitY, i, savedTele, savedDelay, opened,
-			dx, dy, dist, step;
+			dx, dy, dist, step, path;
 
 		print("Seis layout " + this.seisLayout);
 		this.followPath(this.seisLayout === 1 ? this.starToSeisA : this.starToSeisB);
@@ -618,7 +705,33 @@ function Diablo() {
 			}
 		}
 
+		// Bait ~18y from hold along the walkable path to the seal (straight line hits the nest wall)
 		if (seal) {
+			try {
+				path = getPath(me.area, Math.round(seal.x), Math.round(seal.y), pullX, pullY, 0, 4);
+			} catch (ePath) {
+				path = null;
+			}
+
+			if (path && path.length) {
+				path.reverse();
+
+				for (i = 0; i < path.length; i += 1) {
+					if (getDistance(pullX, pullY, path[i].x, path[i].y) >= 18) {
+						baitX = Math.round(path[i].x);
+						baitY = Math.round(path[i].y);
+						break;
+					}
+				}
+
+				if (baitX === undefined && path.length > 1) {
+					baitX = Math.round(path[path.length - 2].x);
+					baitY = Math.round(path[path.length - 2].y);
+				}
+			}
+		}
+
+		if (seal && baitX === undefined) {
 			dx = seal.x - pullX;
 			dy = seal.y - pullY;
 			dist = Math.sqrt(dx * dx + dy * dy);
@@ -637,7 +750,7 @@ function Diablo() {
 				baitX = pullX;
 				baitY = pullY - 16;
 			}
-		} else {
+		} else if (baitX === undefined) {
 			baitX = pullX;
 			baitY = pullY - 16;
 		}

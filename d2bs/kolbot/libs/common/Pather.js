@@ -34,6 +34,11 @@ var NodeAction = {
 			Attack.clear(20, 0);
 		}
 
+		// Arcane Sanctuary without Teleport — platforms are packed; always clear while walking
+		if (me.area === 74 && !(Pather.teleport && Pather.canTeleport())) {
+			Attack.clear(15, 0);
+		}
+
 		if ((typeof Config.ClearPath === "number" || typeof Config.ClearPath === "object") && arg.clearPath === false) {
 			switch (typeof Config.ClearPath) {
 			case "number":

@@ -82,6 +82,8 @@ var ClassAttack = {
 	},
 
 	// Keep Config.AttackSkill in sync so Attack.clear / canAttack use the right range/element
+	// Do NOT force AttackSkill[2]/[4] to 0 — that makes every swing also cast normal attack.
+	// Skill 0 belongs only in LowManaSkill (or as primary when no PS/dagger yet).
 	syncAttackSkills: function () {
 		var sk = this.bestAttackSkill();
 
@@ -92,24 +94,17 @@ var ClassAttack = {
 		if (Config.AttackSkill[3] !== sk) {
 			Config.AttackSkill[3] = sk;
 		}
-
-		if (Config.AttackSkill[2] < 0) {
-			Config.AttackSkill[2] = 0;
-		}
-
-		if (Config.AttackSkill[4] < 0) {
-			Config.AttackSkill[4] = 0;
-		}
 	},
 
 	// Prefer configured skill; fall back Teeth / normal until dagger+PS
+	// Skill 0 is only valid as a primary (no PS yet) — never as a "usable" untimed companion.
 	usableSkill: function (skillId) {
 		if (skillId === undefined || skillId < 0) {
 			return -1;
 		}
 
 		if (skillId === 0) {
-			return 0;
+			return -1;
 		}
 
 		if (skillId === 73) {
@@ -350,7 +345,8 @@ var ClassAttack = {
 
 		checkSkill = this.usableSkill(checkSkill);
 
-		if (Attack.checkResist(unit, checkSkill)) {
+		// usableSkill maps PS→0 when no dagger; 0 as primary is OK. Untimed never uses 0 (see usableSkill).
+		if (checkSkill === 0 || (checkSkill > 0 && Attack.checkResist(unit, checkSkill))) {
 			timedSkill = checkSkill;
 		} else if (Config.AttackSkill[5] > -1 && this.hasSkill(Config.AttackSkill[5]) && Attack.checkResist(unit, Config.AttackSkill[5]) && ([56, 59].indexOf(Config.AttackSkill[5]) === -1 || Attack.validSpot(unit.x, unit.y))) {
 			// Don't fall back to Teeth once Poison Strike is learned
@@ -359,7 +355,7 @@ var ClassAttack = {
 			}
 		}
 
-		// Get untimed skill
+		// Get untimed skill (skill 0 rejected by usableSkill — LowMana only)
 		if (Attack.getCustomAttack(unit)) {
 			checkSkill = Attack.getCustomAttack(unit)[1];
 		} else {
@@ -368,15 +364,15 @@ var ClassAttack = {
 
 		checkSkill = this.usableSkill(checkSkill);
 
-		if (Attack.checkResist(unit, checkSkill)) {
+		if (checkSkill > 0 && Attack.checkResist(unit, checkSkill)) {
 			untimedSkill = checkSkill;
 		} else if (Config.AttackSkill[6] > -1 && this.hasSkill(Config.AttackSkill[6]) && Attack.checkResist(unit, Config.AttackSkill[6]) && ([56, 59].indexOf(Config.AttackSkill[6]) === -1 || Attack.validSpot(unit.x, unit.y))) {
 			untimedSkill = Config.AttackSkill[6];
 		}
 
-		// Out of mana → normal attack (Teeth/PS drain fast at low levels)
+		// Out of mana → normal attack only (LowManaSkill[0] === 0)
 		if (timedSkill > 0 && Skill.getManaCost(timedSkill) > me.mp) {
-			if (me.charlvl <= 18 || Config.LowManaSkill[0] === 0) {
+			if (Config.LowManaSkill[0] === 0 || me.charlvl <= 18) {
 				timedSkill = 0;
 				untimedSkill = -1;
 			} else if (Config.LowManaSkill[0] > 0 && this.hasSkill(Config.LowManaSkill[0]) && Attack.checkResist(unit, Config.LowManaSkill[0])) {
@@ -389,13 +385,15 @@ var ClassAttack = {
 		}
 
 		if (untimedSkill > 0 && Skill.getManaCost(untimedSkill) > me.mp && (timedSkill <= 0 || Skill.getManaCost(timedSkill) > me.mp)) {
-			if (me.charlvl <= 18 || Config.LowManaSkill[1] === 0 || Config.LowManaSkill[0] === 0) {
-				timedSkill = 0;
+			if (Config.LowManaSkill[1] === 0 || Config.LowManaSkill[0] === 0 || me.charlvl <= 18) {
+				if (timedSkill <= 0) {
+					timedSkill = 0;
+				}
+
 				untimedSkill = -1;
 			} else if (Config.LowManaSkill[1] > 0 && this.hasSkill(Config.LowManaSkill[1]) && Attack.checkResist(unit, Config.LowManaSkill[1])) {
 				untimedSkill = Config.LowManaSkill[1];
 			} else {
-				timedSkill = 0;
 				untimedSkill = -1;
 			}
 		}

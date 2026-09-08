@@ -912,6 +912,23 @@ var Item = {
 		return item.gid === bestGid || bestGid === -1;
 	},
 
+	// D2BS getStat returns false (not 0) when the value is 0 — coerce so 0-dur is detected
+	statOrZero: function (item, stat) {
+		var v;
+
+		if (!item) {
+			return 0;
+		}
+
+		v = item.getStat(stat);
+
+		if (v === false || v === undefined || v === null) {
+			return 0;
+		}
+
+		return v;
+	},
+
 	// 0 durability / empty stack (not indestructible). Ethereal gear cannot be NPC-repaired.
 	isBroken: function (item) {
 		var durability, maxDur, quantity;
@@ -929,22 +946,24 @@ var Item = {
 		case 43: // Throwing axes
 		case 44: // Javelins
 		case 87: // Amazon javelins
-			quantity = item.getStat(70);
+			quantity = this.statOrZero(item, 70);
 
-			return typeof quantity === "number" && quantity <= 0;
+			return quantity <= 0;
 		default:
 			break;
 		}
 
+		// Jewelry / charms have no durability — getStat(73) is false
 		maxDur = item.getStat(73);
 
-		if (typeof maxDur !== "number" || maxDur <= 0) {
+		if (maxDur === false || maxDur === undefined || maxDur === null || maxDur <= 0) {
 			return false;
 		}
 
-		durability = item.getStat(72);
+		// Current dur 0 → getStat(72) is false in D2BS (old code treated that as "not broken")
+		durability = this.statOrZero(item, 72);
 
-		return typeof durability === "number" && durability <= 0;
+		return durability <= 0;
 	},
 
 	canEquip: function (item) {
@@ -967,7 +986,45 @@ var Item = {
 		return true;
 	},
 
-	// Equips an item and throws away the old equipped item
+	// gid → fail count this game; skip after 2 so a bad slot can't stutter every chores pass
+	_equipFails: {},
+
+	// Old item left on cursor after a swap → inventory / stash, drop only as last resort
+	stowCursorItem: function () {
+		var cursorItem;
+
+		if (!me.itemoncursor) {
+			return true;
+		}
+
+		cursorItem = getUnit(100);
+
+		if (!cursorItem) {
+			return !me.itemoncursor;
+		}
+
+		if (Storage.Inventory.CanFit(cursorItem) && Storage.Inventory.MoveTo(cursorItem)) {
+			return true;
+		}
+
+		if (typeof Town !== "undefined" && Town.openStash() && Storage.Stash.CanFit(cursorItem) && Storage.Stash.MoveTo(cursorItem)) {
+			return true;
+		}
+
+		if (typeof this.parkCursorItem === "function" && this.parkCursorItem()) {
+			return true;
+		}
+
+		cursorItem = getUnit(100);
+
+		if (cursorItem && me.itemoncursor) {
+			cursorItem.drop();
+		}
+
+		return !me.itemoncursor;
+	},
+
+	// Equips an item and stows the old equipped item. Verifies by gid (unit refs go stale after a swap).
 	equip: function (item, bodyLoc) {
 		if (!this.canEquip(item)) {
 			return false;
@@ -978,7 +1035,13 @@ var Item = {
 			return true;
 		}
 
-		var i, cursorItem;
+		var i, gid, cur, worn;
+
+		gid = item.gid;
+
+		if (this._equipFails[gid] >= 2) {
+			return false;
+		}
 
 		if (item.location === 7) {
 			if (!Town.openStash()) {
@@ -986,28 +1049,52 @@ var Item = {
 			}
 		}
 
+		function equippedNow() {
+			var u = me.getItem(-1, -1, gid);
+
+			return !!(u && u.mode === 1 && u.bodylocation === bodyLoc);
+		}
+
 		for (i = 0; i < 3; i += 1) {
-			if (item.toCursor()) {
-				clickItem(0, bodyLoc);
-				delay(me.ping * 2 + 500);
+			cur = me.getItem(-1, -1, gid);
 
-				if (item.bodylocation === bodyLoc) {
-					if (getCursorType() === 3) {
-						//Misc.click(0, 0, me);
+			// Refresh ref each pass — after a swap the old ref may point at the item now on cursor
+			if (!cur) {
+				break;
+			}
 
-						cursorItem = getUnit(100);
+			if (cur.mode === 1 && cur.bodylocation === bodyLoc) {
+				this.stowCursorItem();
+				return true;
+			}
 
-						if (cursorItem) {
-							if (!Storage.Inventory.CanFit(cursorItem) || !Storage.Inventory.MoveTo(cursorItem)) {
-								cursorItem.drop();
-							}
-						}
-					}
+			if (!me.itemoncursor || !getUnit(100) || getUnit(100).gid !== gid) {
+				if (me.itemoncursor) {
+					this.stowCursorItem(); // something else on cursor — clear first
+				}
 
-					return true;
+				if (!cur.toCursor()) {
+					delay(100 + me.ping);
+					continue;
 				}
 			}
+
+			clickItem(0, bodyLoc);
+			delay(me.ping * 2 + 500);
+
+			if (equippedNow()) {
+				this.stowCursorItem(); // previous item of this slot
+				delete this._equipFails[gid];
+				return true;
+			}
 		}
+
+		// Failed — never leave anything on the cursor (that is the "stutter")
+		this._equipFails[gid] = (this._equipFails[gid] || 0) + 1;
+		worn = this.getEquippedItemUnit(bodyLoc);
+		print("ÿc8AutoEquipÿc0 :: equip FAILED " + (item.name || item.classid) + " → slot " + bodyLoc +
+			" (worn=" + (worn ? (worn.name || worn.classid) : "none") + ", fails=" + this._equipFails[gid] + ")");
+		this.stowCursorItem();
 
 		return false;
 	},
@@ -1646,9 +1733,12 @@ var Item = {
 
 		// Remove items without tier / broken (won't equip; avoid wasted tries)
 		for (i = 0; i < items.length; i += 1) {
-			if (NTIP.GetTier(items[i]) === 0 || this.isBroken(items[i])) {
+			if (this.isBroken(items[i])) {
+				print("ÿc8AutoEquipÿc0 :: skip broken (0 dur) " + (items[i].name || items[i].classid));
 				items.splice(i, 1);
-
+				i -= 1;
+			} else if (NTIP.GetTier(items[i]) === 0) {
+				items.splice(i, 1);
 				i -= 1;
 			}
 		}
@@ -1700,7 +1790,13 @@ var Item = {
 
 						gid = items[0].gid;
 
-						print(items[0].name);
+						if (this._equipFails[gid] >= 2) {
+							break; // gave up on this one this game
+						}
+
+						print("ÿc2AutoEquipÿc0 :: equip " + items[0].name + " (tier " + tier + ") → slot " + bodyLoc[j] +
+							" replacing " + (this.getEquippedItemUnit(bodyLoc[j]) ? (this.getEquippedItemUnit(bodyLoc[j]).name || "?") : "empty") +
+							" (tier " + eqTier + ")");
 
 						if (this.equip(items[0], bodyLoc[j])) {
 							if (items[0].itemType === 2 || items[0].itemType === 70) {

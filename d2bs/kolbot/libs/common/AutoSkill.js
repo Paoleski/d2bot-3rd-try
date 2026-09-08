@@ -460,6 +460,3 @@ var AutoSkill = new function () {
 		return true;
 	};
 };
-
-};
-};

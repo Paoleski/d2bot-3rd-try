@@ -2647,13 +2647,15 @@ var Town = {
 			return false;
 		}
 
-		// Belt fill — one shift-buy per type fills all empty matching columns
+		// Belt fill — shift-buy only when every empty slot is for this type.
+		// Full empty belt (hp+mp columns): shift HP would flood mana columns too.
 		col = this.checkColumns(beltSize);
 
 		for (i = 0; i < 2; i += 1) {
 			wantHp = (i === 0) ? "hp" : "mp";
+			beforeEmpty = this.beltEmptyFor(wantHp);
 
-			if (this.beltEmptyFor(wantHp) <= 0) {
+			if (beforeEmpty <= 0) {
 				continue;
 			}
 
@@ -2694,21 +2696,44 @@ var Town = {
 				continue;
 			}
 
-			try {
-				// Shift-click: fill all empty belt slots of this potion type
-				pot.buy(true);
-			} catch (eBuy) {
-				print("ÿc1Townÿc0 :: pot.buy(shift) failed: " + eBuy);
-
+			if (this.canShiftBuyPots(wantHp, col, beltSize)) {
 				try {
-					pot.buy(false);
-				} catch (eBuy2) {
-					print("ÿc1Townÿc0 :: pot.buy failed: " + eBuy2);
-					continue;
+					// Shift fills every empty belt slot — safe only for a single pot type
+					pot.buy(true);
+				} catch (eBuy) {
+					print("ÿc1Townÿc0 :: pot.buy(shift) failed: " + eBuy);
+
+					try {
+						pot.buy(false);
+					} catch (eBuy2) {
+						print("ÿc1Townÿc0 :: pot.buy failed: " + eBuy2);
+						continue;
+					}
+				}
+
+				delay(80 + me.ping);
+			} else {
+				// Mixed empty columns — buy singles into inv; refillBelt after shop closes
+				print("ÿc2Townÿc0 :: pot buy " + wantHp + " x" + beforeEmpty + " (no shift — mixed empty belt)");
+
+				for (j = 0; j < beforeEmpty; j += 1) {
+					pot = this.getPotion(npc, wantHp);
+
+					if (!pot || !Storage.Inventory.CanFit(pot)) {
+						break;
+					}
+
+					try {
+						pot.buy(false);
+					} catch (eBuy3) {
+						print("ÿc1Townÿc0 :: pot.buy failed: " + eBuy3);
+						break;
+					}
+
+					delay(40 + me.ping);
 				}
 			}
 
-			delay(80 + me.ping);
 			col = this.checkColumns(beltSize);
 			buffer.mp = Misc.countPotions("mp", "inv");
 			buffer.hp = Misc.countPotions("hp", "inv");
@@ -2785,7 +2810,31 @@ var Town = {
 		return true;
 	},
 
-	// Check when to shift-buy potions
+	// True if every empty belt slot is configured for `type` (safe for pot.buy(true)).
+	// Full empty hp+mp belt → false (shift would fill mana columns with healing pots).
+	canShiftBuyPots: function (type, col, beltSize) {
+		var i, empty = false;
+
+		if (!type || !col || !beltSize) {
+			return false;
+		}
+
+		for (i = 0; i < 4; i += 1) {
+			if (col[i] <= 0) {
+				continue;
+			}
+
+			empty = true;
+
+			if (Config.BeltColumn[i] !== type) {
+				return false;
+			}
+		}
+
+		return empty;
+	},
+
+	// Check when to shift-buy potions (legacy — prefer canShiftBuyPots per type)
 	shiftCheck: function (col, beltSize) {
 		var i, fillType;
 
@@ -5276,7 +5325,7 @@ CursorLoop:
 	},
 
 	getItemsForRepair: function (repairPercent, chargedItems, includeEthereal) {
-		var i, charge, quantity, durability,
+		var i, charge, quantity, durability, maxDur,
 			itemList = [],
 			item = me.getItem(-1, 1);
 
@@ -5294,18 +5343,35 @@ CursorLoop:
 					case 43: // Throwing axes
 					case 44: // Javelins
 					case 87: // Amazon javelins
-						quantity = item.getStat(70);
+						// getStat returns false at 0 — coerce
+						quantity = (typeof Item !== "undefined" && Item.statOrZero) ? Item.statOrZero(item, 70) : item.getStat(70);
 
-						if (typeof quantity === "number" && quantity * 100 / (getBaseStat("items", item.classid, "maxstack") + item.getStat(254)) <= repairPercent) { // Stat 254 = increased stack size
+						if (quantity === false || quantity === undefined || quantity === null) {
+							quantity = 0;
+						}
+
+						if (typeof quantity === "number" && quantity * 100 / (getBaseStat("items", item.classid, "maxstack") + (item.getStat(254) || 0)) <= repairPercent) {
 							itemList.push(copyUnit(item));
 						}
 
 						break;
 					// Durability check
 					default:
-						durability = item.getStat(72);
+						maxDur = item.getStat(73);
 
-						if (typeof durability === "number" && durability * 100 / item.getStat(73) <= repairPercent) {
+						// No durability (jewelry etc.) — getStat(73) is false
+						if (maxDur === false || maxDur === undefined || maxDur === null || maxDur <= 0) {
+							break;
+						}
+
+						// Current dur 0 → getStat(72) is false in D2BS
+						durability = (typeof Item !== "undefined" && Item.statOrZero) ? Item.statOrZero(item, 72) : item.getStat(72);
+
+						if (durability === false || durability === undefined || durability === null) {
+							durability = 0;
+						}
+
+						if (typeof durability === "number" && durability * 100 / maxDur <= repairPercent) {
 							itemList.push(copyUnit(item));
 						}
 
@@ -6205,6 +6271,11 @@ MainLoop:
 		// Empty Config.Runewords bases (Stealth Breast/Light Plate, Lore, Leaf, …) — never sell
 		if (typeof Item !== "undefined" && Item.isProtectedRWBase && Item.isProtectedRWBase(item)) {
 			return false;
+		}
+
+		// 0-dur / empty stack — never equip, always sell (CubeRepair only works while worn)
+		if (typeof Item !== "undefined" && Item.isBroken && Item.isBroken(item)) {
+			return true;
 		}
 
 		// Real player autoequip upgrade only

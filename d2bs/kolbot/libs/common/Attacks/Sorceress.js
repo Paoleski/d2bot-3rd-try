@@ -695,12 +695,13 @@ var ClassAttack = {
 					this.diabloKiteAway(unit);
 				}
 			} else if (unit && this.isSealPullBoss(unit)) {
-				// Hold pull node — never getIntoPosition toward seal bosses
+				// Hold pull node — never getIntoPosition toward seal bosses.
+				// Out of range / no LOS → 0 (real fail) so getBoss can approachBoss(); was a fake 1 that never cast.
 				this.sealPullStandOff(unit);
 
 				if (getDistance(me, unit) > range || checkCollision(me, unit, 0x4)) {
 					delay(100);
-					return 1;
+					return 0;
 				}
 			} else if (range < 4 && !Attack.validSpot(unit.x, unit.y)) {
 				return 0;
@@ -763,7 +764,7 @@ var ClassAttack = {
 
 				if (getDistance(me, unit) > range || checkCollision(me, unit, 0x4)) {
 					delay(100);
-					return 1;
+					return 0;
 				}
 			} else if (range < 4 && !Attack.validSpot(unit.x, unit.y)) {
 				return 0;

@@ -136,10 +136,9 @@
 
 // amulet
 // No naked tier-1 magic — that vacuumed trash amulets
-[type] == amulet # [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 5 # [tier] == 2
-[type] == amulet # [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 5 && ([hpregen] > 0 || [maxhp] > 0) # [tier] == 3
-[type] == amulet # [maxhp] > 15 # [tier] == 3
-[type] == amulet # [maxhp] > 15 && [maxmana] > 15 # [tier] == 4
+// Early floor is a CONTINUOUS formula (2.x–5.x): more total res / hp / mana always wins.
+// Flat "tier 2" made 11 all res (44 total) tie with 2x10 res and get sold as junk.
+[type] == amulet # [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 5 || [maxhp] > 15 || [maxhp]+[maxmana] >= 30 # [tier] == 2 + ([fireresist]+[lightresist]+[coldresist]+[poisonresist])/50 + ([maxhp]+[maxmana])/60 + [hpregen]/10
 [type] == amulet && [quality] == rare # [maxhp] > 0 && [maxmana] > 0 && ([fcr] > 0 || [strength] > 0) # [tier] == 5
 [type] == amulet && [quality] == rare # [maxhp] > 0 && [maxmana] > 0 && ([fcr] > 0 && [strength] > 0) # [tier] == 6
 [type] == amulet && [quality] == unique # [itemallskills] == 1 # [tier] == 7
@@ -169,10 +168,8 @@
 
 // ring
 // No naked tier-1/2 — vacuumed every magic/rare ring (manager "Kept Ring …")
-[type] == ring # [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 5 # [tier] == 2
-[type] == ring # [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 5 && ([hpregen] > 0 || [maxhp] > 0) # [tier] == 3
-[type] == ring # [maxhp] > 15 # [tier] == 3
-[type] == ring # [maxhp] > 15 && [maxmana] > 15 # [tier] == 4
+// Early floor — continuous formula (see amulet note): total res / hp / mana always compare
+[type] == ring # [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 5 || [maxhp] > 15 || [maxhp]+[maxmana] >= 30 # [tier] == 2 + ([fireresist]+[lightresist]+[coldresist]+[poisonresist])/50 + ([maxhp]+[maxmana])/60 + [hpregen]/10
 // Caster FCR — must beat early single-resist junk (tiers 2–4). Magic Apprentice alone was tier 0 / sold.
 [type] == ring # [fcr] >= 10 # [tier] == 14
 [type] == ring # [fcr] >= 10 && ([maxhp] > 0 || [maxmana] > 0) # [tier] == 15
