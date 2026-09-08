@@ -628,6 +628,53 @@ MainLoop:
 		return rval;
 	},
 
+	// Single Player "Select Difficulty" screen (location 20). Coords from blizzhackers Control.js.
+	selectDifficultySP: function (diff) {
+		var control, i,
+			order = [
+				{name: "Hell", x: 264, y: 383},
+				{name: "Nightmare", x: 264, y: 340},
+				{name: "Normal", x: 264, y: 297}
+			];
+
+		if (!diff) {
+			diff = "Highest";
+		}
+
+		function clickDiff(entry) {
+			control = getControl(6, entry.x, entry.y, 272, 35) || getControl(-1, entry.x, entry.y, 272, 35);
+
+			if (!control || control.disabled === 4) {
+				return false;
+			}
+
+			print("ÿc2OOGÿc0 :: SP difficulty → " + entry.name);
+			control.click();
+
+			return true;
+		}
+
+		switch (diff) {
+		case "Normal":
+			return clickDiff(order[2]);
+		case "Nightmare":
+			return clickDiff(order[1]);
+		case "Hell":
+			return clickDiff(order[0]);
+		case "Highest":
+		default:
+			for (i = 0; i < order.length; i += 1) {
+				if (clickDiff(order[i])) {
+					return true;
+				}
+			}
+
+			print("ÿc1OOGÿc0 :: SP difficulty — no enabled button");
+
+			return false;
+		}
+	},
+
 	createGame: function (name, pass, diff, delay) {
 		var control;
 

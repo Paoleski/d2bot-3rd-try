@@ -196,7 +196,7 @@ function Diablo() {
 
 	this.getBoss = function (name, pullFight, holdX, holdY, baitX, baitY, walkBait) {
 		var i, boss, dist, waitTicks, engageDist, glow, mon, best, bestD, d,
-			idle, farIdle, outRange, engaged, sawBoss, baitPulses, self = this;
+			idle, farIdle, outRange, engaged, sawBoss, baitPulses, deadPulses, giveUpDead, self = this;
 
 		glow = getUnit(2, 131);
 		waitTicks = pullFight ? 72 : 16;
@@ -207,7 +207,74 @@ function Diablo() {
 		engaged = false;
 		sawBoss = false;
 		baitPulses = 0;
+		deadPulses = 0;
+		giveUpDead = false;
 		walkBait = !!walkBait;
+
+		// Never personally saw the boss or any leftover pack after a bait pulse — he may
+		// already be dead (killed by a teammate, or this is a script-restart mid-Chaos-Sanctuary).
+		// Bail out after a couple of fruitless pulses instead of grinding the full wait budget.
+		// Boss corpse present — he's already dead. getUnit(1, name) still returns the corpse,
+		// Attack.checkMonster() rejects it, and without this the loop reads that as
+		// "not spawned yet" and pulses forever.
+		function bossCorpse() {
+			var u = getUnit(1, name);
+
+			if (u) {
+				do {
+					if (u.mode === 12 || u.hp <= 0) {
+						return true;
+					}
+				} while (u.getNext());
+			}
+
+			return false;
+		}
+
+		function releaseHold() {
+			snapHold();
+
+			if (typeof ClassAttack !== "undefined") {
+				ClassAttack._sealHoldX = undefined;
+				ClassAttack._sealHoldY = undefined;
+			}
+		}
+
+		function checkAlreadyDead() {
+			if (bossCorpse()) {
+				if (typeof self.status === "function") {
+					self.status(name + " — corpse found, already dead");
+				} else {
+					print(name + " — corpse found, already dead");
+				}
+
+				return true;
+			}
+
+			if (sawBoss || engaged) {
+				deadPulses = 0;
+				return false;
+			}
+
+			if (packNear(25)) {
+				deadPulses = 0;
+				return false;
+			}
+
+			deadPulses += 1;
+
+			if (deadPulses >= 2) {
+				if (typeof self.status === "function") {
+					self.status(name + " — not found after pulls, assuming already dead");
+				} else {
+					print(name + " — not found after pulls, assuming already dead");
+				}
+
+				return true;
+			}
+
+			return false;
+		}
 
 		function snapHold() {
 			if (holdX === undefined || holdY === undefined) {
@@ -473,10 +540,27 @@ function Diablo() {
 			}
 
 			snapHold();
+
+			// Already dead before we even start (teammate / script restart) — skip the whole pull
+			if (bossCorpse()) {
+				if (typeof self.status === "function") {
+					self.status(name + " — corpse found, already dead");
+				}
+
+				releaseHold();
+				return true;
+			}
+
 			doAggro();
 
 			for (i = 0; i < waitTicks; i += 1) {
 				snapHold();
+
+				if (bossCorpse()) {
+					giveUpDead = true;
+					break;
+				}
+
 				boss = getUnit(1, name);
 
 				if (boss && Attack.checkMonster(boss)) {
@@ -516,16 +600,39 @@ function Diablo() {
 					if (idle >= 8) {
 						doAggro();
 						idle = 0;
+
+						if (checkAlreadyDead()) {
+							giveUpDead = true;
+							break;
+						}
 					}
 				}
 
 				delay(120);
 			}
 
+			if (giveUpDead) {
+				snapHold();
+
+				if (typeof ClassAttack !== "undefined") {
+					ClassAttack._sealHoldX = undefined;
+					ClassAttack._sealHoldY = undefined;
+				}
+
+				return true;
+			}
+
 			this.chaosPreattack(name, 4);
 
 			for (i = 0; i < 240; i += 1) {
 				snapHold();
+
+				// Killed (by us or anyone) — corpse means done, don't wait for the pack to fully disperse
+				if (bossCorpse() && !packNear(15)) {
+					releaseHold();
+					return true;
+				}
+
 				boss = getUnit(1, name);
 
 				if (boss && Attack.checkMonster(boss)) {
@@ -588,6 +695,17 @@ function Diablo() {
 				if (farIdle >= 8) {
 					doAggro();
 					farIdle = 0;
+
+					if (checkAlreadyDead()) {
+						snapHold();
+
+						if (typeof ClassAttack !== "undefined") {
+							ClassAttack._sealHoldX = undefined;
+							ClassAttack._sealHoldY = undefined;
+						}
+
+						return true;
+					}
 				}
 
 				delay(100);

@@ -351,7 +351,7 @@ function LoadConfig() {
 
 	// Repair settings
 	Config.CubeRepair = false; // Repair weapons with Ort and armor with Ral rune. Don't use it if you don't understand the risk of losing items.
-	Config.RepairPercent = 0; // Only repair when an item is broken (0 durability).
+	Config.RepairPercent = 40; // Repair when equipped durability/charges ≤ this %
 
 	// Gambling config
 	Config.Gamble = false;
@@ -528,6 +528,12 @@ function LoadConfig() {
 	Config.BossPriority = false;
 	Config.NecroShamanFocus = true; // Act1: kill shamans before fallen packs
 	Config.ClearType = 0;
+	Config.DangerClear = { // peel melee-range mobs before walking on
+		Range: 8,
+		ClearRange: 12,
+		PollMs: 250,
+		WhileTeleporting: false
+	};
 	Config.TeleStomp = false;
 	Config.Wereform = false;
 
@@ -584,6 +590,7 @@ function LoadConfig() {
 		[68, 1, true],     // Bone Armor
 		[75, 1, true],     // Clay Golem
 		[85, 2, true],     // 2 Blood Golems early (tank while you stab)
+		[367, 1, true, 24], // Blood Warp ASAP at 24 (prereqs Clay+Blood Golem)
 		[73, 20, false],   // MAX Poison Strike first
 		[79, 1, true],     // Golem Mastery
 		[83, 1, true],     // Desecrate (synergy + bodies)
@@ -592,9 +599,8 @@ function LoadConfig() {
 		[79, 15, false],   // Golem Mastery 15 → 4 golems
 		[83, 20, false],   // MAX Desecrate
 		[68, 20, false],   // MAX Bone Armor
-		[367, 1, true],    // Blood Warp
 		[85, 20, false],   // MAX Blood Golem
-		[367, 20, false]   // MAX Blood Warp
+		[367, 20, false]   // MAX Blood Warp (cooldown reduction)
 	];
 
 	Config.AutoStat.Enabled = true;

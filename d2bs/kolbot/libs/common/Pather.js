@@ -56,6 +56,14 @@ var NodeAction = {
 
 		if (arg.clearPath !== false) {
 			Attack.clear(15, typeof arg.clearPath === "number" ? arg.clearPath : 0);
+		} else if (Attack.shouldDangerClear()) {
+			var dMon = Attack.inDanger();
+
+			if (dMon) {
+				// Travel legs with clearPath=false still peel what's already on us
+				print("ÿc4Patherÿc0 :: danger " + (dMon.name || "?") + " d=" + Math.round(getDistance(me, dMon)) + " → clear");
+				Attack.clear(Attack.dangerClearRange());
+			}
 		}
 	},
 
@@ -134,14 +142,33 @@ var Pather = {
 	cancelFlags: [0x01, 0x02, 0x04, 0x08, 0x14, 0x16, 0x0c, 0x0f, 0x17, 0x19, 0x1A],
 	wpAreas: [1, 3, 4, 5, 6, 27, 29, 32, 35, 40, 48, 42, 57, 43, 44, 52, 74, 46, 75, 76, 77, 78, 79, 80, 81, 83, 101, 103, 106, 107, 109, 111, 112, 113, 115, 123, 117, 118, 129],
 	recursion: true,
+	dangerCheck: false, // walkTo polls Attack.inDanger only when moveTo enables this
+	dangerHit: false,   // walkTo sets true when it aborts for melee danger
 
-	// True if we should path with Teleport (hard skill or oskill). Not overwritten by moveTo.
+	// 54 = Sorc Teleport / oskill; 367 = Necro Blood Warp (PD2); 0 = none
+	teleSkill: function () {
+		if (me.getStat(97, 54) || (me.classid === 1 && me.getSkill(54, 1))) {
+			return 54;
+		}
+
+		if (me.classid === 2 && me.getSkill(367, 1)) {
+			if (typeof Config !== "undefined" && Config.BloodWarp && Config.BloodWarp.Enabled === false) {
+				return 0;
+			}
+
+			return 367;
+		}
+
+		return 0;
+	},
+
+	// True if we should path with Teleport / Blood Warp. Not overwritten by moveTo.
 	canTeleport: function () {
 		if (!this.teleport || me.inTown || me.getState(139) || me.getState(140)) {
 			return false;
 		}
 
-		return (me.classid === 1 && !!me.getSkill(54, 1)) || !!me.getStat(97, 54);
+		return this.teleSkill() > 0;
 	},
 
 	// Progressive *extra* wait between teles (ms). Walk/fight only while this is active.
@@ -176,25 +203,63 @@ var Pather = {
 		return table[d][a - 1];
 	},
 
-	// True when we may start a teleport cast (skill, mana, progressive extra delay).
+	// Blood Warp game cooldown (ms). Soft points count so +skills reduce CD. 0 for skill 54.
+	getTeleCooldownMs: function () {
+		var sk, lvl;
+
+		sk = this.teleSkill();
+
+		if (sk !== 367) {
+			return 0;
+		}
+
+		lvl = me.getSkill(367, 1) || 1;
+
+		// 5.8s − 0.2s × (lvl−1), 0 at lvl 30+; +150ms buffer so we don't spam a rejected cast
+		return Math.max(0, 5800 - 200 * (lvl - 1)) + 150;
+	},
+
+	// True when we may start a teleport cast (skill, mana/life, TeleDelay + Blood Warp CD).
 	// Cast-frame recovery is handled in teleportTo — not here — so Hell (0ms) keeps tele pathing.
 	canTeleportNow: function () {
-		var delayMs, cost;
+		var delayMs, cdMs, waitMs, cost, sk, lvl, lifeCost, minPct, chickenFloor, afterHp;
 
 		if (!this.canTeleport()) {
 			return false;
 		}
 
+		sk = this.teleSkill();
 		delayMs = this.getTeleDelay();
+		cdMs = this.getTeleCooldownMs();
+		waitMs = Math.max(delayMs || 0, cdMs || 0);
 
-		if (delayMs > 0 && this._lastTeleTick && (getTickCount() - this._lastTeleTick) < delayMs) {
+		if (waitMs > 0 && this._lastTeleTick && (getTickCount() - this._lastTeleTick) < waitMs) {
 			return false;
 		}
 
-		cost = Skill.getManaCost(54);
+		cost = Skill.getManaCost(sk);
 
 		if (cost > 0 && me.mp < cost) {
 			return false;
+		}
+
+		// Blood Warp: 12% current life (min 2×lvl, cap 60) — refuse if post-cast HP is too low
+		if (sk === 367) {
+			lvl = me.getSkill(367, 1) || 1;
+			lifeCost = Math.max(Math.floor(me.hp * 0.12), Math.min(2 * lvl, 60));
+			afterHp = me.hp - lifeCost;
+			minPct = (typeof Config !== "undefined" && Config.BloodWarp && Config.BloodWarp.MinLifePct !== undefined) ?
+				Config.BloodWarp.MinLifePct : 50;
+			chickenFloor = (typeof Config !== "undefined" && Config.LifeChicken > 0) ?
+				Config.LifeChicken + 10 : 20;
+
+			if (afterHp < Math.floor(me.hpmax * minPct / 100)) {
+				return false;
+			}
+
+			if (afterHp <= Math.floor(me.hpmax * chickenFloor / 100)) {
+				return false;
+			}
 		}
 
 		return true;
@@ -213,7 +278,7 @@ var Pather = {
 			return false;
 		}
 
-		var i, path, adjustedNode, cleared,
+		var i, path, adjustedNode, cleared, moved, dMon,
 			node = {x: x, y: y},
 			fail = 0;
 
@@ -350,7 +415,40 @@ var Pather = {
 					continue;
 				}
 
-				if (wantTele ? this.teleportTo(node.x, node.y) : this.walkTo(node.x, node.y, (fail > 0 || me.inTown) ? 2 : 4)) {
+				// Pre-node: peel melee threats before walking into the next node
+				if (!wantTele && Attack.shouldDangerClear()) {
+					dMon = Attack.inDanger();
+
+					if (dMon) {
+						print("ÿc4Patherÿc0 :: danger " + (dMon.name || "?") + " d=" + Math.round(getDistance(me, dMon)) + " → clear");
+						Attack.clear(Attack.dangerClearRange());
+					}
+				}
+
+				this.dangerHit = false;
+				this.dangerCheck = !wantTele && !me.inTown;
+
+				moved = wantTele ? this.teleportTo(node.x, node.y) : this.walkTo(node.x, node.y, (fail > 0 || me.inTown) ? 2 : 4);
+
+				this.dangerCheck = false;
+
+				if (!wantTele && this.dangerHit) {
+					this.dangerHit = false;
+					dMon = Attack.inDanger();
+
+					if (dMon) {
+						print("ÿc4Patherÿc0 :: danger " + (dMon.name || "?") + " d=" + Math.round(getDistance(me, dMon)) + " → clear");
+					}
+
+					if (Attack.shouldDangerClear() || dMon) {
+						Attack.clear(Attack.dangerClearRange() || 12);
+					}
+
+					path.unshift(node);
+					continue;
+				}
+
+				if (moved) {
 					if (wantTele) {
 						this._lastTeleTick = getTickCount();
 					}
@@ -375,7 +473,7 @@ var Pather = {
 					if (fail > 0 && !wantTele && !me.inTown) {
 						// Don't go berserk on longer paths
 						if (!cleared) {
-							Attack.clear(5);
+							Attack.clear(Attack.dangerClearRange() || 12);
 
 							cleared = true;
 						}
@@ -427,14 +525,27 @@ var Pather = {
 		Still waits in-game cast frames inside teleportTo.
 	*/
 	forceTeleportTo: function (x, y, maxRange) {
-		var savedDelay, ok;
+		var savedDelay, ok, sk, cdMs;
 
 		if (!this.canTeleport()) {
 			return false;
 		}
 
+		sk = this.teleSkill();
+		cdMs = this.getTeleCooldownMs();
+
+		// Blood Warp: never bypass game cooldown (TeleDelay may be forced to 0)
+		if (sk === 367 && cdMs > 0 && this._lastTeleTick &&
+				(getTickCount() - this._lastTeleTick) < cdMs) {
+			return false;
+		}
+
 		savedDelay = (typeof Config !== "undefined") ? Config.TeleDelay : undefined;
-		this._lastTeleTick = 0;
+
+		// Only clear bot TeleDelay tick for skill 54 — Blood Warp keeps _lastTeleTick for CD
+		if (sk !== 367) {
+			this._lastTeleTick = 0;
+		}
 
 		if (typeof Config !== "undefined") {
 			Config.TeleDelay = 0;
@@ -455,11 +566,20 @@ var Pather = {
 		y - the y coord to teleport to
 	*/
 	teleportTo: function (x, y, maxRange) {
-		var i, tick;
+		var i, tick, sk, startX, startY;
 
 		if (maxRange === undefined) {
 			maxRange = 5;
 		}
+
+		sk = this.teleSkill();
+
+		if (!sk) {
+			return false;
+		}
+
+		startX = me.x;
+		startY = me.y;
 
 		// In-game cast frames (FCR) — wait out current cast before next Teleport
 		tick = getTickCount();
@@ -468,13 +588,12 @@ var Pather = {
 			delay(10);
 		}
 
-MainLoop:
 		for (i = 0; i < 3; i += 1) {
 			if (Config.PacketCasting) {
-				Skill.setSkill(54, 0);
+				Skill.setSkill(sk, 0);
 				Packet.castSkill(0, x, y);
 			} else {
-				Skill.cast(54, 0, x, y);
+				Skill.cast(sk, 0, x, y);
 			}
 
 			tick = getTickCount();
@@ -494,6 +613,12 @@ MainLoop:
 				}
 
 				delay(10);
+			}
+
+			// Cast fired but we did not move (CD / life / reject) — stamp tick and stop retrying
+			if (getDistance(me.x, me.y, startX, startY) < 3) {
+				this._lastTeleTick = getTickCount();
+				return false;
 			}
 		}
 
@@ -517,7 +642,44 @@ MainLoop:
 
 		var i, angle, angles, nTimer, whereToClick, tick,
 			nFail = 0,
-			attemptCount = 0;
+			attemptCount = 0,
+			lastDangerPoll = 0,
+			nearEmpty = false,
+			pollMs, dMon;
+
+		// Poll Attack.inDanger on the PollMs cadence (backoff when area is empty).
+		// Only active when moveTo set Pather.dangerCheck (direct walkTo from getIntoPosition skips this).
+		var pollDanger = function () {
+			if (!Pather.dangerCheck || me.inTown || Attack.clearing || !Attack.shouldDangerClear()) {
+				return false;
+			}
+
+			pollMs = (Config.DangerClear && Config.DangerClear.PollMs) || 250;
+
+			if (nearEmpty) {
+				pollMs *= 2;
+			}
+
+			if (getTickCount() - lastDangerPoll < pollMs) {
+				return false;
+			}
+
+			lastDangerPoll = getTickCount();
+			dMon = Attack.inDanger();
+
+			if (Attack._dangerCache) {
+				nearEmpty = !!Attack._dangerCache.nearEmpty;
+			}
+
+			if (dMon) {
+				Pather.dangerHit = true;
+				Misc.click(0, 0, me.x, me.y); // stop walking
+
+				return true;
+			}
+
+			return false;
+		};
 
 		// Stamina handler and Charge
 		if (!me.inTown && !me.dead) {
@@ -566,6 +728,10 @@ ModeLoop:
 					return false;
 				}
 
+				if (pollDanger()) {
+					return true;
+				}
+
 				if ((getTickCount() - nTimer) > 500) {
 					nFail += 1;
 
@@ -589,6 +755,10 @@ ModeLoop:
 							tick = getTickCount();
 
 							while (getDistance(me, whereToClick) > 2 && getTickCount() - tick < 1000) {
+								if (pollDanger()) {
+									return true;
+								}
+
 								delay(40);
 							}
 
@@ -604,6 +774,10 @@ ModeLoop:
 
 			// Wait until we're done walking - idle or dead
 			while (getDistance(me.x, me.y, x, y) > minDist && me.mode !== 1 && me.mode !== 5 && !me.dead) {
+				if (pollDanger()) {
+					return true;
+				}
+
 				delay(10);
 			}
 

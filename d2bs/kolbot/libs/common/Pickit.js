@@ -27,7 +27,65 @@ var Pickit = {
 		this.beltSize = Storage.BeltSize();
 	},
 
-	// PD2: singles itemType 75 (LoD was 74), stacks 138, generics 149. Prefer code.
+	// PD2 gold piles often report classid 538 (same as vip) — identify by code/type, never classid alone.
+	isGoldPile: function (unit) {
+		var code;
+
+		if (!unit) {
+			return false;
+		}
+
+		code = unit.code ? String(unit.code).toLowerCase() : "";
+
+		if (code === "gld") {
+			return true;
+		}
+
+		if (unit.itemType === 4) {
+			return true;
+		}
+
+		// LoD / alias fallbacks when code missing
+		if (!code && (unit.classid === 523 || unit.classid === 540)) {
+			return true;
+		}
+
+		return false;
+	},
+
+	goldPileAmount: function (unit) {
+		if (!unit) {
+			return 0;
+		}
+
+		if (typeof unit.getStat === "function") {
+			return unit.getStat(14) || 0;
+		}
+
+		return unit.gold || 0;
+	},
+
+	// Skip tiny piles as you level (TK was vacuuming filter-hidden gold after every kill).
+	// lvl <10: any; 10→50, 20→200, 30→450, 40→800, cap 2000. Config.MinGoldPile >=0 overrides.
+	minGoldPile: function () {
+		var lvl, cfg;
+
+		cfg = (typeof Config !== "undefined") ? Config.MinGoldPile : undefined;
+
+		if (cfg !== undefined && cfg !== null && cfg >= 0) {
+			return cfg;
+		}
+
+		lvl = me.charlvl || 1;
+
+		if (lvl < 10) {
+			return 1;
+		}
+
+		return Math.min(2000, Math.floor(lvl * lvl / 2));
+	},
+
+	// PD2: prefer code/classid. Never trust itemType 75 alone — that's also LoD circlets (ci0–ci3).
 	isRuneItem: function (unit) {
 		var code, cid;
 
@@ -37,25 +95,30 @@ var Pickit = {
 
 		code = unit.code ? String(unit.code).toLowerCase() : "";
 
-		if (/^r\d{2}s?$/i.test(code) || /^r\d{2}g$/i.test(code)) {
-			return true;
+		// Circlet family shares type 75 with some PD2 rune layouts — never treat as runes
+		if (/^ci[0-3]$/i.test(code)) {
+			return false;
 		}
 
-		// PD2 types: 75=rune, 137/138=runs, 149=rung, 164–196=r01g–r33g. Keep 74 for LoD safety.
-		if ([74, 75, 137, 138, 149].indexOf(unit.itemType) > -1 ||
-				(unit.itemType >= 164 && unit.itemType <= 196)) {
+		if (/^r\d{2}s?$/i.test(code) || /^r\d{2}g$/i.test(code)) {
 			return true;
 		}
 
 		cid = unit.classid;
 
-		// Classic LoD rune classid range (fallback)
+		// Classic LoD rune classid range
 		if (cid >= 610 && cid <= 642) {
 			return true;
 		}
 
 		// PD2 singles 628–660, stacks 702–734
 		if ((cid >= 628 && cid <= 660) || (cid >= 702 && cid <= 734)) {
+			return true;
+		}
+
+		// Type fallbacks: LoD runes=74; PD2 stacks/generics. NOT 75 (circlets).
+		if ([74, 137, 138, 149].indexOf(unit.itemType) > -1 ||
+				(unit.itemType >= 164 && unit.itemType <= 196)) {
 			return true;
 		}
 
@@ -112,11 +175,52 @@ var Pickit = {
 	// 3 - Runeword wants
 	// 4 - Pickup to sell (triggered when low on gold)
 	checkItem: function (unit) {
-		var rval = NTIP.CheckItem(unit, false, true),
-			code, n, scroll;
+		var rval, code, n, scroll;
 
-		// Identify scrolls: skip once Cain can ID. Before Cain, keep a couple for charms/gear.
+		// Gold BEFORE nip — PD2 piles often share classid 538 with vip (Quest.nip false-hit)
+		if (this.isGoldPile(unit)) {
+			if (this.goldPileAmount(unit) < this.minGoldPile()) {
+				return {
+					result: 0,
+					line: null
+				};
+			}
+
+			return {
+				result: 1,
+				line: "gold"
+			};
+		}
+
+		rval = NTIP.CheckItem(unit, false, true);
+
+		// Identify scrolls: Normal only, and only pre-Cain (quest 4 resets each difficulty).
+		// NM/Hell: buy ID scrolls if needed — never clutter inv from the ground.
 		code = unit && unit.code ? String(unit.code).toLowerCase() : "";
+
+		// Cain lore scroll (tr1) — useless clutter; NOT Lam Esen (bbb)
+		if (typeof QuestItems !== "undefined" && typeof QuestItems.isHoradricScroll === "function" &&
+				QuestItems.isHoradricScroll(unit)) {
+			return {
+				result: 0,
+				line: null
+			};
+		}
+
+		if (code === "tr1") {
+			return {
+				result: 0,
+				line: null
+			};
+		}
+
+		// NM/Hell: never field-pick ID or TP scrolls (tomes filled in town)
+		if (me.diff > 0 && (code === "isc" || code === "tsc")) {
+			return {
+				result: 0,
+				line: null
+			};
+		}
 
 		if (code === "isc") {
 			if (me.getQuest(4, 0) || me.getQuest(4, 1)) {
@@ -154,19 +258,13 @@ var Pickit = {
 			};
 		}
 
-		// Arrows/bolts BEFORE quest — never mis-tag ammo as quest via classid collision
+		// Arrows/bolts BEFORE quest — never mis-tag ammo as quest via classid collision.
+		// PD2 rares are real gear; still only keep if merc/player actually needs that ammo type.
 		if (unit.itemType === 5 || unit.itemType === 6) {
-			if (unit.quality === 6 || unit.quality === 7) {
+			if (typeof Item !== "undefined" && typeof Item.wantsAmmo === "function" && Item.wantsAmmo(unit)) {
 				return {
 					result: 1,
-					line: "ammo-rare"
-				};
-			}
-
-			if (typeof Item !== "undefined" && typeof Item.mercNeedsAmmo === "function" && Item.mercNeedsAmmo(unit)) {
-				return {
-					result: 1,
-					line: "merc"
+					line: Item.mercNeedsAmmo(unit) ? "merc" : "ammo"
 				};
 			}
 
@@ -332,11 +430,18 @@ var Pickit = {
 			};
 		}
 
-		// Gold piles always; no more LowGold white/blue vacuum
-		if (rval.result === 0 && (unit.classid === 523 || unit.classid === 540)) {
+		// Gold piles — size gated in checkItem / canPick (not LowGold white/blue vacuum)
+		if (rval.result === 0 && this.isGoldPile(unit)) {
+			if (this.goldPileAmount(unit) < this.minGoldPile()) {
+				return {
+					result: 0,
+					line: null
+				};
+			}
+
 			return {
-				result: 4,
-				line: null
+				result: 1,
+				line: "gold"
 			};
 		}
 
@@ -448,6 +553,17 @@ var Pickit = {
 						(Town.potionKind(unit) === "yps" || Town.potionKind(unit) === "wms"))) {
 				return false;
 			}
+
+			// Javelins/glaives — never (before gem code check: "glv" falsely matched as gem)
+			if (unit.itemType === 44 || unit.itemType === 88 || code === "glv" || code === "glvs") {
+				return false;
+			}
+		}
+
+		// Potions / axes: reject caster junk axes BEFORE potion force-keep
+		// (Military Pick code "mpi" used to match mana via mp* prefix)
+		if (typeof Item !== "undefined" && typeof Item.isCasterJunkAxe === "function" && Item.isCasterJunkAxe(unit)) {
+			return false;
 		}
 
 		// Potions always — even if nip/check returned 0 (PD2 classid shifts break nip / old isc-id collision)
@@ -470,11 +586,6 @@ var Pickit = {
 			return this.isWantedGem(unit);
 		}
 
-		// Sorc/necro: axes (Military Pick etc.) — never pick, never sell-bait
-		if (typeof Item !== "undefined" && typeof Item.isCasterJunkAxe === "function" && Item.isCasterJunkAxe(unit)) {
-			return false;
-		}
-
 		// Barb helms — only Act5 barb merc (or barb player); never sorc sell-bait
 		if (typeof Item !== "undefined" && typeof Item.isBarbHelm === "function" && Item.isBarbHelm(unit)) {
 			if (me.classid === 4 && Config.AutoEquip && Item.autoEquipCheck(unit)) {
@@ -488,10 +599,7 @@ var Pickit = {
 			return false;
 		}
 
-		// Javelins/glaives — never (merc uses spear/polearm; player casters don't)
-		if (unit.itemType === 44 || unit.itemType === 88) {
-			return false;
-		}
+		// Javelins/glaives already rejected above (type 44/88 / code glv)
 
 		if (!status || status.result === 0 || status.result === false || status.result === null || status.result === undefined) {
 			return false;
@@ -535,10 +643,11 @@ var Pickit = {
 			return true;
 		}
 
-		// Wrong / unneeded merc ammo — never pick (rare/unique already kept above as result 1)
-		if ((unit.itemType === 5 || unit.itemType === 6) && unit.quality !== 6 && unit.quality !== 7 &&
-				!(typeof Item.mercNeedsAmmo === "function" && Item.mercNeedsAmmo(unit))) {
-			return false;
+		// Wrong / unneeded ammo — never pick (incl. PD2 rare/unique quivers)
+		if (unit.itemType === 5 || unit.itemType === 6) {
+			if (!(typeof Item !== "undefined" && typeof Item.wantsAmmo === "function" && Item.wantsAmmo(unit))) {
+				return false;
+			}
 		}
 
 		// Merc-slot armor (body/helm/boots/etc.): only pick if better for player OR merc.
@@ -694,6 +803,11 @@ var Pickit = {
 			return true;
 		}
 
+		// Jewel Fragments (jewf) are not socketable jewels
+		if (code === "jewf") {
+			return false;
+		}
+
 		if (unit.itemType === 58 || unit.itemType === 59) {
 			return true;
 		}
@@ -704,6 +818,88 @@ var Pickit = {
 		}
 
 		return unit.classid === 661;
+	},
+
+	// Keep: unique/set/crafted, or magic/rare matching a pickit line that has stats.
+	// Ignores leveling vacuum lines like "[type] == jewel && [quality] == magic" (no # stats).
+	isWantedJewel: function (unit) {
+		var i, list, item;
+
+		if (!unit || !this.isJewel(unit)) {
+			return false;
+		}
+
+		// Set / unique / crafted — never fragment (facets etc.)
+		if (unit.quality === 5 || unit.quality === 7 || unit.quality === 8) {
+			return true;
+		}
+
+		if (typeof NTIP_CheckList === "undefined") {
+			return typeof NTIP !== "undefined" && NTIP.CheckItem(unit) === 1;
+		}
+
+		// NTIP eval strings reference `item`
+		item = unit;
+		list = NTIP_CheckList;
+
+		for (i = 0; i < list.length; i += 1) {
+			try {
+				if (!list[i] || !list[i][0] || !list[i][0].length) {
+					continue;
+				}
+
+				if (!eval(list[i][0])) {
+					continue;
+				}
+
+				// Vacuum pickup (no property section) — not a keep
+				if (!list[i][1] || !list[i][1].length) {
+					continue;
+				}
+
+				if (eval(list[i][1])) {
+					return true;
+				}
+			} catch (e) {
+				// bad nip line — skip
+			}
+		}
+
+		return false;
+	},
+
+	// Identified magic/rare junk → cube with key → Jewel Fragments (PD2)
+	isJunkJewel: function (unit) {
+		if (!unit || !this.isJewel(unit)) {
+			return false;
+		}
+
+		// Need ID before judging mods
+		if (!unit.getFlag(0x10)) {
+			return false;
+		}
+
+		// Magic / rare only
+		if (unit.quality !== 4 && unit.quality !== 6) {
+			return false;
+		}
+
+		// Locked inv / reserved for cubing or crafting
+		if (unit.location === 3 && typeof Storage !== "undefined" && Storage.Inventory &&
+				Storage.Inventory.IsLocked(unit, Config.Inventory)) {
+			return false;
+		}
+
+		if (typeof Cubing !== "undefined" && typeof Cubing.keepItem === "function" && Cubing.keepItem(unit)) {
+			return false;
+		}
+
+		if (typeof CraftingSystem !== "undefined" && CraftingSystem.validGids &&
+				CraftingSystem.validGids.indexOf(unit.gid) > -1) {
+			return false;
+		}
+
+		return !this.isWantedJewel(unit);
 	},
 
 	// Ring (10) / amulet (12) — set/unique/crafted always; rares need nip/AutoEquip floors
@@ -722,6 +918,18 @@ var Pickit = {
 
 		code = unit.code ? String(unit.code).toLowerCase() : "";
 
+		// Glaive weapon is "glv" — must NOT match gem regex (flawless amethyst is "gzv")
+		if (code === "glv" || code === "glvs") {
+			return false;
+		}
+
+		// Javelins / amazon javelins are never gems
+		t = unit.itemType;
+
+		if (t === 44 || t === 88) {
+			return false;
+		}
+
 		// chipped / flawed / normal / flawless / perfect + stacks
 		// codes: gc*/gf*/gs*/gl*/gp* + gzv (flawless amethyst) + sk*
 		if (/^g[cflpsz][vybgrw]s?$/.test(code) || /^sk[cfulz]s?$/.test(code)) {
@@ -729,8 +937,6 @@ var Pickit = {
 		}
 
 		// NTIP types: gem0–gem4 = 93–97; PD2 stackgem/flawless/perfect = 128–130
-		t = unit.itemType;
-
 		if (t >= 93 && t <= 97) {
 			return true;
 		}
@@ -826,7 +1032,8 @@ var Pickit = {
 			return false;
 		}
 
-		if (code.indexOf("hp") === 0 || code.indexOf("mp") === 0 || code.indexOf("rv") === 0 ||
+		// Exact potion codes — never prefix (Military Pick "mpi" ≠ mana)
+		if (/^hp[1-5]$/.test(code) || /^mp[1-5]$/.test(code) || code === "rvs" || code === "rvl" ||
 				code === "vps") {
 			return true;
 		}
@@ -860,7 +1067,7 @@ var Pickit = {
 		}
 
 		// Explicit non-rejuv potion codes (lab: 530/531 are vps/yps)
-		if (code.indexOf("hp") === 0 || code.indexOf("mp") === 0 || code === "vps" || code === "yps" || code === "wms") {
+		if (/^hp[1-5]$/.test(code) || /^mp[1-5]$/.test(code) || code === "vps" || code === "yps" || code === "wms") {
 			return false;
 		}
 
@@ -1051,12 +1258,22 @@ var Pickit = {
 			return false;
 		}
 
-		// Gold (4), scroll (22), key (41), hp/mp/rv/stamina/antidote/thawing (76–81)
-		if (!(t === 4 || t === 22 || t === 41 || (t >= 76 && t <= 81) ||
-				code === "key" || code === "tsc" || code === "isc" ||
-				code.indexOf("hp") === 0 || code.indexOf("mp") === 0 || code.indexOf("rv") === 0 ||
-				code === "vps" || code === "yps" || code === "wms" ||
+		// NM/Hell: no TK on ID/TP scrolls
+		if (me.diff > 0 && (code === "isc" || code === "tsc" || t === 22)) {
+			return false;
+		}
+
+		// Gold (4 / gld), scroll (22), key (41), hp/mp/rv/stamina only — not antidote/thawing
+		if (!(t === 4 || t === 22 || t === 41 || (t >= 76 && t <= 79) ||
+				code === "gld" || code === "key" || code === "tsc" || code === "isc" ||
+				/^hp[1-5]$/.test(code) || /^mp[1-5]$/.test(code) || code === "rvs" || code === "rvl" ||
+				code === "vps" ||
 				unit.classid === 523 || unit.classid === 540)) {
+			return false;
+		}
+
+		// Tiny gold piles — don't TK (often filter-hidden; looks like casting at nothing)
+		if (this.isGoldPile(unit) && this.goldPileAmount(unit) < this.minGoldPile()) {
 			return false;
 		}
 
@@ -1172,9 +1389,9 @@ MainLoop:
 			while (getTickCount() - tick < 1000) {
 				item = copyUnit(item);
 
-				if (stats.classid === 523) {
+				if (stats.classid === 523 || stats.classid === 540 || stats.code === "gld" || stats.type === 4) {
 					if (!item.getStat(14) || item.getStat(14) < stats.gold) {
-						print("ÿc7Picked up " + stats.color + (item.getStat(14) ? (item.getStat(14) - stats.gold) : stats.gold) + " " + stats.name);
+						print("ÿc7Picked up " + stats.color + (item.getStat(14) ? (item.getStat(14) - stats.gold) : stats.gold) + " Gold");
 
 						return true;
 					}
@@ -1210,6 +1427,13 @@ MainLoop:
 		}
 
 		stats.picked = me.itemcount > itemCount || !!me.getItem(-1, -1, gid);
+
+		// Gold leaves no inventory item — detect by gid gone
+		if (!stats.picked && (stats.code === "gld" || stats.type === 4) && !getUnit(4, -1, -1, gid)) {
+			print("ÿc7Picked up " + stats.color + (stats.gold || "?") + " Gold");
+
+			return true;
+		}
 
 		if (stats.picked) {
 			DataFile.updateStats("lastArea");
@@ -1248,7 +1472,7 @@ MainLoop:
 						break;
 					}
 
-					if (["glv", "gly", "glb", "glg", "glr", "glw", "skl", "gpv", "gpy", "gpb", "gpg", "gpr", "gpw", "skz"].indexOf(item.code) > -1 && !Config.ShowHighGems) {
+					if (["gzv", "gly", "glb", "glg", "glr", "glw", "skl", "gpv", "gpy", "gpb", "gpg", "gpr", "gpw", "skz"].indexOf(item.code) > -1 && !Config.ShowHighGems) {
 						break;
 					}
 
@@ -1299,9 +1523,14 @@ MainLoop:
 			case 4: // gold
 				return "ÿc4";
 			case 74: // LoD runes
-			case 75: // PD2 runes
 			case 138: // PD2 rune stacks
 				return "ÿc8";
+			case 75: // PD2 sometimes uses 75 for runes — but LoD circlets are also 75
+				if (this.isRuneItem(unit)) {
+					return "ÿc8";
+				}
+
+				break;
 			case 76: // PD2 healing
 				return "ÿc1";
 			case 77: // PD2 mana
@@ -1330,6 +1559,18 @@ MainLoop:
 	canPick: function (unit) {
 		var tome, charm, i, potion, needPots, buffers, pottype, myKey, key, code, potKind;
 
+		// Cain lore Horadric Scroll (tr1) — never pick (not Lam Esen bbb)
+		if (typeof QuestItems !== "undefined" && typeof QuestItems.isHoradricScroll === "function" &&
+				QuestItems.isHoradricScroll(unit)) {
+			return false;
+		}
+
+		code = unit && unit.code ? String(unit.code).toLowerCase() : "";
+
+		if (code === "tr1") {
+			return false;
+		}
+
 		// Quest: skip only if we already hold the same code (classid alone false-hits on PD2)
 		if (typeof QuestItems !== "undefined" && QuestItems.isQuestItem(unit)) {
 			if (unit.code && me.getItem(unit.code)) {
@@ -1350,6 +1591,15 @@ MainLoop:
 				(typeof Town !== "undefined" && Town.potionKind &&
 					(Town.potionKind(unit) === "yps" || Town.potionKind(unit) === "wms"))) {
 			return false;
+		}
+
+		// Gold piles (PD2: code gld, may not always be itemType 4)
+		if (this.isGoldPile(unit)) {
+			if (me.getStat(14) === me.getStat(12) * 10000) {
+				return false;
+			}
+
+			return this.goldPileAmount(unit) >= this.minGoldPile();
 		}
 
 		switch (unit.classid) {
@@ -1411,11 +1661,20 @@ MainLoop:
 				return false; // Skip gold if full
 			}
 
+			if (this.goldPileAmount(unit) < this.minGoldPile()) {
+				return false;
+			}
+
 			break;
 		case 22: // Scroll
 			code = unit.code ? String(unit.code).toLowerCase() : "";
 
-			// ID scrolls: only pre-Cain (checkItem early-isc), max 2 already gated there
+			// NM/Hell: vendor fills tomes — ignore ground ID/TP scrolls
+			if (me.diff > 0 && (code === "isc" || code === "tsc" || unit.classid === 546 || unit.classid === 547)) {
+				return false;
+			}
+
+			// ID scrolls: only Normal pre-Cain (checkItem early-isc), max 2 already gated there
 			if (code === "isc") {
 				if (me.getQuest(4, 0) || me.getQuest(4, 1)) {
 					return false;
@@ -1424,7 +1683,7 @@ MainLoop:
 				break; // inventory room check below
 			}
 
-			// TP scrolls only (tsc) — fill tome if room
+			// TP scrolls only (tsc) — Normal: fill tome if room
 			if (code === "tsc" || unit.classid === 546) {
 				tome = me.getItem("tbk", 0) || me.getItem(535, 0);
 			} else {
@@ -1459,10 +1718,10 @@ MainLoop:
 			}
 
 			break;
-		case 82: // LoD Small Charm / PD2 thawing — ignore
-		case 83: // PD2 Small Charm
-		case 84: // PD2 Large Charm
-		case 85: // PD2 Grand Charm
+		case 82: // Small Charm (cm1)
+		case 83: // Large Charm (cm2)
+		case 84: // Grand Charm (cm3)
+		case 85: // legacy / shifted grand — keep handling
 			if (unit.quality === 7) { // Unique
 				charm = me.getItem(unit.classid, 0);
 
@@ -1482,7 +1741,7 @@ MainLoop:
 			code = unit.code ? String(unit.code).toLowerCase() : "";
 			potKind = (typeof Town !== "undefined" && typeof Town.potionKind === "function") ?
 				Town.potionKind(unit) :
-				(code.indexOf("hp") === 0 ? "hp" : (code.indexOf("mp") === 0 ? "mp" : false));
+				(/^hp[1-5]$/.test(code) ? "hp" : (/^mp[1-5]$/.test(code) ? "mp" : false));
 
 			if (potKind !== "hp" && potKind !== "mp") {
 				return false;
@@ -1500,9 +1759,6 @@ MainLoop:
 				do {
 					if ((potion.mode === 2 || potion.location === 2) &&
 							typeof Town !== "undefined" && Town.potionKind(potion) === potKind) {
-						needPots -= 1;
-					} else if ((potion.mode === 2 || potion.location === 2) &&
-							potion.code && String(potion.code).toLowerCase().indexOf(potKind) === 0) {
 						needPots -= 1;
 					}
 				} while (potion.getNext());
@@ -1524,8 +1780,7 @@ MainLoop:
 						if (potion) {
 							do {
 								if (potion.location === 3 && potion.mode !== 2 &&
-										((typeof Town !== "undefined" && Town.potionKind(potion) === potKind) ||
-										(potion.code && String(potion.code).toLowerCase().indexOf(potKind) === 0))) {
+										typeof Town !== "undefined" && Town.potionKind(potion) === potKind) {
 									needPots -= 1;
 								}
 							} while (potion.getNext());
@@ -1540,8 +1795,7 @@ MainLoop:
 				if (potion) {
 					do {
 						if (((potion.mode === 0 && potion.location === 3) || potion.mode === 2 || potion.location === 2) &&
-								((typeof Town !== "undefined" && Town.potionKind(potion) === potKind) ||
-								(potion.code && String(potion.code).toLowerCase().indexOf(potKind) === 0))) {
+								typeof Town !== "undefined" && Town.potionKind(potion) === potKind) {
 							// Prefer drinking lower-tier by code digit when classid is unreliable
 							if ((potion.code && unit.code && String(potion.code) < String(unit.code)) ||
 									potion.classid < unit.classid) {

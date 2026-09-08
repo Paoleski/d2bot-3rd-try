@@ -29,7 +29,8 @@ include("common/Town.js");
 function main() {
 	var townCheck = false,
 		holdingMain = false, // we paused default.dbj for a town trip
-		userPaused = false; // Pause/Break from ToolsThread — never auto-resume over it
+		userPaused = false, // Pause/Break from ToolsThread — never auto-resume over it
+		suppressChicken = false; // AutoSmurf boss fights (Baal/Ancients) broadcast this
 
 	if (typeof ConsoleLog !== "undefined") {
 		ConsoleLog.install();
@@ -108,6 +109,11 @@ function main() {
 				townCheck = false;
 			} else if (msg === "userResume") {
 				userPaused = false;
+			} else if (msg === "suppressChicken") {
+				suppressChicken = true;
+				townCheck = false;
+			} else if (msg === "resumeChicken") {
+				suppressChicken = false;
 			}
 		});
 
@@ -128,6 +134,12 @@ function main() {
 			continue;
 		}
 
+		if (suppressChicken) {
+			townCheck = false;
+			delay(50);
+			continue;
+		}
+		
 		if (!me.inTown && (townCheck ||
 			(Config.TownHP > 0 && me.hp < Math.floor(me.hpmax * Config.TownHP / 100)) ||
 			(Config.TownMP > 0 && me.mp < Math.floor(me.mpmax * Config.TownMP / 100)))) {

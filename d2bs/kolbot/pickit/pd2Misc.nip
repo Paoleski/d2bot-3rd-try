@@ -42,6 +42,11 @@
 [Name] == lmal
 [Name] == larzuksmalus
 
+// Jewel Fragments (junk jewel + key) — also hard-kept via Pickit.isPd2Currency
+[Name] == jewf
+[Name] == fragments
+[Type] == jewelfragments
+
 // Sample maps (classid names from MPQ) — keep rare for value
 [Name] == kurastmap && [Quality] == Rare
 [Name] == arcanemap && [Quality] == Rare

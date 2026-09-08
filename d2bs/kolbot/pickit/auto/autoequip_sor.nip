@@ -1,4 +1,4 @@
-[name] == gold # [gold] >= 1
+[name] == gold // pile size gated in Pickit.minGoldPile (level-scaled; ignores tiny stacks)
 [Name] == hp1
 [Name] == hp2
 [Name] == hp3
@@ -16,7 +16,8 @@
 [Type] == rejuvpotion
 [Type] == rejuvenationpotion
 [Name] == tsc
-// isc: NEVER pick (Cain IDs). Do not uncomment.
+// Field TP scrolls: Normal only (Pickit rejects tsc/isc when me.diff > 0). NM+ fills tomes in town.
+// isc: NEVER via nip — Pickit early-isc only in Normal pre-Cain.
 //[Name] == isc
 
 // gloves

@@ -7,6 +7,9 @@
 var Attack = {
 	classes: ["Amazon", "Sorceress", "Necromancer", "Paladin", "Barbarian", "Druid", "Assassin"],
 	infinity: false,
+	clearing: false, // true while clear/clearList runs — blocks nested danger clears from Pather
+	_dangerCache: null, // {tick, result, nearEmpty}
+	_dangerCacheMs: 100,
 
 	// Initialize attacks
 	init: function () {
@@ -100,6 +103,121 @@ var Attack = {
 		}
 
 		return best;
+	},
+
+	/** Configured melee-danger radius, or 0 if DangerClear is off. */
+	dangerRange: function () {
+		if (!Config.DangerClear || typeof Config.DangerClear !== "object") {
+			return 0;
+		}
+
+		return Config.DangerClear.Range || 8;
+	},
+
+	/** Range used when clearing a danger interrupt. */
+	dangerClearRange: function () {
+		if (!Config.DangerClear || typeof Config.DangerClear !== "object") {
+			return 0;
+		}
+
+		return Config.DangerClear.ClearRange || 12;
+	},
+
+	/**
+	 * True when we should interrupt walking to clear melee threats.
+	 * Skips town, nested clears, and tele-ready pathing unless WhileTeleporting.
+	 */
+	shouldDangerClear: function () {
+		if (!Config.DangerClear || me.inTown || me.dead || this.clearing) {
+			return false;
+		}
+
+		if (typeof Pather !== "undefined" && Pather.useTeleport && Pather.canTeleportNow() &&
+				!(Config.DangerClear.WhileTeleporting)) {
+			return false;
+		}
+
+		return true;
+	},
+
+	/**
+	 * Nearest attackable monster within melee-danger range of me, or false.
+	 * Cheap-first: distance → hp/mode → checkMonster → skipCheck. Memoized ~100ms.
+	 * Cache also tracks nearEmpty (nothing within Range*2) for walkTo poll backoff.
+	 */
+	inDanger: function (range, coll) {
+		var mon, d, best, bestD, tick, nearEmpty, result;
+
+		if (!Config.DangerClear || me.inTown || me.dead) {
+			return false;
+		}
+
+		if (range === undefined) {
+			range = this.dangerRange();
+		}
+
+		if (!range) {
+			return false;
+		}
+
+		tick = getTickCount();
+
+		if (this._dangerCache && (tick - this._dangerCache.tick) < this._dangerCacheMs &&
+				this._dangerCache.range === range && this._dangerCache.coll === coll) {
+			return this._dangerCache.result;
+		}
+
+		best = false;
+		bestD = range + 1;
+		nearEmpty = true;
+		mon = getUnit(1);
+
+		if (mon) {
+			do {
+				d = getDistance(me, mon);
+
+				if (d > range * 2) {
+					continue;
+				}
+
+				nearEmpty = false;
+
+				if (d > range || d >= bestD) {
+					continue;
+				}
+
+				// Dead / dying — cheap before checkMonster
+				if (mon.hp !== undefined && mon.hp <= 0) {
+					continue;
+				}
+
+				if (mon.mode === 0 || mon.mode === 12) {
+					continue;
+				}
+
+				if (coll !== undefined && checkCollision(me, mon, coll)) {
+					continue;
+				}
+
+				if (!this.checkMonster(mon) || !this.skipCheck(mon)) {
+					continue;
+				}
+
+				bestD = d;
+				best = mon;
+			} while (mon.getNext());
+		}
+
+		result = best ? copyUnit(best) : false;
+		this._dangerCache = {
+			tick: tick,
+			result: result,
+			nearEmpty: nearEmpty,
+			range: range,
+			coll: coll
+		};
+
+		return result;
 	},
 
 	getCustomAttack: function (unit) {
@@ -408,7 +526,9 @@ var Attack = {
 		var i, boss, orgx, orgy, target, result, monsterList, start, coord,
 			retry = 0,
 			gidAttack = [],
-			attackCount = 0;
+			attackCount = 0,
+			dangerR = this.dangerRange(),
+			distMe, sweeps, dm;
 
 		if (Config.AttackSkill[1] < 0 || Config.AttackSkill[3] < 0) {
 			return false;
@@ -436,119 +556,168 @@ var Attack = {
 			orgy = me.y;
 		}
 
-		monsterList = [];
-		target = getUnit(1);
+		this.clearing = true;
+		this._dangerCache = null;
 
-		if (target) {
-			do {
-				if ((!spectype || (target.spectype & spectype)) && this.checkMonster(target) && this.skipCheck(target)) {
-					// Speed optimization - don't go through monster list until there's at least one within clear range
-					if (!start && getDistance(target, orgx, orgy) <= range &&
-							(me.getSkill(54, 1) || !Scripts.Follower || !checkCollision(me, target, 0x1))) {
-						start = true;
+		try {
+			monsterList = [];
+			target = getUnit(1);
+
+			if (target) {
+				do {
+					if ((!spectype || (target.spectype & spectype)) && this.checkMonster(target) && this.skipCheck(target)) {
+						// Speed optimization - don't go through monster list until there's at least one within clear range
+						if (!start && getDistance(target, orgx, orgy) <= range &&
+								(Pather.teleSkill() > 0 || !Scripts.Follower || !checkCollision(me, target, 0x1))) {
+							start = true;
+						}
+
+						// Also start if a melee-danger mob is already on us
+						if (!start && dangerR && getDistance(me, target) <= dangerR) {
+							start = true;
+						}
+
+						monsterList.push(copyUnit(target));
+					}
+				} while (target.getNext());
+			}
+
+			while (start && monsterList.length > 0 && attackCount < 300) {
+				if (boss) {
+					orgx = boss.x;
+					orgy = boss.y;
+				}
+
+				if (me.dead) {
+					return false;
+				}
+
+				// Precompute distMe once per monster — sortMonsters reads it (no getDistance in comparator)
+				for (i = 0; i < monsterList.length; i += 1) {
+					if (monsterList[i].x !== undefined) {
+						monsterList[i].distMe = getDistance(me, monsterList[i]);
+					}
+				}
+
+				//monsterList.sort(Sort.units);
+				monsterList.sort(sortfunc);
+
+				target = copyUnit(monsterList[0]);
+				distMe = target.x !== undefined ? getDistance(me, target) : 999;
+
+				if (target.x !== undefined &&
+						(getDistance(target, orgx, orgy) <= range ||
+							(this.getScarinessLevel(target) > 7 && distMe <= range) ||
+							(dangerR > 0 && distMe <= dangerR)) &&
+						this.checkMonster(target)) {
+					if (Config.Dodge && me.hp * 100 / me.hpmax <= Config.DodgeHP) {
+						this.deploy(target, Config.DodgeRange, 5, 9);
 					}
 
-					monsterList.push(copyUnit(target));
-				}
-			} while (target.getNext());
-		}
+					Misc.townCheck(true);
+					//me.overhead("attacking " + target.name + " spectype " + target.spectype + " id " + target.classid);
 
-		while (start && monsterList.length > 0 && attackCount < 300) {
-			if (boss) {
-				orgx = boss.x;
-				orgy = boss.y;
-			}
+					result = ClassAttack.doAttack(target, attackCount % 15 === 0);
 
-			if (me.dead) {
-				return false;
-			}
+					if (result) {
+						retry = 0;
 
-			//monsterList.sort(Sort.units);
-			monsterList.sort(sortfunc);
+						for (i = 0; i < gidAttack.length; i += 1) {
+							if (gidAttack[i].gid === target.gid) {
+								break;
+							}
+						}
 
-			target = copyUnit(monsterList[0]);
+						if (i === gidAttack.length) {
+							gidAttack.push({gid: target.gid, attacks: 0, name: target.name});
+						}
 
-			if (target.x !== undefined && (getDistance(target, orgx, orgy) <= range || (this.getScarinessLevel(target) > 7 && getDistance(me, target) <= range)) && this.checkMonster(target)) {
-				if (Config.Dodge && me.hp * 100 / me.hpmax <= Config.DodgeHP) {
-					this.deploy(target, Config.DodgeRange, 5, 9);
-				}
+						gidAttack[i].attacks += 1;
+						attackCount += 1;
 
-				Misc.townCheck(true);
-				//me.overhead("attacking " + target.name + " spectype " + target.spectype + " id " + target.classid);
+						// Desync/bad position handler
+						switch (Config.AttackSkill[(target.spectype & 0x7) ? 1 : 3]) {
+						case 112:
+							//print(gidAttack[i].name + " " + gidAttack[i].attacks);
 
-				result = ClassAttack.doAttack(target, attackCount % 15 === 0);
+							// Tele in random direction with Blessed Hammer
+							if (gidAttack[i].attacks > 0 && gidAttack[i].attacks % ((target.spectype & 0x7) ? 4 : 2) === 0) {
+								//print("random move m8");
+								coord = CollMap.getRandCoordinate(me.x, -1, 1, me.y, -1, 1, 5);
+								Pather.moveTo(coord.x, coord.y);
+							}
 
-				if (result) {
-					retry = 0;
+							break;
+						default:
+							// Flash with melee skills
+							if (gidAttack[i].attacks > 0 && gidAttack[i].attacks % ((target.spectype & 0x7) ? 15 : 5) === 0 && Skill.getRange(Config.AttackSkill[(target.spectype & 0x7) ? 1 : 3]) < 4) {
+								Packet.flash(me.gid);
+							}
 
-					for (i = 0; i < gidAttack.length; i += 1) {
-						if (gidAttack[i].gid === target.gid) {
 							break;
 						}
-					}
 
-					if (i === gidAttack.length) {
-						gidAttack.push({gid: target.gid, attacks: 0, name: target.name});
-					}
-
-					gidAttack[i].attacks += 1;
-					attackCount += 1;
-
-					// Desync/bad position handler
-					switch (Config.AttackSkill[(target.spectype & 0x7) ? 1 : 3]) {
-					case 112:
-						//print(gidAttack[i].name + " " + gidAttack[i].attacks);
-
-						// Tele in random direction with Blessed Hammer
-						if (gidAttack[i].attacks > 0 && gidAttack[i].attacks % ((target.spectype & 0x7) ? 4 : 2) === 0) {
-							//print("random move m8");
-							coord = CollMap.getRandCoordinate(me.x, -1, 1, me.y, -1, 1, 5);
-							Pather.moveTo(coord.x, coord.y);
+						// Skip non-unique monsters after 15 attacks, except in Throne of Destruction
+						if (me.area !== 131 && !(target.spectype & 0x7) && gidAttack[i].attacks > 15) {
+							print("ÿc1Skipping " + target.name + " " + target.gid + " " + gidAttack[i].attacks);
+							monsterList.shift();
 						}
 
-						break;
-					default:
-						// Flash with melee skills
-						if (gidAttack[i].attacks > 0 && gidAttack[i].attacks % ((target.spectype & 0x7) ? 15 : 5) === 0 && Skill.getRange(Config.AttackSkill[(target.spectype & 0x7) ? 1 : 3]) < 4) {
-							Packet.flash(me.gid);
+						if (target.mode === 0 || target.mode === 12 || Config.FastPick === 2) {
+							Pickit.fastPick();
+						}
+					} else {
+						if (retry++ > 3) {
+							monsterList.shift();
+							retry = 0;
 						}
 
-						break;
-					}
-
-					// Skip non-unique monsters after 15 attacks, except in Throne of Destruction
-					if (me.area !== 131 && !(target.spectype & 0x7) && gidAttack[i].attacks > 15) {
-						print("ÿc1Skipping " + target.name + " " + target.gid + " " + gidAttack[i].attacks);
-						monsterList.shift();
-					}
-
-					if (target.mode === 0 || target.mode === 12 || Config.FastPick === 2) {
-						Pickit.fastPick();
+						Packet.flash(me.gid);
 					}
 				} else {
-					if (retry++ > 3) {
+					// Shaman / high-scariness: try walk-in a few times, then drop (never rotate forever)
+					if (this.getScarinessLevel(target) > 7 && this.checkMonster(target) &&
+							getDistance(me, target) <= range + 25 && retry < 5) {
+						Pather.moveToUnit(target);
+						retry += 1;
+						monsterList.push(monsterList.shift());
+					} else {
 						monsterList.shift();
 						retry = 0;
 					}
-
-					Packet.flash(me.gid);
-				}
-			} else {
-				// Shaman / high-scariness: try walk-in a few times, then drop (never rotate forever)
-				if (this.getScarinessLevel(target) > 7 && this.checkMonster(target) &&
-						getDistance(me, target) <= range + 25 && retry < 5) {
-					Pather.moveToUnit(target);
-					retry += 1;
-					monsterList.push(monsterList.shift());
-				} else {
-					monsterList.shift();
-					retry = 0;
 				}
 			}
+
+			ClassAttack.afterAttack(pickit);
+			this.openChests(range, orgx, orgy);
+		} finally {
+			this.clearing = false;
 		}
 
-		ClassAttack.afterAttack(pickit);
-		this.openChests(range, orgx, orgy);
+		// Adjacent mob arrived mid-fight — peel it before pickit (only if we actually fought)
+		if (attackCount > 0 && dangerR > 0) {
+			this._dangerCache = null;
+			sweeps = 0;
+			this.clearing = true;
+
+			try {
+				while (sweeps < 40 && (dm = this.inDanger(dangerR))) {
+					this._dangerCache = null;
+
+					if (!ClassAttack.doAttack(dm, sweeps % 15 === 0)) {
+						break;
+					}
+
+					sweeps += 1;
+
+					if (dm.mode === 0 || dm.mode === 12 || Config.FastPick === 2) {
+						Pickit.fastPick();
+					}
+				}
+			} finally {
+				this.clearing = false;
+			}
+		}
 
 		if (attackCount > 0 && pickit) {
 			Pickit.pickItems();
@@ -631,101 +800,114 @@ var Attack = {
 			sortFunc = this.sortMonsters;
 		}
 
-		while (monsterList.length > 0 && attackCount < 300) {
-			if (refresh && attackCount > 0 && attackCount % refresh === 0) {
-				monsterList = mainArg.call();
-			}
+		this.clearing = true;
+		this._dangerCache = null;
 
-			if (me.dead) {
-				return false;
-			}
-
-			monsterList.sort(sortFunc);
-
-			target = copyUnit(monsterList[0]);
-
-			if (target.x !== undefined && this.checkMonster(target)) {
-				if (Config.Dodge && me.hp * 100 / me.hpmax <= Config.DodgeHP) {
-					this.deploy(target, Config.DodgeRange, 5, 9);
+		try {
+			while (monsterList.length > 0 && attackCount < 300) {
+				if (refresh && attackCount > 0 && attackCount % refresh === 0) {
+					monsterList = mainArg.call();
 				}
 
-				Misc.townCheck(true);
-				//me.overhead("attacking " + target.name + " spectype " + target.spectype + " id " + target.classid);
+				if (me.dead) {
+					return false;
+				}
 
-				result = ClassAttack.doAttack(target, attackCount % 15 === 0);
+				for (i = 0; i < monsterList.length; i += 1) {
+					if (monsterList[i].x !== undefined) {
+						monsterList[i].distMe = getDistance(me, monsterList[i]);
+					}
+				}
 
-				if (result) {
-					retry = 0;
+				monsterList.sort(sortFunc);
 
-					for (i = 0; i < gidAttack.length; i += 1) {
-						if (gidAttack[i].gid === target.gid) {
+				target = copyUnit(monsterList[0]);
+
+				if (target.x !== undefined && this.checkMonster(target)) {
+					if (Config.Dodge && me.hp * 100 / me.hpmax <= Config.DodgeHP) {
+						this.deploy(target, Config.DodgeRange, 5, 9);
+					}
+
+					Misc.townCheck(true);
+					//me.overhead("attacking " + target.name + " spectype " + target.spectype + " id " + target.classid);
+
+					result = ClassAttack.doAttack(target, attackCount % 15 === 0);
+
+					if (result) {
+						retry = 0;
+
+						for (i = 0; i < gidAttack.length; i += 1) {
+							if (gidAttack[i].gid === target.gid) {
+								break;
+							}
+						}
+
+						if (i === gidAttack.length) {
+							gidAttack.push({gid: target.gid, attacks: 0});
+						}
+
+						gidAttack[i].attacks += 1;
+
+						// Desync/bad position handler
+						switch (Config.AttackSkill[(target.spectype & 0x7) ? 1 : 3]) {
+						case 112:
+							// Tele in random direction with Blessed Hammer
+							if (gidAttack[i].attacks > 0 && gidAttack[i].attacks % ((target.spectype & 0x7) ? 5 : 15) === 0) {
+								coord = CollMap.getRandCoordinate(me.x, -1, 1, me.y, -1, 1, 4);
+								Pather.moveTo(coord.x, coord.y);
+							}
+
+							break;
+						default:
+							// Flash with melee skills
+							if (gidAttack[i].attacks > 0 && gidAttack[i].attacks % ((target.spectype & 0x7) ? 5 : 15) === 0 && Skill.getRange(Config.AttackSkill[(target.spectype & 0x7) ? 1 : 3]) < 4) {
+								Packet.flash(me.gid);
+							}
+
 							break;
 						}
-					}
 
-					if (i === gidAttack.length) {
-						gidAttack.push({gid: target.gid, attacks: 0});
-					}
-
-					gidAttack[i].attacks += 1;
-
-					// Desync/bad position handler
-					switch (Config.AttackSkill[(target.spectype & 0x7) ? 1 : 3]) {
-					case 112:
-						// Tele in random direction with Blessed Hammer
-						if (gidAttack[i].attacks > 0 && gidAttack[i].attacks % ((target.spectype & 0x7) ? 5 : 15) === 0) {
-							coord = CollMap.getRandCoordinate(me.x, -1, 1, me.y, -1, 1, 4);
-							Pather.moveTo(coord.x, coord.y);
+						// Skip non-unique monsters after 15 attacks, except in Throne of Destruction
+						if (me.area !== 131 && !(target.spectype & 0x7) && gidAttack[i].attacks > 15) {
+							print("ÿc1Skipping " + target.name + " " + target.gid + " " + gidAttack[i].attacks);
+							monsterList.shift();
 						}
 
-						break;
-					default:
-						// Flash with melee skills
-						if (gidAttack[i].attacks > 0 && gidAttack[i].attacks % ((target.spectype & 0x7) ? 5 : 15) === 0 && Skill.getRange(Config.AttackSkill[(target.spectype & 0x7) ? 1 : 3]) < 4) {
-							Packet.flash(me.gid);
+						attackCount += 1;
+
+						if (target.mode === 0 || target.mode === 12 || Config.FastPick === 2) {
+							Pickit.fastPick();
+						}
+					} else {
+						if (retry++ > 3) {
+							monsterList.shift();
+							retry = 0;
 						}
 
-						break;
-					}
-
-					// Skip non-unique monsters after 15 attacks, except in Throne of Destruction
-					if (me.area !== 131 && !(target.spectype & 0x7) && gidAttack[i].attacks > 15) {
-						print("ÿc1Skipping " + target.name + " " + target.gid + " " + gidAttack[i].attacks);
-						monsterList.shift();
-					}
-
-					attackCount += 1;
-
-					if (target.mode === 0 || target.mode === 12 || Config.FastPick === 2) {
-						Pickit.fastPick();
+						Packet.flash(me.gid);
 					}
 				} else {
-					if (retry++ > 3) {
+					// Shaman / high-scariness: try walk-in a few times, then drop (never rotate forever)
+					if (target.x !== undefined && this.getScarinessLevel(target) > 7 && this.checkMonster(target) &&
+							getDistance(me, target) <= 55 && retry < 5) {
+						Pather.moveToUnit(target);
+						retry += 1;
+						monsterList.push(monsterList.shift());
+					} else {
 						monsterList.shift();
 						retry = 0;
 					}
-
-					Packet.flash(me.gid);
-				}
-			} else {
-				// Shaman / high-scariness: try walk-in a few times, then drop (never rotate forever)
-				if (target.x !== undefined && this.getScarinessLevel(target) > 7 && this.checkMonster(target) &&
-						getDistance(me, target) <= 55 && retry < 5) {
-					Pather.moveToUnit(target);
-					retry += 1;
-					monsterList.push(monsterList.shift());
-				} else {
-					monsterList.shift();
-					retry = 0;
 				}
 			}
-		}
 
-		ClassAttack.afterAttack(true);
-		this.openChests(30);
+			ClassAttack.afterAttack(true);
+			this.openChests(30);
 
-		if (attackCount > 0) {
-			Pickit.pickItems();
+			if (attackCount > 0) {
+				Pickit.pickItems();
+			}
+		} finally {
+			this.clearing = false;
 		}
 
 		return true;
@@ -754,7 +936,7 @@ var Attack = {
 				do {
 					if (getDistance(monster, x, y) <= range && this.checkMonster(monster) && this.canAttack(monster) &&
 							(!skipBlocked || !checkCollision(me, monster, skipBlocked)) &&
-							((me.classid === 1 && me.getSkill(54, 1)) || me.getStat(97, 54) || !checkCollision(me, monster, 0x1))) {
+							((Pather.teleSkill() > 0) || !checkCollision(me, monster, 0x1))) {
 						monList.push(copyUnit(monster));
 					}
 				} while (monster.getNext());
@@ -926,9 +1108,32 @@ var Attack = {
 
 	// Sort monsters based on distance, spectype and classId (summoners are attacked first)
 	sortMonsters: function (unitA, unitB) {
+		var distA = unitA.distMe !== undefined ? unitA.distMe : getDistance(me, unitA),
+			distB = unitB.distMe !== undefined ? unitB.distMe : getDistance(me, unitB),
+			dangerR = Attack.dangerRange(),
+			aAdj, bAdj;
+
+		// Melee-danger: peel whatever is already hitting us before chasing shamans/bosses
+		if (dangerR > 0) {
+			aAdj = distA <= dangerR;
+			bAdj = distB <= dangerR;
+
+			if (aAdj && !bAdj) {
+				return -1;
+			}
+
+			if (bAdj && !aAdj) {
+				return 1;
+			}
+
+			if (aAdj && bAdj) {
+				return distA - distB;
+			}
+		}
+
 		// No special sorting for were-form
 		if (Config.Wereform) {
-			return getDistance(me, unitA) - getDistance(me, unitB);
+			return distA - distB;
 		}
 
 		// Barb optimization
@@ -950,8 +1155,8 @@ var Attack = {
 		focusRange = 40;
 		aShaman = ids.indexOf(unitA.classid) > -1;
 		bShaman = ids.indexOf(unitB.classid) > -1;
-		aNear = getDistance(me, unitA) <= focusRange;
-		bNear = getDistance(me, unitB) <= focusRange;
+		aNear = distA <= focusRange;
+		bNear = distB <= focusRange;
 
 		if (aShaman && aNear && !(bShaman && bNear)) {
 			return -1;
@@ -971,13 +1176,13 @@ var Attack = {
 				return 1;
 			}
 
-			return getDistance(me, unitA) - getDistance(me, unitB);
+			return distA - distB;
 		}
 
 		// Neither is a nearby shaman — normal boss / distance sort
 		if (Config.BossPriority) {
 			if ((unitA.spectype & 0x5) && (unitB.spectype & 0x5)) {
-				return getDistance(me, unitA) - getDistance(me, unitB);
+				return distA - distB;
 			}
 
 			if (unitA.spectype & 0x5) {
@@ -989,7 +1194,7 @@ var Attack = {
 			}
 		}
 
-		return getDistance(me, unitA) - getDistance(me, unitB);
+		return distA - distB;
 	},
 
 	// Check if a set of coords is valid/accessable
@@ -1611,6 +1816,20 @@ AuraLoop: // Skip monsters with auras
 
 		if (walk === true) {
 			walk = 1;
+		}
+
+		// Inside a clear: don't walk toward a far target while another mob is in our face
+		if (this.clearing) {
+			var dangerR = this.dangerRange(),
+				danger;
+
+			if (dangerR > 0 && getDistance(me, unit) > dangerR) {
+				danger = this.inDanger(dangerR);
+
+				if (danger && danger.gid !== unit.gid) {
+					return false;
+				}
+			}
 		}
 
 		if (distance < 4 && (!unit.hasOwnProperty("mode") || (unit.mode !== 0 && unit.mode !== 12))) {

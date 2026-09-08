@@ -345,7 +345,6 @@ var Town = {
 		me.cancel();
 		delay(150 + me.ping);
 
-		this.charmKeepList = null;
 		this.trimCharmInventory([]);
 		this.applyCharmInventoryLock();
 		this.organizeCharms(); // inv-only; never opens stash
@@ -439,6 +438,16 @@ var Town = {
 
 		Cubing.doCubing();
 
+		// PD2: junk magic/rare jewels + key → Jewel Fragments (after crafts get first dibs)
+		if (typeof Pd2Stack !== "undefined" && typeof Pd2Stack.cubeJunkJewelsAtStash === "function") {
+			if (Pd2Stack.needsCubeJunkJewels && Pd2Stack.needsCubeJunkJewels()) {
+				if (this.openStash()) {
+					Pd2Stack.cubeJunkJewelsAtStash();
+					me.cancel();
+				}
+			}
+		}
+
 		// PD2: merge leftover loose runes/gems AFTER make (never fold socketables mid-RW)
 		if (typeof Pd2Stack !== "undefined" && typeof Pd2Stack.stackLooseAtStash === "function") {
 			if (Pd2Stack.needsStacking && Pd2Stack.needsStacking()) {
@@ -453,10 +462,17 @@ var Town = {
 		Item.autoEquipMerc(true);
 
 		// --- 4) Repair if needed ---
-		print("ÿc2Townÿc0 :: chores step 4/4 — repair");
-		this.repair(repair);
-		me.cancel();
-		delay(100 + me.ping);
+		repairPreview = this.needRepair();
+
+		if ((repairPreview && repairPreview.length) || repair) {
+			print("ÿc2Townÿc0 :: chores step 4/4 — repair (" +
+				((repairPreview && repairPreview.length) ? repairPreview.join("+") : "force") + ")");
+			this.repair(repair);
+			me.cancel();
+			delay(100 + me.ping);
+		} else {
+			print("ÿc2Townÿc0 :: chores step 4/4 — repair skip");
+		}
 
 		// After NPC/cube repair: drop still-broken eth (CubeRepair path left them equipped) and swap
 		Item.autoEquip();
@@ -493,8 +509,7 @@ var Town = {
 		return true;
 	},
 
-	// PD2 charm itemTypes: 83 small / 84 large (cm2) / 85 grand (cm3). LoD was 82–84.
-	// Never use type 82 — that is thawing potion on PD2.
+	// Live PD2 charm itemTypes: 82 SC / 83 LC (cm2) / 84 GC (cm3). Prefer code cm1–cm3.
 	charmKeepList: null,
 	charmSellGids: null, // overflow after CharmCaps trim — not parked, sold
 
@@ -516,7 +531,7 @@ var Town = {
 			return true;
 		}
 
-		return item.itemType >= 83 && item.itemType <= 85;
+		return item.itemType >= 82 && item.itemType <= 85;
 	},
 
 	// Keep rules from leveling_charms.nip ONLY — ignore kolton charm lines (too loose for sell).
@@ -524,10 +539,12 @@ var Town = {
 	loadCharmKeepList: function () {
 		var i, nipfile, lines, line, info, filepath, raw;
 
-		if (this.charmKeepList) {
+		// Parse leveling_charms.nip once per game (it does not change mid-game)
+		if (this.charmKeepList && this._charmKeepGame === me.gamestarttime) {
 			return this.charmKeepList;
 		}
 
+		this._charmKeepGame = me.gamestarttime;
 		this.charmKeepList = [];
 		filepath = "pickit/auto/leveling_charms.nip";
 
@@ -839,10 +856,10 @@ var Town = {
 			return "unique";
 		}
 
-		// PD2: 83 SC, 84 LC, 85 GC (also classid 621-623)
-		if (item.itemType === 83 || item.classid === 621 || (item.code && String(item.code).toLowerCase() === "cm1")) {
+		// Live PD2: 82 SC, 83 LC, 84 GC (also classid 621-623 / code cm1-3)
+		if (item.itemType === 82 || item.classid === 621 || (item.code && String(item.code).toLowerCase() === "cm1")) {
 			size = "S";
-		} else if (item.itemType === 84 || item.classid === 622 || (item.code && String(item.code).toLowerCase() === "cm2")) {
+		} else if (item.itemType === 83 || item.classid === 622 || (item.code && String(item.code).toLowerCase() === "cm2")) {
 			size = "L";
 		} else {
 			size = "G";
@@ -1152,16 +1169,16 @@ var Town = {
 		code = item.code ? String(item.code).toLowerCase() : "";
 		name = item.name ? String(item.name).toLowerCase().replace(/ÿc[0-9a-z]/gi, "") : "";
 
-		// 1) Code first — never let classid override mp*/hp*/rv*
-		if (code.indexOf("hp") === 0) {
+		// Exact codes only — never prefix-match (Military Pick "mpi" was drunk as mana)
+		if (/^hp[1-5]$/.test(code)) {
 			return "hp";
 		}
 
-		if (code.indexOf("mp") === 0) {
+		if (/^mp[1-5]$/.test(code)) {
 			return "mp";
 		}
 
-		if (code.indexOf("rv") === 0) {
+		if (code === "rvs" || code === "rvl") {
 			return "rv";
 		}
 
@@ -1177,16 +1194,25 @@ var Town = {
 			return "wms"; // thawing — not stamina
 		}
 
-		// 2) Name (when code missing / garbage)
-		if (name.indexOf("mana") > -1) {
+		// 2) Name (when code missing / garbage) — skip weapon names
+		if (code && (code === "mpi" || code === "9mp" || code === "7mp")) {
+			return false;
+		}
+
+		if (name.indexOf("military pick") > -1 || name.indexOf("crowbill") > -1 ||
+				name.indexOf("war spike") > -1) {
+			return false;
+		}
+
+		if (name.indexOf("mana potion") > -1 || (name.indexOf("mana") > -1 && name.indexOf("potion") > -1)) {
 			return "mp";
 		}
 
-		if (name.indexOf("healing") > -1 || name.indexOf("health") > -1) {
+		if (name.indexOf("healing potion") > -1 || name.indexOf("healing") > -1 || name.indexOf("health potion") > -1) {
 			return "hp";
 		}
 
-		if (name.indexOf("rejuvenation") > -1 || name.indexOf("rejuv") > -1) {
+		if (name.indexOf("rejuvenation") > -1 || (name.indexOf("rejuv") > -1 && name.indexOf("potion") > -1)) {
 			return "rv";
 		}
 
@@ -2365,8 +2391,22 @@ var Town = {
 
 			// Always walk up if missing or too far — getUnit can see NPCs across town
 			if (!npc || getDistance(me, npc) > 5) {
-				this.move(this.tasks[me.act - 1][task]);
+				// Act5 Cain: seat differs LoD vs PD2 — path to the unit when we already see him
+				if (npc && getDistance(me, npc) > 5 && typeof Pather !== "undefined" &&
+						typeof Pather.moveToUnit === "function") {
+					Pather.moveToUnit(npc);
+				} else {
+					this.move(this.tasks[me.act - 1][task]);
+				}
+
 				npc = getUnit(1, this.tasks[me.act - 1][task]);
+
+				// Still far (wrong hardcoded seat) — walk to live unit
+				if (npc && getDistance(me, npc) > 5 && typeof Pather !== "undefined" &&
+						typeof Pather.moveToUnit === "function") {
+					Pather.moveToUnit(npc);
+					npc = getUnit(1, this.tasks[me.act - 1][task]);
+				}
 			}
 		}
 
@@ -3567,7 +3607,8 @@ var Town = {
 			if (result.result === 4 || result.result === 0 ||
 					(this.isCharmItem(list[i]) && list[i].getFlag(0x10) && !this.shouldParkCharm(list[i])) ||
 					(typeof Item.isMercInvLeftover === "function" && Item.isMercInvLeftover(list[i])) ||
-					((list[i].itemType === 5 || list[i].itemType === 6) && list[i].quality !== 6 && list[i].quality !== 7) ||
+					((list[i].itemType === 5 || list[i].itemType === 6) &&
+						!(typeof Item !== "undefined" && typeof Item.wantsAmmo === "function" && Item.wantsAmmo(list[i]))) ||
 					list[i].itemType === 80 || list[i].itemType === 81) {
 				if (!Item.autoEquipCheck(list[i])) {
 					return true;
@@ -3664,8 +3705,9 @@ MainLoop:
 					continue;
 				}
 
-				// Arrows/bolts always sell if still in inv (except rare/unique)
-				if ((item.itemType === 5 || item.itemType === 6) && item.quality !== 6 && item.quality !== 7) {
+				// Arrows/bolts always sell if still in inv and nobody needs them (incl. PD2 rares)
+				if ((item.itemType === 5 || item.itemType === 6) &&
+						!(typeof Item !== "undefined" && typeof Item.wantsAmmo === "function" && Item.wantsAmmo(item))) {
 					result.result = 0;
 				}
 
@@ -5212,7 +5254,7 @@ CursorLoop:
 	},
 
 	repair: function (force = false) {
-		var i, quiver, myQuiver, npc, repairAction, bowCheck;
+		var i, quiver, myQuiver, npc, repairAction, bowCheck, before, after, tries;
 
 		this.cubeRepair();
 
@@ -5229,13 +5271,35 @@ CursorLoop:
 		for (i = 0; i < repairAction.length; i += 1) {
 			switch (repairAction[i]) {
 			case "repair":
+				before = this.getItemsForRepair(Config.RepairPercent, true).length;
 				npc = this.initNPC("Repair", "repair");
 
 				if (!npc) {
+					print("ÿc1Townÿc0 :: repair — NPC unavailable");
 					return false;
 				}
 
-				me.repair();
+				// Ensure Trade/Repair shop is actually open (heal/talk leaves menu without shop)
+				if (!getUIFlag(0x0C) || (npc.itemcount || 0) < 1) {
+					if (!npc.startTrade("Repair")) {
+						print("ÿc1Townÿc0 :: repair — startTrade(Repair) failed");
+						return false;
+					}
+				}
+
+				for (tries = 0; tries < 3; tries += 1) {
+					me.repair();
+					delay(400 + me.ping);
+					after = this.getItemsForRepair(Config.RepairPercent, true).length;
+
+					if (after < before || after === 0) {
+						break;
+					}
+				}
+
+				print("ÿc2Townÿc0 :: repaired at " + (npc.name || "NPC") +
+					" (" + before + "→" + after + " item(s) needing repair)");
+
 				// Already at Repair for durability — piggyback RW-base MiniShop (Spirit/Stealth/Lore)
 				this.shopItems();
 
@@ -5276,15 +5340,12 @@ CursorLoop:
 			}
 		}
 
-		//this.shopItems();
-
 		return true;
 	},
 
 	needRepair: function () {
-		var quiver, bowCheck, quantity,
-			repairAction = [],
-			canAfford = me.gold >= me.getRepairCost();
+		var quiver, bowCheck, quantity, needItems, gold,
+			repairAction = [];
 
 		// Arrow/Bolt check
 		bowCheck = Attack.usingBow();
@@ -5312,13 +5373,22 @@ CursorLoop:
 			}
 		}
 
-		// Repair durability/quantity/charges
-		if (canAfford) {
-			if (this.getItemsForRepair(Config.RepairPercent, true).length > 0) {
-				repairAction.push("repair");
+		// Repair durability/quantity/charges — check need first, then gold
+		needItems = this.getItemsForRepair(Config.RepairPercent, true);
+
+		if (needItems.length > 0) {
+			gold = me.gold;
+
+			if (typeof me.getStat === "function") {
+				gold = Math.max(gold, (me.getStat(14) || 0) + (me.getStat(15) || 0));
 			}
-		} else {
-			print("ÿc4Town: ÿc1Can't afford repairs.");
+
+			if (gold >= me.getRepairCost()) {
+				repairAction.push("repair");
+			} else {
+				print("ÿc4Townÿc0 :: Can't afford repairs (need " + me.getRepairCost() +
+					", have " + gold + ", " + needItems.length + " item(s))");
+			}
 		}
 
 		return repairAction;
@@ -5544,6 +5614,12 @@ MainLoop:
 			return false;
 		}
 
+		// Malah's Potion (ice), Scroll of Resistance, Book of Skill, Potion of Life — field/use from inv
+		if (typeof QuestItems !== "undefined" && typeof QuestItems.mustKeepInInventory === "function" &&
+				QuestItems.mustKeepInInventory(item)) {
+			return false;
+		}
+
 		if (this.ignoredItemTypes.indexOf(item.itemType) > -1 || ignoredClassids.indexOf(item.classid) > -1 || !Storage.Stash.CanFit(item)) {
 			return false;
 		}
@@ -5689,6 +5765,12 @@ MainLoop:
 		// Never bank unid magic/rare jewelry — ID first
 		if (!item.getFlag(0x10) && (item.itemType === 10 || item.itemType === 12) &&
 				(item.quality === 4 || item.quality === 6)) {
+			return false;
+		}
+
+		// PD2: leave junk jewels in inv for cubeJunkJewelsAtStash (→ jewf)
+		if (typeof Pickit !== "undefined" && typeof Pickit.isJunkJewel === "function" &&
+				Pickit.isJunkJewel(item)) {
 			return false;
 		}
 
@@ -6119,6 +6201,23 @@ MainLoop:
 		code = item.code ? String(item.code).toLowerCase() : "";
 		kind = (typeof this.potionKind === "function") ? this.potionKind(item) : false;
 
+		// Cain lore Horadric Scroll (tr1) — can't keep; vendors often reject quest lore → drop
+		if ((typeof QuestItems !== "undefined" && typeof QuestItems.isHoradricScroll === "function" &&
+				QuestItems.isHoradricScroll(item)) || code === "tr1") {
+			if (this.isShopOpen() || getUIFlag(0x08) || getUIFlag(0x0C)) {
+				me.cancel();
+				delay(80 + me.ping);
+			}
+
+			try {
+				print("ÿc2Townÿc0 :: drop Horadric Scroll (lore junk, not Lam Esen)");
+				Misc.itemLogger("Dropped", item);
+				item.drop();
+			} catch (eDropTr1) {}
+
+			return true;
+		}
+
 		// Never sell/drop hp/mp/rv/stamina — potionKind first (PD2 type/code can disagree)
 		if (kind === "hp" || kind === "mp" || kind === "rv" || kind === "vps") {
 			return false;
@@ -6163,7 +6262,7 @@ MainLoop:
 		if (code === "isc" && (me.getQuest(4, 0) || me.getQuest(4, 1) || me.act >= 2)) {
 			// fall through to sell below
 		} else if ([76, 77, 78, 79].indexOf(item.itemType) > -1 ||
-				code.indexOf("hp") === 0 || code.indexOf("mp") === 0 || code.indexOf("rv") === 0 ||
+				/^hp[1-5]$/.test(code) || /^mp[1-5]$/.test(code) || code === "rvs" || code === "rvl" ||
 				code === "vps" ||
 				code === "tsc" || code === "isc" || code === "tbk" || code === "ibk" ||
 				item.itemType === 18 || item.itemType === 22) {
@@ -6227,6 +6326,16 @@ MainLoop:
 			return true;
 		}
 
+		// Cain lore Horadric Scroll (tr1) — drop junk; NOT Lam Esen (bbb) / Inifuss (bks)
+		if (typeof QuestItems !== "undefined" && typeof QuestItems.isHoradricScroll === "function" &&
+				QuestItems.isHoradricScroll(item)) {
+			return true;
+		}
+
+		if (item.code && String(item.code).toLowerCase() === "tr1") {
+			return true;
+		}
+
 		if ([18, 41, 76, 77, 78, 79].indexOf(item.itemType) > -1) {
 			return false;
 		}
@@ -6241,8 +6350,9 @@ MainLoop:
 			return false;
 		}
 
-		if (item.code && (item.code.indexOf("hp") === 0 || item.code.indexOf("mp") === 0 ||
-				item.code.indexOf("rv") === 0 || item.code === "vps" ||
+		if (item.code && (/^hp[1-5]$/.test(String(item.code).toLowerCase()) ||
+				/^mp[1-5]$/.test(String(item.code).toLowerCase()) ||
+				item.code === "rvs" || item.code === "rvl" || item.code === "vps" ||
 				item.code === "tsc" || item.code === "tbk" || item.code === "ibk")) {
 			return false;
 		}
@@ -6397,9 +6507,17 @@ MainLoop:
 			return !this.isKeptCharm(item);
 		}
 
-		// Arrows/bolts: sell whites/magic leftovers; keep rare/unique (merc upgrades kept above)
+		// Arrows/bolts: sell leftovers (incl. PD2 rare quivers) unless merc/player needs them
 		if (item.itemType === 5 || item.itemType === 6) {
-			return item.quality !== 6 && item.quality !== 7;
+			if (item.location === 1) {
+				return false; // equipped on player
+			}
+
+			if (typeof Item !== "undefined" && typeof Item.wantsAmmo === "function" && Item.wantsAmmo(item)) {
+				return false;
+			}
+
+			return true;
 		}
 
 		result = Pickit.checkItem(item).result;
@@ -6528,8 +6646,6 @@ MainLoop:
 		this.flushToxPots();
 
 		// Collect junk, then sell (reuse open shop when keepShopOpen)
-		this.charmKeepList = null;
-
 		if (!keepShopOpen) {
 			this.identifyAllCharms(true);
 		}
@@ -6603,7 +6719,10 @@ MainLoop:
 				}
 
 				if (keep) {
-					print("ÿc2Townÿc0 :: keep charm " + code + " type=" + item.itemType + " @ " + item.x + "," + item.y);
+					if (Config.RunewordDebug) {
+						print("ÿc2Townÿc0 :: keep charm " + code + " type=" + item.itemType + " @ " + item.x + "," + item.y);
+					}
+
 					continue;
 				}
 
@@ -6681,11 +6800,7 @@ MainLoop:
 		if (item) {
 			do {
 				if (item.location === 3 && (item.itemType === 5 || item.itemType === 6) && !seen[item.gid]) {
-					// Keep rare/unique quivers
-					if (item.quality === 6 || item.quality === 7) {
-						continue;
-					}
-
+					// PD2: rare/unique quivers are still ammo — flush unless wantsAmmo keeps them
 					gids.push(item.gid);
 					seen[item.gid] = true;
 				}
@@ -6700,16 +6815,23 @@ MainLoop:
 				continue;
 			}
 
-			if (typeof Item.mercNeedsAmmo === "function" && Item.mercNeedsAmmo(item)) {
-				Item.equipMerc(item, 5);
-				item = me.getItem(-1, -1, gid);
+			if (typeof Item.wantsAmmo === "function" && Item.wantsAmmo(item)) {
+				if (typeof Item.mercNeedsAmmo === "function" && Item.mercNeedsAmmo(item)) {
+					Item.equipMerc(item, 5);
+					item = me.getItem(-1, -1, gid);
 
-				if (!item || item.location !== 3) {
-					continue; // equipped onto merc
+					if (!item || item.location !== 3) {
+						continue; // equipped onto merc
+					}
+
+					// Still needed but equip failed this pass — keep for next autoEquipMerc
+					if (typeof Item.autoEquipMercCheck === "function" && Item.autoEquipMercCheck(item)) {
+						continue;
+					}
 				}
 
-				// Still needed but equip failed this pass — keep for next autoEquipMerc
-				if (typeof Item.autoEquipMercCheck === "function" && Item.autoEquipMercCheck(item)) {
+				// Player bow/xbow ammo — keep in inv (Town.needRepair restocks whites; rares OK while shooting)
+				if (typeof Item.playerNeedsAmmo === "function" && Item.playerNeedsAmmo(item)) {
 					continue;
 				}
 			}
@@ -6796,12 +6918,20 @@ MainLoop:
 
 			break;
 		case 5:
+			var cainA5 = getUnit(1, NPC.Cain);
+
 			this.act[4].spot = {};
 			this.act[4].spot.portalspot = [5098, 5019];
 			this.act[4].spot.stash = [5129, 5061];
 			this.act[4].spot[NPC.Larzuk] = [5141, 5045];
 			this.act[4].spot[NPC.Malah] = [5078, 5029];
-			this.act[4].spot[NPC.Cain] = [5119, 5061];
+			// Act5 Cain seat differs: LoD Bnet near stash/WP; PD2/SP near Qual-Kehk.
+			// Prefer live unit; else try Qual-side first (PD2), then stash-side (LoD).
+			if (cainA5) {
+				this.act[4].spot[NPC.Cain] = [cainA5.x, cainA5.y];
+			} else {
+				this.act[4].spot[NPC.Cain] = [5068, 5086, 5119, 5061];
+			}
 			this.act[4].spot[NPC.Qual_Kehk] = [5066, 5083];
 			this.act[4].spot[NPC.Anya] = [5112, 5120];
 			this.act[4].spot.portal = [5118, 5120];

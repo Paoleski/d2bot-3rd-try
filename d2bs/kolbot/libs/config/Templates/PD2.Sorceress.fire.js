@@ -350,7 +350,7 @@ function LoadConfig() {
 
 	// Repair settings
 	Config.CubeRepair = false; // Repair weapons with Ort and armor with Ral rune. Don't use it if you don't understand the risk of losing items.
-	Config.RepairPercent = 0; // Only repair when an item is broken (0 durability).
+	Config.RepairPercent = 40; // Repair when equipped durability/charges ≤ this %
 
 	// Gambling config
 	Config.Gamble = false;
@@ -534,6 +534,12 @@ function LoadConfig() {
 	Config.DodgeHP = 100; // Dodge only if HP percent is less than or equal to Config.DodgeHP. 100 = always dodge.
 	Config.BossPriority = false; // Set to true to attack Unique/SuperUnique monsters first when clearing
 	Config.ClearType = 0; // 0 = all monsters (0xF skips normals — bad for leveling clears)
+	Config.DangerClear = { // peel melee-range mobs before walking on
+		Range: 8,
+		ClearRange: 12,
+		PollMs: 250,
+		WhileTeleporting: false
+	};
 	Config.TeleStomp = false; // Use merc to attack bosses if they're immune to attacks, but not to physical damage
 
 	// Wereform setup. Make sure you read Templates/Attacks.txt for attack skill format.

@@ -350,7 +350,7 @@ function LoadConfig() {
 
 	// Repair settings
 	Config.CubeRepair = false; // Repair weapons with Ort and armor with Ral rune. Don't use it if you don't understand the risk of losing items.
-	Config.RepairPercent = 0; // Only repair when an item is broken (0 durability).
+	Config.RepairPercent = 40; // Repair when equipped durability/charges = this %
 
 	// Gambling config
 	Config.Gamble = false;

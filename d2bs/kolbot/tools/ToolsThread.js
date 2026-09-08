@@ -37,6 +37,7 @@ function main() {
 		quitFlag = false,
 		cloneWalked = false,
 		canQuit = true,
+		suppressChicken = false, // AutoSmurf boss fights (Baal/Ancients) broadcast this — Config edits made in their own script don't reach this thread
 		timerLastDrink = [],
 		rejuvMisses = 0,
 		rejuvGaveUp = false,
@@ -178,13 +179,9 @@ function main() {
 				return false;
 			}
 
-			// Fallback: code first — never let classid override mp*/hp* (PD2: mp1 can report id=607)
+			// Fallback: exact potion codes only (never "mpi" Military Pick as mana)
 			if (pottype === 76) {
-				if (code.indexOf("mp") === 0 || code.indexOf("rv") === 0) {
-					return false;
-				}
-
-				if (code.indexOf("hp") === 0) {
+				if (/^hp[1-5]$/.test(code)) {
 					return true;
 				}
 
@@ -192,11 +189,7 @@ function main() {
 			}
 
 			if (pottype === 77) {
-				if (code.indexOf("hp") === 0 || code.indexOf("rv") === 0) {
-					return false;
-				}
-
-				if (code.indexOf("mp") === 0) {
+				if (/^mp[1-5]$/.test(code)) {
 					return true;
 				}
 
@@ -208,7 +201,7 @@ function main() {
 					return true;
 				}
 
-				if (code.indexOf("hp") === 0 || code.indexOf("mp") === 0 || code.indexOf("rv") === 0) {
+				if (/^hp[1-5]$/.test(code) || /^mp[1-5]$/.test(code) || code === "rvs" || code === "rvl") {
 					return false;
 				}
 
@@ -216,11 +209,11 @@ function main() {
 			}
 
 			if (pottype === 78) {
-				if (code.indexOf("hp") === 0 || code.indexOf("mp") === 0 || code === "vps" || code === "yps" || code === "wms") {
+				if (/^hp[1-5]$/.test(code) || /^mp[1-5]$/.test(code) || code === "vps" || code === "yps" || code === "wms") {
 					return false;
 				}
 
-				if (code === "rvs" || code === "rvl" || code.indexOf("rv") === 0) {
+				if (code === "rvs" || code === "rvl") {
 					return true;
 				}
 
@@ -234,7 +227,7 @@ function main() {
 					return true;
 				}
 
-				return item.itemType === 79 && (!code || code.indexOf("rv") === 0);
+				return item.itemType === 78 && (!code || code === "rvs" || code === "rvl");
 			}
 
 			return false;
@@ -1068,6 +1061,14 @@ function main() {
 			quitFlag = true;
 
 			break;
+		case "suppressChicken":
+			suppressChicken = true;
+
+			break;
+		case "resumeChicken":
+			suppressChicken = false;
+
+			break;
 		default:
 			try {
 				obj = JSON.parse(msg);
@@ -1177,7 +1178,7 @@ function main() {
 				}
 
 				// Give rejuv a tick to land before LifeChicken on the same low-HP frame
-				if (Config.LifeChicken > 0 && me.hp <= Math.floor(me.hpmax * Config.LifeChicken / 100)) {
+				if (!suppressChicken && Config.LifeChicken > 0 && me.hp <= Math.floor(me.hpmax * Config.LifeChicken / 100)) {
 					if (Config.UseRejuvHP > 0 && !rejuvGaveUp) {
 						this.drinkPotion(2);
 						delay(80 + Math.min(me.ping, 200));
@@ -1212,7 +1213,7 @@ function main() {
 					}
 				}
 
-				if (Config.ManaChicken > 0 && me.mp <= Math.floor(me.mpmax * Config.ManaChicken / 100)) {
+				if (!suppressChicken && Config.ManaChicken > 0 && me.mp <= Math.floor(me.mpmax * Config.ManaChicken / 100)) {
 					D2Bot.printToConsole("Mana Chicken: (" + me.mp + "/" + me.mpmax + ") in " + Pather.getAreaName(me.area), 9);
 					D2Bot.updateChickens();
 					this.exit();
@@ -1241,7 +1242,7 @@ function main() {
 					merc = me.getMerc();
 
 					if (mercHP > 0 && merc && merc.mode !== 12) {
-						if (mercHP < Config.MercChicken) {
+						if (!suppressChicken && mercHP < Config.MercChicken) {
 							D2Bot.printToConsole("Merc Chicken in " + Pather.getAreaName(me.area), 9);
 							D2Bot.updateChickens();
 							this.exit();
@@ -1299,8 +1300,8 @@ function main() {
 			DataFile.updateStats("debugInfo", JSON.stringify(debugInfo));
 		}
 
-		// One-shot Tal/Eth unstack test (data/pd2_force_unstack.txt) — every ~2s
-		if (me.gameReady && me.inTown && typeof Pd2Stack !== "undefined" &&
+		// One-shot Tal/Eth unstack test (data/pd2_force_unstack.txt) — lab only, every ~5s
+		if (Config.RunewordDebug && me.gameReady && me.inTown && typeof Pd2Stack !== "undefined" &&
 				typeof Pd2Stack.runForceUnstackTest === "function") {
 			if (!this._pd2UnstackTick || getTickCount() - this._pd2UnstackTick > 5000) {
 				this._pd2UnstackTick = getTickCount();

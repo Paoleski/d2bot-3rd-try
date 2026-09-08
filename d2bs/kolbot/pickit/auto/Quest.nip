@@ -1,6 +1,7 @@
 // PD2 quest items — use 3-letter codes (classids shift vs LoD; see QuestItems.js)
 // hdm=89 hfh=90 bks=541 bkd=542 vip=538 box=566 ass=569 xyz=562 j34=563 g34=564
 // bbb=565 mss=568 qey=570 qhr=571 qbr=572 qf1=173 qf2=174 g33=87 ice=662 tr2=664
+// NEVER pick tr1 (Horadric Scroll lore junk) — that is NOT Lam Esen's Tome (bbb)
 
 [Name] == g34
 [Name] == box

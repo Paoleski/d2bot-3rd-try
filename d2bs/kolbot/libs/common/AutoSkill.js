@@ -77,8 +77,8 @@ var AutoSkill = new function () {
 		case 369: // Ice Barrage
 			reqLvl = 30;
 			break;
-		case 367: // Blood Warp (PD2 custom — bin reqlevel often wrong)
-			reqLvl = 18;
+		case 367: // Blood Warp (PD2 — req 24 since S5; bin often wrong)
+			reqLvl = 24;
 			break;
 		case 73: // Poison Strike (PD2; was Poison Dagger)
 			reqLvl = 6;

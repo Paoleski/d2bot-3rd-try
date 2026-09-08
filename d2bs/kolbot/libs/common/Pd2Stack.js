@@ -1,6 +1,6 @@
 /**
 *	@filename	Pd2Stack.js
-*	@desc		PD2 rune/perfect-gem/WSS stack + flawless→perfect (3 singles + key cube)
+*	@desc		PD2 rune/perfect-gem/WSS/jewf stack + flawless→perfect + junk jewel→fragments
 */
 
 var Pd2Stack = {
@@ -10,11 +10,12 @@ var Pd2Stack = {
 
 	// Lab watch pause (Config.RunewordWatchDelay) so you can see separate/clear+/socket
 	watchPause: function (tag) {
-		var ms = 500;
+		var ms = 0;
 
+		// Lab only: no pause unless RunewordDebug is on and a delay is configured
 		try {
-			if (typeof Config !== "undefined" && Config.RunewordWatchDelay !== undefined) {
-				ms = Config.RunewordWatchDelay;
+			if (typeof Config !== "undefined" && Config.RunewordDebug) {
+				ms = Config.RunewordWatchDelay || 0;
 			}
 		} catch (e0) {}
 
@@ -29,10 +30,16 @@ var Pd2Stack = {
 		delay(ms);
 	},
 
-	// Console + file (plain text, no color codes) — open logs/pd2stack.log in an editor
+	// File always (plain text, no color codes) — open logs/pd2stack.log in an editor.
+	// Console only for fail (ÿc1) / result (ÿc2) lines, or everything when Config.RunewordDebug —
+	// every print also costs ConsoleLog file I/O.
 	log: function (msg) {
-		var clean, line;
-		print(msg);
+		var clean, line, s = String(msg);
+
+		if ((typeof Config !== "undefined" && Config.RunewordDebug) ||
+				s.indexOf("ÿc1") > -1 || s.indexOf("ÿc2") > -1) {
+			print(msg);
+		}
 
 		try {
 			clean = String(msg).replace(/ÿc[0-9a-z]/gi, "");
@@ -151,10 +158,13 @@ var Pd2Stack = {
 			return Pickit.isRuneItem(unit);
 		}
 
+		// Never type 75 alone — that's also circlets (ci0–ci3)
 		return !!(unit && (
+			(unit.code && /^r\d{2}s?$/i.test(String(unit.code))) ||
+			(unit.code && /^r\d{2}g$/i.test(String(unit.code))) ||
 			(unit.classid >= 628 && unit.classid <= 660) ||
 			(unit.classid >= 702 && unit.classid <= 734) ||
-			[74, 75, 137, 138, 149].indexOf(unit.itemType) > -1 ||
+			[74, 137, 138, 149].indexOf(unit.itemType) > -1 ||
 			(unit.itemType >= 164 && unit.itemType <= 196)
 		));
 	},
@@ -354,6 +364,8 @@ var Pd2Stack = {
 
 	// Worldstone Shard (PD2) — QTY-stackable misc; not corrupted WSS
 	WSS_MAX_STACK: 50,
+	// Jewel Fragments (PD2) — stack to 50; from junk jewel + key cube
+	JEWF_MAX_STACK: 50,
 
 	isWssItem: function (unit) {
 		var code, name, cid;
@@ -389,10 +401,44 @@ var Pd2Stack = {
 		return false;
 	},
 
-	// 0 = no known cap (runes/gems). WSS fills to WSS_MAX_STACK then a new pile.
+	isJewfItem: function (unit) {
+		var code, cid, name;
+
+		if (!unit) {
+			return false;
+		}
+
+		code = unit.code ? String(unit.code).toLowerCase() : "";
+
+		if (code === "jewf") {
+			return true;
+		}
+
+		if (unit.itemType === 204) {
+			return true;
+		}
+
+		cid = unit.classid;
+
+		if (cid === 767 || (typeof NTIPAliasClassID !== "undefined" &&
+				((NTIPAliasClassID.jewf && cid === NTIPAliasClassID.jewf) ||
+				(NTIPAliasClassID.fragments && cid === NTIPAliasClassID.fragments)))) {
+			return true;
+		}
+
+		name = unit.name ? String(unit.name).toLowerCase().replace(/ÿc[0-9a-z]/gi, "") : "";
+
+		return name.indexOf("jewel fragment") > -1;
+	},
+
+	// 0 = no known cap (runes/gems). WSS/jewf fill to max then a new pile.
 	maxStackQty: function (unit) {
 		if (this.isWssItem(unit)) {
 			return this.WSS_MAX_STACK;
+		}
+
+		if (this.isJewfItem(unit)) {
+			return this.JEWF_MAX_STACK;
 		}
 
 		return 0;
@@ -447,7 +493,7 @@ var Pd2Stack = {
 		return best;
 	},
 
-	// Runes + perfect gems + WSS (flawless go through promoteFlawless, not stash merge)
+	// Runes + perfect gems + WSS + jewf (flawless go through promoteFlawless, not stash merge)
 	isStackableItem: function (unit) {
 		var t, code;
 
@@ -458,6 +504,7 @@ var Pd2Stack = {
 		t = unit.itemType;
 		code = unit.code ? String(unit.code).toLowerCase() : "";
 
+		// Socketable jewels (not fragments — type 204)
 		if ([58, 59, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86].indexOf(t) > -1) {
 			return false;
 		}
@@ -466,7 +513,12 @@ var Pd2Stack = {
 			return false;
 		}
 
-		return this.isRuneItem(unit) || this.isPerfectGem(unit) || this.isWssItem(unit);
+		if (code === "jew") {
+			return false;
+		}
+
+		return this.isRuneItem(unit) || this.isPerfectGem(unit) || this.isWssItem(unit) ||
+			this.isJewfItem(unit);
 	},
 
 	// PD2 "plus" / stack-form marker in the item name (after Ctrl+Shift peel the + goes away)
@@ -3238,6 +3290,10 @@ var Pd2Stack = {
 			return "wss";
 		}
 
+		if (this.isJewfItem(item)) {
+			return "jewf";
+		}
+
 		return "";
 	},
 
@@ -3730,12 +3786,107 @@ var Pd2Stack = {
 	},
 
 	/**
-	 * Cube flawless → perfect. Prefer existing stack pile + key (PD2 recipe).
-	 * Else 3 loose singles + key. Never stash-merge flawless.
+	 * PD2 flawless → perfect — implemented below (dump all of type + key, transmute loop).
+	 * listFlawlessOfKey / cube helpers sit first so promote can call them.
+	 */
+	listFlawlessOfKey: function (wantKey) {
+		var list, i, out = [];
+
+		list = this.listFlawless();
+
+		for (i = 0; i < list.length; i += 1) {
+			if (this.flawlessKey(list[i]) === wantKey) {
+				out.push(list[i]);
+			}
+		}
+
+		return out;
+	},
+
+	// Flawless qty currently sitting in the Horadric Cube (loc 6)
+	flawlessQtyInCube: function (familyKey) {
+		var items, i, total = 0;
+
+		items = me.findItems(-1, -1, 6);
+
+		if (!items) {
+			return 0;
+		}
+
+		for (i = 0; i < items.length; i += 1) {
+			if (this.isFlawlessGem(items[i]) && this.flawlessKey(items[i]) === familyKey) {
+				total += this.effectiveQty(items[i]);
+			}
+		}
+
+		return total;
+	},
+
+	findKeyInCube: function () {
+		var items, i, code;
+
+		items = me.findItems(-1, -1, 6);
+
+		if (!items) {
+			return false;
+		}
+
+		for (i = 0; i < items.length; i += 1) {
+			code = items[i].code ? String(items[i].code).toLowerCase() : "";
+
+			if (items[i].classid === 560 || code === "key") {
+				return copyUnit(items[i]);
+			}
+		}
+
+		return false;
+	},
+
+	// Dump every inv/stash flawless of this family into the cube (piles first). Cube = 12 cells.
+	moveAllFlawlessToCube: function (familyKey) {
+		var gems, i, gem, moved = 0, qty = 0, piles = [], singles = [];
+
+		gems = this.listFlawlessOfKey(familyKey);
+
+		for (i = 0; i < gems.length; i += 1) {
+			if (this.isFlawlessPile(gems[i])) {
+				piles.push(gems[i]);
+			} else {
+				singles.push(gems[i]);
+			}
+		}
+
+		// Piles first — one cell holds the whole stack (PD2 transmute eats 3 per click)
+		gems = piles.concat(singles);
+
+		for (i = 0; i < gems.length; i += 1) {
+			gem = me.getItem(-1, -1, gems[i].gid);
+
+			if (!gem || gem.location === 6 || this.isPerfectGem(gem)) {
+				continue;
+			}
+
+			if (!Storage.Cube.MoveTo(gem)) {
+				break;
+			}
+
+			moved += 1;
+			qty += this.effectiveQty(gem);
+			delay(40 + me.ping);
+		}
+
+		return {moved: moved, qty: qty};
+	},
+
+	/**
+	 * PD2 flawless → perfect: dump ALL of one gem type into the cube + key,
+	 * then transmute repeatedly (each click consumes 3 from the pile/stack).
+	 * Stash+cube stay open the whole time — never closeCube mid-loop (cancel
+	 * would close the stash and force a reopen).
 	 */
 	promoteFlawlessAtStash: function () {
-		var list, seen, families, i, j, key, keyItem, cube, made, qty, gems, gem, pile, moved, usedPile,
-			qtyBefore, qtyAfter, passes;
+		var list, seen, families, i, key, keyItem, cube, made, qtyBefore,
+			cubeQty, dump, pass, openedCube = false, familyMade, lastCubeQty;
 
 		if (typeof Config !== "undefined" && Config.Pd2PromoteFlawless === false) {
 			return false;
@@ -3754,6 +3905,7 @@ var Pd2Stack = {
 			return false;
 		}
 
+		// Caller (doStashVisit) already opened stash — only open if somehow closed
 		if (typeof Town !== "undefined" && !getUIFlag(0x19) && !Town.openStash()) {
 			this.log("ÿc1Pd2Stackÿc0 :: promoteFlawless — stash closed");
 			return false;
@@ -3781,154 +3933,322 @@ var Pd2Stack = {
 			return false;
 		}
 
+		if (!Cubing.emptyCube()) {
+			this.log("ÿc1Pd2Stackÿc0 :: promoteFlawless — emptyCube failed");
+			return false;
+		}
+
+		Cubing.cursorCheck();
+
+		if (!Cubing.openCube()) {
+			this.log("ÿc1Pd2Stackÿc0 :: promoteFlawless — openCube failed");
+			return false;
+		}
+
+		openedCube = true;
 		made = 0;
 
 		for (i = 0; i < families.length; i += 1) {
 			key = families[i];
-			passes = 0;
+			qtyBefore = this.flawlessTotalQty(key);
 
-			while (this.flawlessTotalQty(key) >= 3 && passes < 8) {
-				passes += 1;
-				qtyBefore = this.flawlessTotalQty(key);
-				keyItem = this.findPromoteKey();
+			if (qtyBefore < 3) {
+				continue;
+			}
 
-				if (!keyItem) {
-					this.log("ÿc8Pd2Stackÿc0 :: promoteFlawless — out of keys");
-					return made > 0;
-				}
+			keyItem = this.findPromoteKey();
 
-				qty = qtyBefore;
-				gems = this.listFlawlessOfKey(key);
-				pile = null;
-				usedPile = false;
+			if (!keyItem) {
+				this.log("ÿc8Pd2Stackÿc0 :: promoteFlawless — out of keys");
+				break;
+			}
 
-				// 1) Existing stack pile (qty≥3 or stack-form classid) + key
-				for (j = 0; j < gems.length; j += 1) {
-					gem = me.getItem(-1, -1, gems[j].gid);
+			// Clear previous family's leftovers/perfects without closing the UI
+			if (!Cubing.emptyCube()) {
+				this.log("ÿc1Pd2Stackÿc0 :: promoteFlawless — emptyCube failed mid");
+				break;
+			}
 
-					if (!gem) {
-						continue;
-					}
+			dump = this.moveAllFlawlessToCube(key);
 
-					if (this.isPerfectGem(gem)) {
-						continue;
-					}
+			if (dump.moved < 1 || this.flawlessQtyInCube(key) < 3) {
+				this.vlog("ÿc8Pd2Stackÿc0 :: promote skip " + key + " (cube qty < 3)");
+				Cubing.emptyCube();
+				continue;
+			}
 
-					if (this.isFlawlessPile(gem) && this.effectiveQty(gem) >= 3) {
-						pile = gem;
-						break;
-					}
+			keyItem = this.findPromoteKey();
 
-					// Stack-form even if qty stat misreads — trust family total when only one pile
-					if (this.isFlawlessPile(gem) && gems.length === 1 && qty >= 3) {
-						pile = gem;
-						break;
-					}
-				}
+			if (!keyItem || !Storage.Cube.MoveTo(keyItem)) {
+				this.log("ÿc1Pd2Stackÿc0 :: promoteFlawless — move key failed");
+				Cubing.emptyCube();
+				break;
+			}
 
-				if (!Cubing.emptyCube()) {
-					this.log("ÿc1Pd2Stackÿc0 :: promoteFlawless — emptyCube failed");
-					return made > 0;
-				}
+			this.log("ÿc4Pd2Stackÿc0 :: promoteFlawless " + key + " " + dump.moved +
+				" unit(s) ≈" + this.flawlessQtyInCube(key) + " + key → transmute until <3");
 
-				Cubing.cursorCheck();
+			familyMade = 0;
+			lastCubeQty = this.flawlessQtyInCube(key);
 
-				if (pile) {
-					this.log("ÿc4Pd2Stackÿc0 :: promoteFlawless " + key + " pile+key (qty≈" +
-						this.effectiveQty(pile) + " family=" + qty + ")");
+			for (pass = 0; pass < 40; pass += 1) {
+				cubeQty = this.flawlessQtyInCube(key);
 
-					if (!Storage.Cube.MoveTo(pile)) {
-						this.log("ÿc1Pd2Stackÿc0 :: promoteFlawless — move pile failed gid=" + pile.gid);
-						break;
-					}
-
-					usedPile = true;
-				} else {
-					this.log("ÿc4Pd2Stackÿc0 :: promoteFlawless " + key + " 3 singles + key (family=" + qty + ")");
-					moved = 0;
-
-					for (j = 0; j < gems.length && moved < 3; j += 1) {
-						gem = me.getItem(-1, -1, gems[j].gid);
-
-						if (!gem || this.isFlawlessPile(gem) || this.isPerfectGem(gem)) {
-							continue;
-						}
-
-						if (!Storage.Cube.MoveTo(gem)) {
-							this.log("ÿc1Pd2Stackÿc0 :: promoteFlawless — move gem failed");
-							break;
-						}
-
-						moved += 1;
-						delay(50 + me.ping);
-					}
-
-					if (moved < 3) {
-						this.vlog("ÿc8Pd2Stackÿc0 :: promote skip " + key + " (need 3)");
-						Cubing.emptyCube();
-						break;
-					}
-				}
-
-				keyItem = this.findPromoteKey();
-
-				if (!keyItem || !Storage.Cube.MoveTo(keyItem)) {
-					this.log("ÿc1Pd2Stackÿc0 :: promoteFlawless — move key failed");
-					Cubing.emptyCube();
+				if (cubeQty < 3) {
 					break;
 				}
 
-				if (!Cubing.openCube()) {
-					this.log("ÿc1Pd2Stackÿc0 :: promoteFlawless — openCube failed");
-					Cubing.emptyCube();
-					return made > 0;
+				if (!this.findKeyInCube()) {
+					keyItem = this.findPromoteKey();
+
+					if (!keyItem || !Storage.Cube.MoveTo(keyItem)) {
+						this.log("ÿc8Pd2Stackÿc0 :: promoteFlawless — out of keys mid " + key);
+						break;
+					}
+				}
+
+				// Keep cube UI open — openCube is a no-op if already up
+				if (!getUIFlag(0x1a) && !Cubing.openCube()) {
+					this.log("ÿc1Pd2Stackÿc0 :: promoteFlawless — cube UI lost");
+					break;
 				}
 
 				transmute();
-				delay(700 + me.ping);
-				Cubing.emptyCube();
-				Cubing.closeCube();
+				delay(500 + me.ping);
+				familyMade += 1;
+				made += 1;
 
-				if (typeof Town !== "undefined") {
-					Town.openStash();
-				}
+				cubeQty = this.flawlessQtyInCube(key);
 
-				delay(150 + me.ping);
-
-				qtyAfter = this.flawlessTotalQty(key);
-
-				if (qtyAfter >= qtyBefore) {
-					// Recipe did nothing (often already-perfect / wrong pile) — abort this family
+				if (cubeQty >= lastCubeQty) {
 					this.log("ÿc1Pd2Stackÿc0 :: promoteFlawless abort " + key +
-						" — no progress (still " + qtyAfter + ", was " + qtyBefore + ")");
+						" — no progress (cube still ≈" + cubeQty + ")");
 					break;
 				}
 
-				this.log("ÿc2Pd2Stackÿc0 :: promoted " + key + " → perfect(s)" +
-					(usedPile ? " via pile" : " via singles") +
-					" (" + qtyBefore + "→" + qtyAfter + ")");
-				made += 1;
+				lastCubeQty = cubeQty;
 			}
+
+			Cubing.emptyCube();
+
+			this.log("ÿc2Pd2Stackÿc0 :: promoted " + key + " (" + qtyBefore + "→" +
+				this.flawlessTotalQty(key) + " left, " + familyMade + " transmute(s))");
+		}
+
+		Cubing.emptyCube();
+
+		// Leave cube UI alone — do NOT Cubing.closeCube()/cancel here (that closes stash
+		// and forces Town.openStash again). doStashVisit me.cancel() once at the end.
+		if (openedCube && !getUIFlag(0x19) && typeof Town !== "undefined") {
+			Town.openStash();
 		}
 
 		if (made > 0) {
-			this.log("ÿc2Pd2Stackÿc0 :: promoteFlawless done (" + made + " recipe(s))");
+			this.log("ÿc2Pd2Stackÿc0 :: promoteFlawless done (" + made + " transmute(s))");
 		}
 
 		return made > 0;
 	},
 
-	listFlawlessOfKey: function (wantKey) {
-		var list, i, out = [];
+	// --- PD2 junk jewels + key → Jewel Fragments (1–15 jewels + key) ---
 
-		list = this.listFlawless();
+	listJunkJewels: function () {
+		var items, i, out = [];
 
-		for (i = 0; i < list.length; i += 1) {
-			if (this.flawlessKey(list[i]) === wantKey) {
-				out.push(list[i]);
+		items = me.findItems(-1, -1);
+
+		if (!items) {
+			return out;
+		}
+
+		for (i = 0; i < items.length; i += 1) {
+			if ((items[i].location === 3 || items[i].location === 7) &&
+					typeof Pickit !== "undefined" && typeof Pickit.isJunkJewel === "function" &&
+					Pickit.isJunkJewel(items[i])) {
+				out.push(copyUnit(items[i]));
 			}
 		}
 
 		return out;
+	},
+
+	needsCubeJunkJewels: function () {
+		if (typeof Config !== "undefined" && Config.Pd2CubeJunkJewels === false) {
+			return false;
+		}
+
+		if (!this.findPromoteKey()) {
+			return false;
+		}
+
+		return this.listJunkJewels().length > 0;
+	},
+
+	/**
+	 * Cube junk magic/rare jewels + key → Jewel Fragments (PD2).
+	 * Up to 15 jewels per transmute. Stash should be open.
+	 * Call after Cubing.doCubing so craft recipes get jewels first.
+	 */
+	cubeJunkJewelsAtStash: function () {
+		var jewels, keyItem, cube, made, batch, i, jew, moved, before, after, passes;
+
+		if (typeof Config !== "undefined" && Config.Pd2CubeJunkJewels === false) {
+			return false;
+		}
+
+		if (typeof Cubing === "undefined" || typeof Storage === "undefined") {
+			this.log("ÿc1Pd2Stackÿc0 :: cubeJunkJewels — Cubing/Storage missing");
+			return false;
+		}
+
+		if (typeof Pickit === "undefined" || typeof Pickit.isJunkJewel !== "function") {
+			this.log("ÿc1Pd2Stackÿc0 :: cubeJunkJewels — Pickit.isJunkJewel missing");
+			return false;
+		}
+
+		cube = (typeof QuestItems !== "undefined" && QuestItems.getCube) ?
+			QuestItems.getCube() : (me.getItem("box") || me.getItem(566));
+
+		if (!cube) {
+			this.log("ÿc8Pd2Stackÿc0 :: cubeJunkJewels — no cube");
+			return false;
+		}
+
+		if (typeof Town !== "undefined" && !getUIFlag(0x19) && !Town.openStash()) {
+			this.log("ÿc1Pd2Stackÿc0 :: cubeJunkJewels — stash closed");
+			return false;
+		}
+
+		// Refresh craft reservations so we don't eat jewels Cubing still needs
+		if (typeof Cubing !== "undefined" && typeof Cubing.update === "function") {
+			try {
+				Cubing.update();
+			} catch (eUp) {}
+		}
+
+		made = 0;
+		passes = 0;
+
+		if (!Cubing.emptyCube()) {
+			this.log("ÿc1Pd2Stackÿc0 :: cubeJunkJewels — emptyCube failed");
+			return false;
+		}
+
+		Cubing.cursorCheck();
+
+		if (!Cubing.openCube()) {
+			this.log("ÿc1Pd2Stackÿc0 :: cubeJunkJewels — openCube failed");
+			return false;
+		}
+
+		while (passes < 12) {
+			passes += 1;
+			jewels = this.listJunkJewels();
+
+			if (!jewels.length) {
+				break;
+			}
+
+			keyItem = this.findPromoteKey();
+
+			if (!keyItem) {
+				this.log("ÿc8Pd2Stackÿc0 :: cubeJunkJewels — out of keys");
+				break;
+			}
+
+			if (!Cubing.emptyCube()) {
+				this.log("ÿc1Pd2Stackÿc0 :: cubeJunkJewels — emptyCube failed");
+				break;
+			}
+
+			moved = 0;
+			batch = Math.min(15, jewels.length);
+
+			this.log("ÿc4Pd2Stackÿc0 :: cubeJunkJewels " + batch + " jewel(s) + key");
+
+			for (i = 0; i < jewels.length && moved < 15; i += 1) {
+				jew = me.getItem(-1, -1, jewels[i].gid);
+
+				if (!jew || !Pickit.isJunkJewel(jew)) {
+					continue;
+				}
+
+				if (!Storage.Cube.MoveTo(jew)) {
+					this.log("ÿc1Pd2Stackÿc0 :: cubeJunkJewels — move jewel failed");
+					break;
+				}
+
+				moved += 1;
+				delay(40 + me.ping);
+			}
+
+			if (moved < 1) {
+				Cubing.emptyCube();
+				break;
+			}
+
+			keyItem = this.findPromoteKey();
+
+			if (!keyItem || !Storage.Cube.MoveTo(keyItem)) {
+				this.log("ÿc1Pd2Stackÿc0 :: cubeJunkJewels — move key failed");
+				Cubing.emptyCube();
+				break;
+			}
+
+			before = this._countJewf();
+
+			if (!getUIFlag(0x1a) && !Cubing.openCube()) {
+				this.log("ÿc1Pd2Stackÿc0 :: cubeJunkJewels — cube UI lost");
+				break;
+			}
+
+			transmute();
+			delay(700 + me.ping);
+			Cubing.emptyCube();
+			// No closeCube / openStash — keep stash open across batches
+
+			delay(100 + me.ping);
+			after = this._countJewf();
+
+			if (after <= before) {
+				this.log("ÿc1Pd2Stackÿc0 :: cubeJunkJewels abort — no fragments gained (jewf " +
+					before + "→" + after + ")");
+				break;
+			}
+
+			this.log("ÿc2Pd2Stackÿc0 :: cubeJunkJewels " + moved + " → jewf (total≈" + after + ")");
+			made += 1;
+		}
+
+		Cubing.emptyCube();
+
+		if (!getUIFlag(0x19) && typeof Town !== "undefined") {
+			Town.openStash();
+		}
+
+		if (made > 0) {
+			this.log("ÿc2Pd2Stackÿc0 :: cubeJunkJewels done (" + made + " transmute(s))");
+		}
+
+		return made > 0;
+	},
+
+	_countJewf: function () {
+		var items, i, n = 0;
+
+		items = me.findItems(-1, -1);
+
+		if (!items) {
+			return 0;
+		}
+
+		for (i = 0; i < items.length; i += 1) {
+			if ((items[i].location === 3 || items[i].location === 6 || items[i].location === 7) &&
+					this.isJewfItem(items[i])) {
+				n += this.effectiveQty(items[i]);
+			}
+		}
+
+		return n;
 	}
 };

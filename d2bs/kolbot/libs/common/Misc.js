@@ -320,7 +320,7 @@ var Skill = {
 
 		if (!item && skillId !== 0 && this.getManaCost(skillId) > me.mp) {
 			// Maybe delay on ALL skills that we don't have enough mana for?
-			if (Config.AttackSkill.concat([42, 54]).concat(Config.LowManaSkill).indexOf(skillId) > -1) {
+			if (Config.AttackSkill.concat([42, 54, 367]).concat(Config.LowManaSkill).indexOf(skillId) > -1) {
 				delay(300);
 			}
 
@@ -853,8 +853,6 @@ var Item = {
 				tier: tier,
 				quality: item.quality
 			};
-			print("ÿc2AutoEquipÿc0 :: remember shield tier " + tier +
-				" (" + (item.name || this._pendingShield.code || "#") + ") — stash until orb/Spirit (sorc)");
 		}
 
 		return true;
@@ -1039,7 +1037,7 @@ var Item = {
 
 		gid = item.gid;
 
-		if (this._equipFails[gid] >= 2) {
+		if ((this._equipFails[gid] || 0) >= 2) {
 			return false;
 		}
 
@@ -1754,7 +1752,6 @@ var Item = {
 					if (this.isShieldItem(items[0]) && !this.wantsShieldSlot()) {
 						if (me.classid === 1) {
 							this.rememberPendingShield(items[0]);
-							print("ÿc2AutoEquipÿc0 :: skip equip shield — stash until orb/Spirit (sorc)");
 						}
 
 						break;
@@ -1790,7 +1787,7 @@ var Item = {
 
 						gid = items[0].gid;
 
-						if (this._equipFails[gid] >= 2) {
+						if ((this._equipFails[gid] || 0) >= 2) {
 							break; // gave up on this one this game
 						}
 
@@ -2599,6 +2596,45 @@ var Item = {
 		eq = this.getMercItem(5);
 
 		return this.mercScore(item) > eq.score + 100; // tiny hysteresis for ammo stacks
+	},
+
+	// PD2 quivers are real gear (rares with MF/res/etc.) — only want ammo that fits a bow/xbow in use.
+	// Never hoard rare bolts/arrows "for value" on a caster / desert-merc setup.
+	playerNeedsAmmo: function (item) {
+		var bowCheck;
+
+		if (!item || (item.itemType !== 5 && item.itemType !== 6)) {
+			return false;
+		}
+
+		if (typeof Attack === "undefined" || typeof Attack.usingBow !== "function") {
+			return false;
+		}
+
+		bowCheck = Attack.usingBow();
+
+		if (bowCheck === "bow") {
+			return item.itemType === 5; // arrows
+		}
+
+		if (bowCheck === "crossbow") {
+			return item.itemType === 6; // bolts
+		}
+
+		return false;
+	},
+
+	// Field pick / town keep — merc upgrade OR player actually shooting that ammo type
+	wantsAmmo: function (item) {
+		if (!item || (item.itemType !== 5 && item.itemType !== 6)) {
+			return false;
+		}
+
+		if (this.playerNeedsAmmo(item)) {
+			return true;
+		}
+
+		return this.mercNeedsAmmo(item);
 	},
 
 	// Returns bodylocation array for merc, or false if unusable.

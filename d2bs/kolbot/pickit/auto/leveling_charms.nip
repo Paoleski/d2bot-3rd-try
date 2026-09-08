@@ -1,6 +1,7 @@
 // Early leveling filler charms — keep until better ones replace them.
 // Inventory bottom rows = charm zone (Town.applyCharmInventoryLock).
-// PD2 types: smallcharm=83, mediumcharm=84 (Large), largecharm=85 (Grand).
+// Live PD2 types: smallcharm=82 (cm1), mediumcharm=83 (cm2), largecharm=84 (cm3).
+// Prefer [name] == cm1/cm2/cm3 keep lines — type aliases have been wrong before.
 // Unid charms: pick to ID (Town forces ID before sell). Keep lines below are IDENTIFIED only.
 // After ID, charms that miss these keep lines are sold (Town.sellAllBadCharms).
 // Sell gate uses THIS file only (not kolton). Be generous while inv is empty.
@@ -14,27 +15,41 @@
 [name] == cm3 && [quality] == magic && [flag] != identified
 
 // =============================================================================
-// Small Charms (1x1) — identified keep
+// Small Charms (1x1) — identified keep (type + name)
 // =============================================================================
-// Any single resist > 6
+// Any single resist >= 7
 [type] == smallcharm && [quality] == magic # [fireresist] >= 7
 [type] == smallcharm && [quality] == magic # [coldresist] >= 7
 [type] == smallcharm && [quality] == magic # [lightresist] >= 7
 [type] == smallcharm && [quality] == magic # [poisonresist] >= 7
+[name] == cm1 && [quality] == magic # [fireresist] >= 7
+[name] == cm1 && [quality] == magic # [coldresist] >= 7
+[name] == cm1 && [quality] == magic # [lightresist] >= 7
+[name] == cm1 && [quality] == magic # [poisonresist] >= 7
 [type] == smallcharm && [quality] == magic # [coldresist]+[fireresist]+[lightresist]+[poisonresist] >= 10
+[name] == cm1 && [quality] == magic # [coldresist]+[fireresist]+[lightresist]+[poisonresist] >= 10
 // Life / mana (loose for empty inv)
 [type] == smallcharm && [quality] == magic # [maxhp] >= 10
 [type] == smallcharm && [quality] == magic # [maxmana] >= 10
+[name] == cm1 && [quality] == magic # [maxhp] >= 10
+[name] == cm1 && [quality] == magic # [maxmana] >= 10
 // Movement / recovery
 [type] == smallcharm && [quality] == magic # [frw] >= 3
 [type] == smallcharm && [quality] == magic # [fhr] >= 5
+[name] == cm1 && [quality] == magic # [frw] >= 3
+[name] == cm1 && [quality] == magic # [fhr] >= 5
 // Combos (even weaker singles if paired)
 [type] == smallcharm && [quality] == magic # [maxhp] >= 8 && ([fireresist] >= 5 || [coldresist] >= 5 || [lightresist] >= 5 || [maxmana] >= 8)
 [type] == smallcharm && [quality] == magic # [frw] >= 3 && ([maxhp] >= 8 || [maxmana] >= 8 || [fireresist]+[coldresist]+[lightresist] >= 6)
 [type] == smallcharm && [quality] == magic # [fhr] >= 5 && ([maxhp] >= 8 || [maxmana] >= 8)
+[name] == cm1 && [quality] == magic # [maxhp] >= 8 && ([fireresist] >= 5 || [coldresist] >= 5 || [lightresist] >= 5 || [maxmana] >= 8)
+[name] == cm1 && [quality] == magic # [frw] >= 3 && ([maxhp] >= 8 || [maxmana] >= 8 || [fireresist]+[coldresist]+[lightresist] >= 6)
+[name] == cm1 && [quality] == magic # [fhr] >= 5 && ([maxhp] >= 8 || [maxmana] >= 8)
 // MF / gold (stash filler while leveling)
 [type] == smallcharm && [quality] == magic # [itemmagicbonus] >= 5
 [type] == smallcharm && [quality] == magic # [itemgoldbonus] >= 10
+[name] == cm1 && [quality] == magic # [itemmagicbonus] >= 5
+[name] == cm1 && [quality] == magic # [itemgoldbonus] >= 10
 
 // =============================================================================
 // Large Charms (2x1) — NTIP type is mediumcharm
@@ -53,12 +68,16 @@
 [type] == mediumcharm && [quality] == magic # [itemmagicbonus] >= 5
 [name] == cm2 && [quality] == magic # [maxhp] >= 15
 [name] == cm2 && [quality] == magic # [maxmana] >= 15
+[name] == cm2 && [quality] == magic # [fireresist] >= 7
+[name] == cm2 && [quality] == magic # [coldresist] >= 7
+[name] == cm2 && [quality] == magic # [lightresist] >= 7
+[name] == cm2 && [quality] == magic # [poisonresist] >= 7
 [name] == cm2 && [quality] == magic # [fireresist] >= 7 || [coldresist] >= 7 || [lightresist] >= 7
 
 // =============================================================================
 // Grand Charms (2x3) — NTIP type is largecharm — sorc leveling priorities
 // =============================================================================
-// Any single resist > 6
+// Any single resist >= 7
 [type] == largecharm && [quality] == magic # [fireresist] >= 7
 [type] == largecharm && [quality] == magic # [coldresist] >= 7
 [type] == largecharm && [quality] == magic # [lightresist] >= 7
@@ -81,6 +100,9 @@
 [type] == largecharm && [quality] == magic # [itemmagicbonus] >= 5
 [name] == cm3 && [quality] == magic # [maxhp] >= 15
 [name] == cm3 && [quality] == magic # [maxmana] >= 20
+[name] == cm3 && [quality] == magic # [fireresist] >= 7
+[name] == cm3 && [quality] == magic # [coldresist] >= 7
+[name] == cm3 && [quality] == magic # [lightresist] >= 7
 [name] == cm3 && [quality] == magic # [fireresist] >= 7 || [coldresist] >= 7 || [lightresist] >= 7
 [name] == cm3 && [quality] == magic # [coldskilltab] >= 1 || [fireskilltab] >= 1 || [lightningskilltab] >= 1 || [sorceressskills] >= 1
 [name] == grandcharm && [quality] == magic # [maxhp] >= 15

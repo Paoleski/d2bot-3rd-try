@@ -674,6 +674,9 @@ MainLoop:
 
 		break;
 	case 20: // Single Player - Select Difficulty
+		ControlAction.selectDifficultySP(gameInfo.difficulty);
+		locationTimeout(5000, location);
+
 		break;
 	case 21: // Main Menu - Connecting
 		if (!locationTimeout(StarterConfig.ConnectingTimeout * 1e3, location)) {

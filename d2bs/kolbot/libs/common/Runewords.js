@@ -249,9 +249,9 @@ var Runewords = {
 		print(line);
 	},
 
-	// Lab watch pause between RW steps (Config.RunewordWatchDelay, default 500)
+	// Lab watch pause between RW steps (Config.RunewordWatchDelay) — only when RunewordDebug
 	watchPause: function (tag) {
-		var ms = Config.RunewordWatchDelay;
+		var ms = Config.RunewordDebug ? (Config.RunewordWatchDelay || 0) : 0;
 
 		if (!ms || ms < 1) {
 			return;
@@ -1588,9 +1588,9 @@ var Runewords = {
 		return true;
 	},
 
-	// True if unit can hold Lore — named Config base OR any white/grey helm/circlet (PD2 classid drift)
+	// True if unit can hold Lore — any empty 2os white/grey helm/circlet (PD2 classid drift OK)
 	isConfiguredLoreBase: function (unit) {
-		var i, rw, baseId, key, socks;
+		var socks;
 
 		if (!unit || !this.hasLoreRecipe()) {
 			return false;
@@ -1604,43 +1604,17 @@ var Runewords = {
 			return false;
 		}
 
-		if (unit.getFlag(0x400000)) {
+		if (unit.getFlag(0x400000) || unit.getItem()) {
 			return false;
 		}
 
-		// Prefer exact Config name match when aliases work
-		for (i = 0; i < Config.Runewords.length; i += 1) {
-			rw = Config.Runewords[i];
-
-			if (!rw || !this.isLoreRecipe(rw[0])) {
-				continue;
-			}
-
-			baseId = rw[1];
-
-			if (typeof baseId === "string") {
-				key = baseId.replace(/\s+/g, "").toLowerCase();
-
-				if (typeof NTIPAliasClassID !== "undefined" && NTIPAliasClassID.hasOwnProperty(key)) {
-					baseId = NTIPAliasClassID[key];
-				} else {
-					continue;
-				}
-			}
-
-			if (unit.classid === baseId) {
-				return true;
-			}
-		}
-
-		// Fallback: any empty-looking 2os helm/circlet is a valid Lore base
 		socks = unit.getStat(194) || 0;
 
 		if (typeof unit.getStatEx === "function") {
 			socks = Math.max(socks, unit.getStatEx(194) || 0);
 		}
 
-		return socks === 2 && !unit.getItem();
+		return socks === 2;
 	},
 
 	// MiniShopBot / field: first 2os Lore helm, or strictly higher defense than banked

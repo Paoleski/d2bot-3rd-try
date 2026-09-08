@@ -24,7 +24,9 @@ var QuestItems = {
 	jade: 563,		// j34
 	goldenBird: 564, // g34
 	lifePotion: 562, // xyz (Potion of Life / scroll of self resurrect)
-	lamEsen: 565,	// bbb
+	lamEsen: 565,	// bbb — WARNING: this classid collides with the Horadric Cube in PD2.
+					// NEVER match this item by classid alone (e.g. me.getItem(QuestItems.lamEsen))
+					// since the cube is basically always in inventory — always require code === "bbb" too.
 	soulstone: 568,	// mss
 	khalimEye: 570,	// qey
 	khalimHeart: 571, // qhr
@@ -41,13 +43,19 @@ var QuestItems = {
 
 	// Prefer code — PD2 classids shift; classid alone false-misses
 	getCube: function () {
-		return me.getItem("box") || me.getItem(this.cube) || false;
+		return this.findByCode("box") || me.getItem("box") || me.getItem(this.cube) || false;
 	},
 
 	has: function (classid, code) {
 		var it, c, want;
 
 		want = code ? String(code).toLowerCase() : null;
+
+		// Prefer exact code scan — me.getItem("bbb") is NTIPAlias→classid and hits the cube on PD2
+		if (want) {
+			return this.hasCode(want);
+		}
+
 		it = me.getItem();
 
 		if (it) {
@@ -57,33 +65,13 @@ var QuestItems = {
 					continue;
 				}
 
-				c = it.code ? String(it.code).toLowerCase() : "";
-
-				if (want && c === want) {
-					return true;
-				}
-
-				if (!want && classid !== undefined && classid !== null && it.classid === classid) {
-					return true;
-				}
-
-				// classid + code: both must match (avoid PD2 classid collisions)
-				if (want && classid !== undefined && classid !== null && it.classid === classid && c === want) {
+				if (classid !== undefined && classid !== null && it.classid === classid) {
 					return true;
 				}
 			} while (it.getNext());
 		}
 
-		// Fast path fallback
-		if (want) {
-			it = me.getItem(want);
-
-			if (it) {
-				return true;
-			}
-		}
-
-		if (classid !== undefined && classid !== null && !want) {
+		if (classid !== undefined && classid !== null) {
 			return !!me.getItem(classid);
 		}
 
@@ -129,12 +117,10 @@ var QuestItems = {
 			return best;
 		}
 
+		// NEVER me.getItem("bbb") / me.getItem(code) — D2BS resolves via NTIPAliasClassID
+		// (bbb→565) which on PD2 is the Horadric Cube (same classid). Scan by .code only.
 		if (want) {
-			it = me.getItem(want);
-
-			if (it) {
-				return it;
-			}
+			return this.findByCode(want);
 		}
 
 		if (classid !== undefined && classid !== null && !want) {
@@ -144,11 +130,53 @@ var QuestItems = {
 		return false;
 	},
 
+	// Exact 3-letter code match only (never classid / NTIPAlias getItem(string))
+	findByCode: function (code) {
+		var want, it, best = null, c;
+
+		if (!code) {
+			return false;
+		}
+
+		want = String(code).toLowerCase();
+		it = me.getItem();
+
+		if (!it) {
+			return false;
+		}
+
+		do {
+			if ([1, 3, 6, 7].indexOf(it.location) < 0) {
+				continue;
+			}
+
+			c = it.code ? String(it.code).toLowerCase() : "";
+
+			if (c === want) {
+				if (it.location === 3) {
+					return copyUnit(it);
+				}
+
+				if (!best) {
+					best = copyUnit(it);
+				}
+			}
+		} while (it.getNext());
+
+		return best || false;
+	},
+
+	hasCode: function (code) {
+		return !!this.findByCode(code);
+	},
+
 	allIds: function () {
+		// Never include lamEsen (565) — on PD2 that classid IS the Horadric Cube.
+		// Lam Esen's Tome is code "bbb" only (see findByCode / mustKeepInInventory).
 		return [
 			this.malus, this.hellforge, this.wirtLeg, this.inifuss, this.cairnKey,
 			this.staffKings, this.horadricStaff, this.viper, this.cube, this.bookSkill, this.gidbinn,
-			this.jade, this.goldenBird, this.lifePotion, this.lamEsen, this.soulstone,
+			this.jade, this.goldenBird, this.lifePotion, this.soulstone,
 			this.khalimEye, this.khalimHeart, this.khalimBrain, this.khalimFlail, this.khalimWill,
 			this.malahPotion, this.scrollResist
 		];
@@ -193,10 +221,75 @@ var QuestItems = {
 		return null;
 	},
 
+	// Maguffins that must stay in inventory until used (never bank)
+	mustKeepInInventory: function (unit) {
+		var code;
+
+		if (!unit) {
+			return false;
+		}
+
+		code = unit.code ? String(unit.code).toLowerCase() : "";
+
+		// Prefer code — PD2 classids shift
+		if (code === "ice" || code === "tr2" || code === "xyz" || code === "ass" ||
+				code === "j34" || code === "g34" || code === "bbb") {
+			return true;
+		}
+
+		if (code) {
+			return false; // known non-keep code
+		}
+
+		// Code missing — classid fallback
+		return unit.classid === this.malahPotion || unit.classid === this.scrollResist ||
+			unit.classid === this.lifePotion || unit.classid === this.bookSkill ||
+			unit.classid === this.jade || unit.classid === this.goldenBird ||
+			unit.classid === this.lamEsen;
+	},
+
+	// Cain's lore "Horadric Scroll" (tr1/567) — NOT Lam Esen (bbb), NOT Inifuss (bks). Drop junk.
+	isHoradricScroll: function (unit) {
+		var code, name;
+
+		if (!unit) {
+			return false;
+		}
+
+		code = unit.code ? String(unit.code).toLowerCase() : "";
+
+		if (code === "tr1") {
+			return true;
+		}
+
+		if (code === "bbb" || code === "bks" || code === "bkd" || code === "tr2") {
+			return false;
+		}
+
+		if (unit.classid === 567 || (typeof NTIPAliasClassID !== "undefined" &&
+				NTIPAliasClassID.tr1 !== undefined && unit.classid === NTIPAliasClassID.tr1)) {
+			return true;
+		}
+
+		name = unit.name ? String(unit.name).toLowerCase().replace(/ÿc[0-9a-z]/gi, "") : "";
+
+		// "Horadric Scroll" / "Scroll of Horadric Quest Info" — not Lam Esen's Tome
+		if (name.indexOf("horadric") > -1 && name.indexOf("scroll") > -1) {
+			return true;
+		}
+
+		return false;
+	},
+
 	isQuestItem: function (unit) {
 		var code, expected;
 
 		if (!unit) {
+			return false;
+		}
+
+		// Lore scroll from Cain — never treat as keep/pick quest item
+		if (this.isHoradricScroll(unit)) {
 			return false;
 		}
 
@@ -218,8 +311,9 @@ var QuestItems = {
 		// Known non-quest codes that share/near quest classid ranges — never classid-match these
 		if (code && (code === "aqv" || code === "cqv" || code === "aqv2" || code === "cqv2" ||
 				code === "aqv3" || code === "cqv3" || code === "key" || code === "tsc" || code === "isc" ||
-				code === "tbk" || code === "ibk" || code === "gld" || code.indexOf("hp") === 0 ||
-				code.indexOf("mp") === 0 || code.indexOf("rv") === 0)) {
+				code === "tbk" || code === "ibk" || code === "gld" || code === "tr1" ||
+				/^hp[1-5]$/.test(code) ||
+				/^mp[1-5]$/.test(code) || code === "rvs" || code === "rvl" || code === "mpi")) {
 			return false;
 		}
 

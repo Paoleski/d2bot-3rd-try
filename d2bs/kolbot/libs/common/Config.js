@@ -220,14 +220,17 @@ var Config = {
 	ShowCubingInfo: true,
 
 	Cubing: false,
-	// PD2: at stash, cube 3+ stacked flawless + key → perfect (via Pd2Stack, before rune stacking)
+	// PD2: at stash, dump all flawless of a type + key into cube; transmute until <3 (eats 3/click)
 	Pd2PromoteFlawless: true,
+	// PD2: after cubing, junk magic/rare jewels + key → Jewel Fragments (stackable jewf)
+	Pd2CubeJunkJewels: true,
 	CubeRepair: false,
-	RepairPercent: 0, // 0 = only when broken (0 durability) / empty stack
+	RepairPercent: 40, // Repair when equipped durability/charges ≤ this % (0 = only when fully broken)
 	Recipes: [],
 	MakeRunewords: false,
-	RunewordWatchDelay: 500, // lab: ms pause between unstack/separate/socket steps (0=off)
+	RunewordWatchDelay: 0, // lab: ms pause between unstack/separate/socket steps (0=off; only honoured when RunewordDebug)
 	RunewordDebug: false, // Lore/Stealth diagnose dumps, cull notes, helper status, Pd2Stack verbose — only the make itself logs when false
+	ConsoleLogAll: false, // also tee prints into logs/console.all.log (per-profile log is always written)
 	// Loot-filter marker that means a rune is socketable (Ctrl+Shift cleared +form). Override if your filter wording differs.
 	Pd2UnstackedNameRegex: /UNSTACKED|WILL\s*SOCKET/i,
 	Pd2ClientWidth: 0, // 0 = read from helper heartbeat; set if helper has no W H yet
@@ -241,6 +244,11 @@ var Config = {
 	MiniShopBot: false,
 	MiniShopMinGold: 2000, // MiniShop scan is only a reason to visit the vendor with this much gold (RW base hunts ignore it)
 	TeleSwitch: false,
+	// Necromancer Blood Warp (PD2 skill 367) — used as Teleport substitute via Pather.teleSkill()
+	BloodWarp: {
+		Enabled: true,
+		MinLifePct: 50 // refuse warp if HP after cost would fall below this % of max
+	},
 	MFSwitch: 0,
 	MFSwitchPercent: 0,
 	LogExperience: false,
@@ -311,6 +319,13 @@ var Config = {
 	TeleStomp: false,
 	ClearType: false,
 	ClearPath: false,
+	// SoloPlay-style: stop walking to peel melee-range monsters (false = off)
+	DangerClear: {
+		Range: 8,              // treat as "on me" within this distance
+		ClearRange: 12,        // Attack.clear range on danger interrupt
+		PollMs: 250,           // walkTo poll cadence; doubles when nothing within Range*2
+		WhileTeleporting: false // if false, skip checks when tele is ready
+	},
 	BossPriority: false,
 	NecroShamanFocus: false, // necro Act1: peel fallen/fetish shamans first
 
@@ -320,6 +335,7 @@ var Config = {
 
 	// Sorceress specific
 	UseTelekinesis: true, // Sorc: TK pick (lvl 14+) gold/scrolls/keys/pots + Duriel orifice (never attack/chests)
+	MinGoldPile: -1, // -1 = scale with charlvl (Pickit.minGoldPile); >=0 = fixed minimum pile size
 	CastStatic: 55, // PD2: stop at max(this, 55/70/85 N/NM/H). 100 = disabled. Empty StaticList = act bosses+Izual only.
 	StaticList: [],
 

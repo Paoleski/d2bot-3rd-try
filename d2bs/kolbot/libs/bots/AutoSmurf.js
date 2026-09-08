@@ -162,8 +162,17 @@ function AutoSmurf() {
 		}
 		for (var i = 0 ; i < questStuff.length ; i += 1) {
 			item = me.getItem(questStuff[i]);
+			// Never bank Maguffins needed in-field (Malah's Potion ice, scroll resist, etc.)
+			if (item && typeof QuestItems !== "undefined" && QuestItems.mustKeepInInventory &&
+					QuestItems.mustKeepInInventory(item)) {
+				continue;
+			}
+			// Never bank Horadric Cube (classid can collide with lamEsen 565 on PD2)
+			if (item && item.code && String(item.code).toLowerCase() === "box") {
+				continue;
+			}
 			if (item && item.location !==7 && item.location !== 6 && Storage.Stash.CanFit(item)) { // Have the item and it's not in Stash or Cube and it can fit in Stash.
-				Storage.Stash.MoveTo(i);
+				Storage.Stash.MoveTo(item);
 				delay(me.ping * 2 + 500);
 			}
 		}
@@ -218,7 +227,9 @@ function AutoSmurf() {
 			delay(500);
 		}
 		//misc : starting & teams
-		if (me.findItem(546) || me.findItem(547) || potion || me.getQuest(20, 1)) { // Have A Jade Figurine, The Golden Bird or the Potion of Life or need to Return to Alkor for Reward. Tell the Teleporting Sorc so she gets us to process it.
+		if (me.findItem("j34") || me.findItem("g34") || me.findItem("xyz") ||
+				me.findItem(QuestItems.jade) || me.findItem(QuestItems.goldenBird) || me.findItem(QuestItems.lifePotion) ||
+				potion || me.getQuest(20, 1)) { // Jade / Bird / Potion of Life / Alkor reward. PD2 codes — not LoD 546/547.
 			Messaging.sendToList(Config.AutoSmurf.AllTeamProfiles, "team figurine");
 			teamFigurine = true;
 		}
@@ -1231,9 +1242,9 @@ function AutoSmurf() {
 
 //PATHING
 
-	// Own Teleport (or oskill) → leave Pather.teleport on; TeleDelay walks/fights between casts
+	// Own Teleport / Blood Warp / oskill → leave Pather.teleport on; TeleDelay + CD walks between casts
 	this.enableTeleport = function () {
-		Pather.teleport = !!(me.getSkill(54, 1) || me.getStat(97, 54));
+		Pather.teleport = Pather.teleSkill() > 0;
 
 		return Pather.teleport;
 	};
@@ -1245,15 +1256,19 @@ function AutoSmurf() {
 	};
 
 	this.travel = function (goal) { // 0->9, a custom waypoint getter function
-		var i, homeTown, nextAreaIndex, oldClearType, target, destination, unit,
+		var i, homeTown, nextAreaIndex, oldClearType, target, destination, unit, sk, cdSec,
 			wpAreas = [],
 			areaIDs = [];
 		oldClearType = Config.ClearType;
 		this.enableTeleport();
-		if (Pather.teleport) {
+		sk = Pather.teleSkill();
+		if (sk === 367) {
+			cdSec = ((Pather.getTeleCooldownMs() || 0) / 1000).toFixed(1);
+			this.status("travel(" + goal + ") — Blood Warp on (cd " + cdSec + "s)");
+		} else if (sk === 54) {
 			this.status("travel(" + goal + ") — Teleport on (TeleDelay)");
 		} else {
-			this.status("travel(" + goal + ") — walking (no Teleport skill yet)");
+			this.status("travel(" + goal + ") — walking (no Teleport / Blood Warp yet)");
 		}
 		switch (goal) {
 		case 0:
@@ -1804,14 +1819,31 @@ function AutoSmurf() {
 		var i, chest, item, code, tick, townTrips = 0;
 
 		function haveItem() {
-			if (code && (me.findItem(code) || me.getItem(code))) {
-				return true;
-			}
+			var it, c;
 
-			if (typeof QuestItems !== "undefined" && typeof QuestItems.has === "function" && code) {
-				if (QuestItems.has(classid, code)) {
-					return true;
+			// Exact code only — me.getItem("bbb") → NTIPAlias 565 → Horadric Cube on PD2
+			if (code) {
+				if (typeof QuestItems !== "undefined" && typeof QuestItems.hasCode === "function") {
+					return QuestItems.hasCode(code);
 				}
+
+				it = me.getItem();
+
+				if (it) {
+					do {
+						if ([1, 3, 6, 7].indexOf(it.location) < 0) {
+							continue;
+						}
+
+						c = it.code ? String(it.code).toLowerCase() : "";
+
+						if (c === code) {
+							return true;
+						}
+					} while (it.getNext());
+				}
+
+				return false;
 			}
 
 			return !!(me.findItem(classid) || me.getItem(classid));
@@ -1836,15 +1868,20 @@ function AutoSmurf() {
 		}
 
 		function findGround() {
-			var it = getUnit(4, classid) || (code ? getUnit(4, code) : null),
+			var it = code ? getUnit(4, code) : null,
 				u;
 
-			if (it) {
+			// Prefer code unit; never trust classid alone for lamEsen (565 = cube on PD2)
+			if (it && (!code || (it.code && String(it.code).toLowerCase() === code))) {
 				return it;
 			}
 
-			if (!code && classid === undefined) {
-				return null;
+			if (!code) {
+				it = getUnit(4, classid);
+
+				if (it) {
+					return it;
+				}
 			}
 
 			u = getUnit(4);
@@ -1854,9 +1891,14 @@ function AutoSmurf() {
 			}
 
 			do {
-				if ((u.mode === 3 || u.mode === 5) &&
-						((code && u.code && String(u.code).toLowerCase() === code) || u.classid === classid)) {
-					return copyUnit(u);
+				if ((u.mode === 3 || u.mode === 5)) {
+					if (code && u.code && String(u.code).toLowerCase() === code) {
+						return copyUnit(u);
+					}
+
+					if (!code && u.classid === classid) {
+						return copyUnit(u);
+					}
 				}
 			} while (u.getNext());
 
@@ -1956,51 +1998,62 @@ function AutoSmurf() {
 
 	this.toInventory = function () {
 		this.status("toInventory");
-		var i, items = [], item, code, want;
+		var i, items = [], item, code, want, pulled = 0, fromLoc;
 
-		want = ["hst", "qf2", "qf1", "qey", "qhr", "qbr"];
+		want = ["hst", "qf2", "qf1", "qey", "qhr", "qbr", "ice", "tr2", "xyz", "ass", "j34", "g34", "bbb"];
 
 		if (!Town.openStash()) {
+			Town.move("stash");
 			Town.openStash();
 		}
 
-		item = me.getItem(-1, 0);
+		// -1 mode = all containers (0 often misses stash on PD2/D2BS)
+		item = me.getItem(-1, -1);
 
 		if (item) {
 			do {
+				// Only pull from stash / cube — leave equipped alone
+				if (item.location !== 7 && item.location !== 6) {
+					continue;
+				}
+
 				code = item.code ? String(item.code).toLowerCase() : "";
 
-				if (want.indexOf(code) > -1 ||
-						item.classid === QuestItems.horadricStaff ||
-						item.classid === QuestItems.khalimWill ||
-						item.classid === QuestItems.khalimFlail ||
-						item.classid === QuestItems.khalimEye ||
-						item.classid === QuestItems.khalimHeart ||
-						item.classid === QuestItems.khalimBrain) {
+				// Code only — every classid above collides with something else in PD2
+				// (e.g. lamEsen/565 also matches the Horadric Cube), and every one of
+				// those quest items already has its code listed in `want`, so the
+				// classid checks were pure risk with zero added coverage.
+				if (want.indexOf(code) > -1) {
 					items.push(copyUnit(item));
 				}
 			} while (item.getNext());
 		}
 
 		for (i = 0; i < items.length; i += 1) {
-			if (items[i].location === 3) {
-				continue; // already inventory
+			item = me.getItem(-1, -1, items[i].gid) || items[i];
+
+			if (!item || item.location === 3) {
+				continue;
 			}
 
-			if (!Storage.Inventory.CanFit(items[i])) {
-				Town.clearInventory(); // make room for quest staff
+			code = item.code ? String(item.code).toLowerCase() : String(item.classid);
+			fromLoc = item.location;
+
+			if (!Storage.Inventory.CanFit(item)) {
+				Town.clearInventory();
 			}
 
-			if (Storage.Inventory.CanFit(items[i])) {
-				Storage.Inventory.MoveTo(items[i]);
+			if (Storage.Inventory.CanFit(item) && Storage.Inventory.MoveTo(item)) {
+				pulled += 1;
+				this.status("toInventory: pulled " + code + " from " + (fromLoc === 7 ? "stash" : "cube"));
 			} else {
-				this.status("toInventory: no room for " + (items[i].code || items[i].classid));
+				this.status("toInventory: no room for " + code);
 			}
 		}
 
 		delay(500 + me.ping);
 		me.cancel();
-		return true;
+		return pulled;
 	};
 
 	this.cubeStaff = function () {
@@ -2798,6 +2851,8 @@ function AutoSmurf() {
 				}
 			} else { // diff > 0
 				if(teleportingSorc) {
+					this.enableTeleport();
+
 					if(!getWaypoint(1)) {
 						this.status("Grabbing Cold Plains waypoint");
 						Pather.moveToExit(2, true, false); // Move from Rogue Encampment to Blood Moor
@@ -2809,7 +2864,7 @@ function AutoSmurf() {
 					Pather.moveToExit(2, true, false); // Move from Rogue Encampment to Blood Moor
 					Pather.moveToExit(8, true, false);
 					Pather.makePortal();
-					Pather.teleport = false; // not teleporting in Den
+					this.enableTeleport(); // TeleDelay clear — do not force walk
 					delay(3000);
 				} else {
 					this.status("Going to town — waiting for Den portal");
@@ -2819,6 +2874,7 @@ function AutoSmurf() {
 						delay(250);
 					}
 					this.Bo();
+					this.enableTeleport();
 				}
 				for (i = 0; i < 3; i += 1) {
 					this.status("Clearing Den of Evil (try " + (i + 1) + "/3)");
@@ -2830,8 +2886,7 @@ function AutoSmurf() {
 						break;
 					}
 				}
-				if(teleportingSorc)
-					Pather.teleport = true;
+				this.enableTeleport();
 				this.status("Going to town");
 				Town.goToTown();
 			}
@@ -3555,7 +3610,7 @@ function AutoSmurf() {
 		this.waitForPartyMembers();
 		Precast.doPrecast(true);
 		this.Bo();
-		Pather.teleport = false;
+		this.enableTeleport(); // TeleDelay to Tree of Inifuss — do not force walk
 
 		if (me.area !== 5) {
 			throw new Error("Cain: expected Dark Wood, got area " + me.area);
@@ -3619,7 +3674,7 @@ function AutoSmurf() {
 			Town.goToTown(1);
 		}
 
-		Pather.teleport = !!(me.getSkill(54, 1) || me.getStat(97, 54));
+		Pather.teleport = Pather.teleSkill() > 0;
 
 		return true;
 	};
@@ -3723,13 +3778,13 @@ function AutoSmurf() {
 			if(teleportingSorc) {
 				Pather.useWaypoint(4); //stoney field
 				Pather.makePortal();
-				if(me.diff > 0)
-					Pather.teleport = false;
+				this.enableTeleport(); // NM/Hell: TeleDelay while clearing Rakanishu path
 			} else {
 				Town.move("portalspot");
 				while (!Pather.usePortal(4, null)) {
 					delay(250);
 				}
+				this.enableTeleport();
 			}
 			this.waitForPartyMembers();
 			Precast.doPrecast(true);			
@@ -3750,7 +3805,7 @@ function AutoSmurf() {
 			if ( me.diff > 0 ) { 
 				// Dark-f: now only leader finish the next job when Nightmare & Hell
 				if (teleportingSorc) { 
-					Pather.teleport = true;
+					this.enableTeleport();
 					for (i = 0; i < 5; i += 1) {
 						if (Pather.usePortal(38)) {
 							break;
@@ -3857,7 +3912,7 @@ function AutoSmurf() {
 			return false;
 		}
 
-		Pather.teleport = false;
+		this.enableTeleport();
 		Precast.doPrecast(true);
 		this.Bo();
 		Pather.moveToRakanishu(true, true);
@@ -3891,7 +3946,7 @@ function AutoSmurf() {
 			Town.goToTown();
 		}
 
-		Pather.teleport = true;
+		this.enableTeleport();
 
 		return true;
 	};
@@ -3946,7 +4001,7 @@ function AutoSmurf() {
 
 		this.teamInGame();
 		this.waitForPartyMembers();
-		Pather.teleport = !!(me.getSkill(54, 1) && me.charlvl >= 18);
+		Pather.teleport = Pather.teleSkill() > 0;
 		Precast.doPrecast(true);
 		this.Bo();
 
@@ -4018,7 +4073,7 @@ function AutoSmurf() {
 		if (!me.inTown && me.area >= 28 && me.area <= 36) {
 			this.status("Continuing from area " + me.area + " toward Catacombs");
 			this.teamInGame();
-			Pather.teleport = !!(me.getSkill(54, 1) && me.charlvl >= 18);
+			Pather.teleport = Pather.teleSkill() > 0;
 			path = [28, 29, 30, 31, 32, 33, 34, 35];
 			idx = path.indexOf(me.area);
 
@@ -4082,7 +4137,7 @@ function AutoSmurf() {
 			return false;
 		}
 
-		Pather.teleport = false;
+		this.enableTeleport();
 		this.waitForPartyMembers();
 		this.Bo();
 		this.dungeonPackFarm(36);
@@ -4091,7 +4146,7 @@ function AutoSmurf() {
 		Precast.doPrecast(true);
 		this.Bo();
 		this.dungeonPackFarm(35);
-		Pather.teleport = true;
+		this.enableTeleport();
 
 		return true;
 	};
@@ -4973,7 +5028,7 @@ function AutoSmurf() {
 		Town.goToTown(2);
 		this.teamInGame();
 		Town.doChores();
-		canTP = !!(me.getSkill(54, 1) || me.getStat(97, 54));
+		canTP = Pather.teleSkill() > 0;
 		Pather.teleport = canTP;
 
 		if (teleportingSorc) {
@@ -6030,127 +6085,370 @@ function AutoSmurf() {
 		return true;
 	};
 	
-	this.figurine = function () { // Perform the Golden Bird quest or wait for another character to do so, then drink the potion.
-		var cain, alkor, meshif;
+	this.figurine = function () { // Golden Bird / Potion of Life. PD2: j34/563, g34/564, xyz/562 (not LoD 546/547/545).
+		var cain, alkor, meshif, tries, lines, text, n, j, teamWait,
+			hadJade, hadBird;
 
-//	------- SiC-666 NOTES ------
-//		me.getQuest(20, 6) = ask cain about the jade figurine (persists after talking to cain)
-//		me.getQuest(20, 2) = Show Meshif the figurine (persists after talking to Meshif)
-//		me.getQuest(20, 16/19) = Ask cain about golden bird? need to check to see when these turn on. All i know is they are off before finding the figurine.
-//		me.getQuest(20, 4) = Give golden bird to Alkor
-//		me.getQuest(20, 1/28) = Return to Alkor for reward. 28 turns on once quest log is opened after reaching this stage.
-//		me.getQuest(20, 0) = Quest complete.
-//		me.getQuest(20, 5/12/13) = Quest complete/have potion? (16/19 persist at this stage, but 6/2/4/1 are off)
-//		me.getQuest(20, 5/12/13/16/19) = persists after drinking potion
-//	----------------------------
+		function hasJade() {
+			return !!(typeof QuestItems !== "undefined" &&
+				(QuestItems.has(QuestItems.jade, "j34") || me.getItem("j34") || me.getItem(QuestItems.jade)));
+		}
+
+		function hasBird() {
+			return !!(typeof QuestItems !== "undefined" &&
+				(QuestItems.has(QuestItems.goldenBird, "g34") || me.getItem("g34") || me.getItem(QuestItems.goldenBird)));
+		}
+
+		function hasLifePotion() {
+			var it = (typeof QuestItems !== "undefined" && QuestItems.find) ?
+				QuestItems.find(QuestItems.lifePotion, "xyz") : null;
+
+			if (it && (it.location === 3 || it.location === 7)) {
+				return it;
+			}
+
+			it = me.getItem("xyz") || (typeof QuestItems !== "undefined" && me.getItem(QuestItems.lifePotion));
+
+			return it || false;
+		}
+
+		function talkNpc(npcName, maxTries) {
+			var t, npc, names;
+
+			names = [npcName];
+
+			if (npcName === "cain" || npcName === "deckard cain") {
+				names = ["deckard cain", "cain"];
+			}
+
+			for (t = 0; t < (maxTries || 6); t += 1) {
+				Town.move(npcName === "deckard cain" ? "cain" : npcName);
+
+				for (n = 0; n < names.length; n += 1) {
+					npc = getUnit(1, names[n]);
+
+					if (npc) {
+						break;
+					}
+				}
+
+				if (!npc) {
+					delay(300 + me.ping);
+					continue;
+				}
+
+				if (getDistance(me, npc) > 5) {
+					Pather.moveToUnit(npc);
+				}
+
+				if (getUIFlag(0x08) || getUIFlag(0x0C)) {
+					me.cancel();
+					delay(200 + me.ping);
+				}
+
+				if (!npc.openMenu()) {
+					delay(300 + me.ping);
+					continue;
+				}
+
+				if (!Misc.useMenu(3381)) {
+					try {
+						lines = getDialogLines();
+					} catch (eDlg) {
+						lines = null;
+					}
+
+					if (lines) {
+						for (n = 0; n < lines.length; n += 1) {
+							text = (lines[n].text || "").toString().toLowerCase();
+
+							if (lines[n].selectable && text.indexOf("talk") > -1) {
+								try {
+									lines[n].handler();
+								} catch (eTalk) {}
+
+								break;
+							}
+						}
+					}
+				}
+
+				delay(800 + me.ping);
+				me.cancel();
+				delay(250 + me.ping);
+				sendPacket(1, 0x40);
+				return true;
+			}
+
+			return false;
+		}
+
+		function drinkLifePotion() {
+			var pot = hasLifePotion();
+
+			if (!pot) {
+				return false;
+			}
+
+			this.status("Drinking Potion of Life");
+
+			if (pot.location === 7) {
+				if (!Town.openStash()) {
+					Town.move("stash");
+					Town.openStash();
+				}
+
+				Storage.Inventory.MoveTo(pot);
+				delay(300 + me.ping);
+				pot = hasLifePotion();
+			}
+
+			if (pot && pot.location === 3) {
+				clickItem(1, pot);
+				delay(500 + me.ping);
+				return true;
+			}
+
+			return false;
+		}
 
 		this.status("Processing the Figurine");
-		Town.goToTown(3);
-		if (me.getItem(QuestItems.jade)) { // Have A Jade Figurine.
-			if (!me.getQuest(20, 2)) { // Not at the "Show Meshif the Figurine" stage yet. Need to talk to Cain.
-				Town.move("cain");
-				cain = getUnit(1, "deckard cain");
-				cain.openMenu();
-				me.cancel();
-			}
-			Town.move("meshif");
-			meshif = getUnit(1, "meshif");
-			meshif.openMenu();
-		}
-		if (me.getItem(QuestItems.goldenBird)) { // Have The Golden Bird.
-			if (!me.getQuest(20, 4)) { // Not at the "Give Golden Bird to Alkor" stage yet. Need to talk to Cain.
-				Town.move("cain");
-				cain = getUnit(1, "deckard cain");
-				cain.openMenu();
-				me.cancel();
-			}
-			Town.move("alkor");
-			alkor = getUnit(1, "alkor");
-			alkor.openMenu();
-			me.cancel();
+
+		if (me.getQuest(20, 0) && !hasLifePotion()) {
+			teamFigurine = false;
+			return true;
 		}
 
-		if (!me.getQuest(20, 1) && !me.getQuest(20, 0)) {
-			var j = 0 ;
-			while (!me.getQuest(20, 1) && !me.getQuest(20, 0)) { // Haven't done the Jade Figurine quest yet. It's possible another character has the Jade Figurine. After checking myself for it and processing if it had it, I should wait here until the "Return to Alkor for reward" stage.
-				sendPacket(1, 0x40); // This is likely required to refresh the status of me.getQuest(20, 1) as has been tested with me.getQuest(18, 0) in this.travincal()
-				delay(1000);
-				if (j % 5 == 0) { // Check for Team Members every 5 seconds.
+		Town.goToTown(3);
+		this.toInventory(); // pull xyz/j34/g34 if banked
+
+		// Already have potion → drink and finish
+		if (hasLifePotion()) {
+			drinkLifePotion.call(this);
+			teamFigurine = false;
+			this.status("Golden Bird — potion drunk");
+			return true;
+		}
+
+		hadJade = hasJade();
+		hadBird = hasBird();
+
+		if (hadJade) {
+			if (!me.getQuest(20, 2)) {
+				this.status("Figurine — talk Cain");
+				talkNpc("cain", 4);
+			}
+
+			this.status("Figurine — show Meshif");
+
+			for (tries = 0; tries < 8 && hasJade(); tries += 1) {
+				talkNpc("meshif", 1);
+				delay(400 + me.ping);
+			}
+		}
+
+		hadBird = hasBird();
+
+		if (hadBird) {
+			if (!me.getQuest(20, 4)) {
+				this.status("Golden Bird — talk Cain");
+				talkNpc("cain", 4);
+			}
+
+			this.status("Golden Bird — give to Alkor");
+
+			for (tries = 0; tries < 10 && hasBird(); tries += 1) {
+				talkNpc("alkor", 1);
+				delay(400 + me.ping);
+			}
+		}
+
+		// Solo: never spin forever waiting for another char's figurine
+		teamWait = (Config.AutoSmurf && Config.AutoSmurf.TeamSize > 1) ? 90 : 0;
+
+		if (!me.getQuest(20, 1) && !me.getQuest(20, 0) && !hasLifePotion() && !hasBird() && !hasJade()) {
+			for (j = 0; j < teamWait && !me.getQuest(20, 1) && !me.getQuest(20, 0) && !hasLifePotion(); j += 1) {
+				if (j % 5 === 0) {
+					this.status("Figurine — waiting for team Maguffin (" + j + "/" + teamWait + ")");
 					this.teamInGame();
 				}
-				j += 1;
+
+				sendPacket(1, 0x40);
+				delay(1000);
 			}
 		}
-		if (!me.getQuest(20, 0)) {
-			Town.move("alkor");
-			alkor = getUnit(1, "alkor");
-			alkor.openMenu();
-			me.cancel();
-		}
-		delay(500);
-		potion = me.getItem(QuestItems.lifePotion); // Already declared var and checked once in this.start(). Now that Golden Bird is complete, check for the unit again.
-		if (potion) {
-			this.status("Drinking the Figurine potion!");
-			if (potion.location > 3) {
-				this.openStash();
+
+		// Return to Alkor for Potion of Life (after bird turn-in)
+		if (!me.getQuest(20, 0) && !hasLifePotion()) {
+			for (tries = 0; tries < 12 && !hasLifePotion() && !me.getQuest(20, 0); tries += 1) {
+				this.status("Alkor — Potion of Life (" + (tries + 1) + "/12)");
+				talkNpc("alkor", 1);
+				delay(400 + me.ping);
+				this.toInventory();
 			}
-			clickItem(1, potion);
 		}
-		Town.move("cain");
+
+		if (hasLifePotion()) {
+			drinkLifePotion.call(this);
+		} else if (!me.getQuest(20, 0)) {
+			this.status("Alkor — no Potion of Life yet, continue");
+		}
+
 		teamFigurine = false;
-		this.status("Seriously, the 'Potion of Life'?? Tastes more like 'Potion of Piss'!!!");
+		this.status("Golden Bird — done");
 		return true;
 	};
 	
-	this.lamEsen = function () { // Teleporting Sorc walks over to Alkor and completes the quest for everyone via exploit.
-		var i, alkor, target;
-		this.status("Lam Essen's Tome");
+	this.lamEsen = function () { // Fetch Lam Esen's Tome (code bbb ONLY), then Alkor.
+		var i, target, lines, li, ltxt, isLeader;
+
+		// PD2: classid 565 is the Horadric Cube. me.getItem("bbb") → NTIPAlias → 565 → cube.
+		// NEVER use getItem("bbb") / classid 565. Only unit.code === "bbb".
+		function hasTome() {
+			return !!(typeof QuestItems !== "undefined" && QuestItems.hasCode && QuestItems.hasCode("bbb"));
+		}
+
+		function tomeInInventory() {
+			var it = (typeof QuestItems !== "undefined" && QuestItems.findByCode) ?
+				QuestItems.findByCode("bbb") : null;
+
+			return !!(it && it.location === 3);
+		}
+
+		this.status("Lam Esen's Tome");
+
+		if (me.getQuest(17, 0)) {
+			this.status("Lam Esen — already complete");
+			return true;
+		}
+
+		isLeader = !!(teleportingSorc || (Config.AutoSmurf && Config.AutoSmurf.TeamSize <= 1));
+
 		Town.goToTown(3);
 		this.teamInGame();
-		if (!me.inTown) {
-			Town.goToTown();
+		this.toInventory(); // pull real bbb from stash if banked
+
+		if (hasTome() && !tomeInInventory()) {
+			this.status("Lam Esen — tome in stash, pulling to inventory");
+			this.toInventory();
 		}
-		if(teleportingSorc){
-			if(me.charlvl >=18 && me.classid ===1 ) {
+
+		// Leader / solo: fetch from Ruined Temple when we don't actually have bbb
+		if (isLeader && !hasTome()) {
+			if (me.charlvl >= 18 && me.classid === 1) {
 				Pather.teleport = true;
 			} else {
 				Pather.teleport = false;
 			}
+
 			if (!Town.goToTown() || !Pather.useWaypoint(80, true)) {
-				throw new Error("Lam Essen quest failed");
+				this.status("lamEsen: WP 80 (Kurast Causeway) failed");
+				return false;
 			}
+
 			Precast.doPrecast(false);
+
 			if (!Pather.moveToExit(94, true) || !Pather.moveToPreset(me.area, 2, 193)) {
-				throw new Error("Lam Essen quest failed");
-			}		
+				this.status("lamEsen: Ruined Temple path failed");
+				return false;
+			}
+
 			if (Pather.teleport === true) {
 				Pather.moveToExit(94, true, false);
-				if(!Pather.moveToPreset(me.area, 2, 193, 0, 0, 0)){
+
+				if (!Pather.moveToPreset(me.area, 2, 193, 0, 0, 0)) {
 					Pather.moveToPreset(me.area, 2, 193);
-				}				
+				}
 			} else {
 				Pather.moveToExit(94, true, 0);
-				if(!Pather.moveToPreset(me.area, 2, 193, 0, 0, 0)){
+
+				if (!Pather.moveToPreset(me.area, 2, 193, 0, 0, 0)) {
 					Pather.moveToPreset(me.area, 2, 193);
 				}
 			}
-			// PD2: Lam Esen's Tome is bbb/565 — LoD 548 is wrong and left pickItem(undefined)
-			if (!this.getQuestItem(QuestItems.lamEsen, 193)) {
-				this.status("lamEsen: failed to pick bbb/" + QuestItems.lamEsen);
+
+			// Pick by code bbb — getQuestItem must not treat the cube as the tome
+			if (!this.getQuestItem(QuestItems.lamEsen, 193) || !hasTome()) {
+				this.status("lamEsen: failed to pick Lam Esen's Tome (bbb)");
 				return false;
 			}
-			Town.goToTown();
+
+			Town.goToTown(3);
 			Messaging.sendToList(Config.AutoSmurf.AllTeamProfiles, "Lam Essen");
 		}
+
+		this.toInventory();
+
+		if (!tomeInInventory()) {
+			if (hasTome()) {
+				this.status("Lam Esen — tome still not in inv after stash pull, abort");
+			} else if (!isLeader) {
+				this.status("Lam Esen — waiting for leader tome (bbb)");
+			} else {
+				this.status("Lam Esen — no tome (bbb) yet, skip Alkor");
+			}
+
+			return false;
+		}
+
+		this.status("Lam Esen — tome (bbb) in inventory, turning in at Alkor");
+
 		Town.move("alkor");
 		target = getUnit(1, "alkor");
-		while(target && target.openMenu()) {
-			me.cancel();
-			sendPacket(1, 0x40); //to refresh the status of me.getQuest(17, 0).
-			if (me.getQuest(17, 0)) { // Have completed Lam Esen's Tome.
-				break;
+
+		for (i = 0; i < 12 && target && !me.getQuest(17, 0); i += 1) {
+			if (!tomeInInventory() && !me.getQuest(17, 0)) {
+				this.toInventory();
+
+				if (!tomeInInventory()) {
+					this.status("Lam Esen — lost tome before turn-in, abort Alkor");
+					return false;
+				}
 			}
+
+			this.status("Alkor — Lam Esen turn-in (" + (i + 1) + "/12)");
+
+			if (getUIFlag(0x08) || getUIFlag(0x0C)) {
+				me.cancel();
+				delay(200 + me.ping);
+			}
+
+			if (target.openMenu()) {
+				if (!Misc.useMenu(3381)) {
+					try {
+						lines = getDialogLines();
+
+						if (lines) {
+							for (li = 0; li < lines.length; li += 1) {
+								ltxt = (lines[li].text || "").toString().toLowerCase();
+
+								if (lines[li].selectable && ltxt.indexOf("talk") > -1) {
+									try {
+										lines[li].handler();
+									} catch (eTalk) {}
+
+									break;
+								}
+							}
+						}
+					} catch (eDlg) {}
+				}
+
+				delay(800 + me.ping);
+				me.cancel();
+			}
+
+			delay(300 + me.ping);
+			sendPacket(1, 0x40);
+			target = getUnit(1, "alkor");
 		}
+
+		if (!me.getQuest(17, 0)) {
+			this.status("Lam Esen — Alkor did not complete (still have bbb? " + tomeInInventory() + ")");
+			return false;
+		}
+
+		this.status("Lam Esen — complete");
 		return true;
 	};
 
@@ -6544,11 +6842,12 @@ function AutoSmurf() {
 				Pather.moveToExit(100, true);
 			}
 		}
-		var unit = getUnit(4, 546);
-		if(unit && teleportingSorc)
+		var unit = getUnit(4, "j34") || getUnit(4, QuestItems.jade);
+		if (unit && teleportingSorc) {
 			this.getQuestItem(QuestItems.jade);
-		if (me.findItem(546) || me.findItem(547) || me.getQuest(20, 1)) { // Have A Jade Figurine or The Golden Bird or need to Return to Alkor for Reward (possible if someone's Pickit then Town processes the Quest). Tell the Teleporting Sorc so she gets us to process it.
-			Messaging.sendToList(Config.AutoSmurf.AllTeamProfiles, "team figurine");			
+		}
+		if (me.findItem("j34") || me.findItem("g34") || me.findItem(QuestItems.jade) || me.findItem(QuestItems.goldenBird) || me.getQuest(20, 1)) {
+			Messaging.sendToList(Config.AutoSmurf.AllTeamProfiles, "team figurine");
 			teamFigurine = true;
 		}
 		if(!Pather.usePortal(null, null)){
@@ -7029,7 +7328,7 @@ function AutoSmurf() {
 		// If boss is visible but won't come — TP onto him and re-anchor hold there (no bait loop)
 		this.getBoss = function (name, pullFight, holdX, holdY, baitX, baitY, walkBait) {
 			var i, boss, dist, waitTicks, engageDist, glow, mon, best, bestD, d,
-				idle, farIdle, outRange, engaged, sawBoss, baitPulses, self = this;
+				idle, farIdle, outRange, engaged, sawBoss, baitPulses, deadPulses, giveUpDead, self = this;
 
 			glow = getUnit(2, 131);
 			waitTicks = pullFight ? 72 : 16;
@@ -7040,7 +7339,74 @@ function AutoSmurf() {
 			engaged = false;
 			sawBoss = false;
 			baitPulses = 0;
+			deadPulses = 0;
+			giveUpDead = false;
 			walkBait = !!walkBait;
+
+			// Never personally saw the boss or any leftover pack after a bait pulse — he may
+			// already be dead (killed by a teammate, or this is a script-restart mid-Chaos-Sanctuary).
+			// Bail out after a couple of fruitless pulses instead of grinding the full wait budget.
+			// Boss corpse present — he's already dead. getUnit(1, name) still returns the corpse,
+			// Attack.checkMonster() rejects it, and without this the loop reads that as
+			// "not spawned yet" and pulses forever.
+			function bossCorpse() {
+				var u = getUnit(1, name);
+
+				if (u) {
+					do {
+						if (u.mode === 12 || u.hp <= 0) {
+							return true;
+						}
+					} while (u.getNext());
+				}
+
+				return false;
+			}
+
+			function releaseHold() {
+				snapHold();
+
+				if (typeof ClassAttack !== "undefined") {
+					ClassAttack._sealHoldX = undefined;
+					ClassAttack._sealHoldY = undefined;
+				}
+			}
+
+			function checkAlreadyDead() {
+				if (bossCorpse()) {
+					if (typeof self.status === "function") {
+						self.status(name + " — corpse found, already dead");
+					} else {
+						print(name + " — corpse found, already dead");
+					}
+
+					return true;
+				}
+
+				if (sawBoss || engaged) {
+					deadPulses = 0;
+					return false;
+				}
+
+				if (packNear(25)) {
+					deadPulses = 0;
+					return false;
+				}
+
+				deadPulses += 1;
+
+				if (deadPulses >= 2) {
+					if (typeof self.status === "function") {
+						self.status(name + " — not found after pulls, assuming already dead");
+					} else {
+						print(name + " — not found after pulls, assuming already dead");
+					}
+
+					return true;
+				}
+
+				return false;
+			}
 
 			function snapHold() {
 				if (holdX === undefined || holdY === undefined) {
@@ -7328,11 +7694,28 @@ function AutoSmurf() {
 				}
 
 				snapHold();
+
+				// Already dead before we even start (teammate / script restart) — skip the whole pull
+				if (bossCorpse()) {
+					if (typeof self.status === "function") {
+						self.status(name + " — corpse found, already dead");
+					}
+
+					releaseHold();
+					return true;
+				}
+
 				// First peek closer so we don't wait forever with no LOS
 				doAggro();
 
 				for (i = 0; i < waitTicks; i += 1) {
 					snapHold();
+
+					if (bossCorpse()) {
+						giveUpDead = true;
+						break;
+					}
+
 					boss = getUnit(1, name);
 
 					if (boss && Attack.checkMonster(boss)) {
@@ -7363,26 +7746,49 @@ function AutoSmurf() {
 						continue;
 					}
 
-					if (packNear(18)) {
-						engaged = true;
-						holdCast(18);
-						idle = 0;
-					} else {
-						idle += 1;
+				if (packNear(18)) {
+					engaged = true;
+					holdCast(18);
+					idle = 0;
+				} else {
+					idle += 1;
 
-						if (idle >= 8) {
-							doAggro();
-							idle = 0;
+					if (idle >= 8) {
+						doAggro();
+						idle = 0;
+
+						if (checkAlreadyDead()) {
+							giveUpDead = true;
+							break;
 						}
 					}
-
-					delay(120);
 				}
 
-				this.chaosPreattack(name, 4);
+				delay(120);
+			}
 
-				for (i = 0; i < 240; i += 1) {
+			if (giveUpDead) {
+				snapHold();
+
+				if (typeof ClassAttack !== "undefined") {
+					ClassAttack._sealHoldX = undefined;
+					ClassAttack._sealHoldY = undefined;
+				}
+
+				return true;
+			}
+
+			this.chaosPreattack(name, 4);
+
+			for (i = 0; i < 240; i += 1) {
 					snapHold();
+
+					// Killed (by us or anyone) — corpse means done, don't wait for the pack to fully disperse
+					if (bossCorpse() && !packNear(15)) {
+						releaseHold();
+						return true;
+					}
+
 					boss = getUnit(1, name);
 
 					if (boss && Attack.checkMonster(boss)) {
@@ -7448,6 +7854,17 @@ function AutoSmurf() {
 					if (farIdle >= 8) {
 						doAggro();
 						farIdle = 0;
+
+						if (checkAlreadyDead()) {
+							snapHold();
+
+							if (typeof ClassAttack !== "undefined") {
+								ClassAttack._sealHoldX = undefined;
+								ClassAttack._sealHoldY = undefined;
+							}
+
+							return true;
+						}
 					}
 
 					delay(100);
@@ -7950,189 +8367,631 @@ function AutoSmurf() {
 		return true;
 	};
 
-	this.rescueBarbs = function() {
-		this.status("coming barbies");
-		var i, k, qual, door, skill,
-			coords =[],
+	this.rescueBarbs = function () {
+		var i, k, qual, door, lines, text, tries, nKilled, live, gid, d, best, bestD, any,
+			coords = [],
 			barbSpots = [];
+
+		// Prison Door (434) still targetable
+		function cageAlive(u) {
+			return !!(u && u.hp > 0 && copyUnit(u).x);
+		}
+
+		// Nearest living cage to a barb preset
+		function nearestCage(x, y, range) {
+			var u = getUnit(1, 434);
+
+			best = null;
+			bestD = range || 30;
+
+			if (!u) {
+				return null;
+			}
+
+			do {
+				if (cageAlive(u)) {
+					d = getDistance(x, y, u.x, u.y);
+
+					if (d < bestD) {
+						bestD = d;
+						best = copyUnit(u);
+					}
+				}
+			} while (u.getNext());
+
+			return best;
+		}
+
+		// Kill one cage with ClassAttack (own skills) until dead
+		function killCage(u) {
+			var n;
+
+			if (!u) {
+				return false;
+			}
+
+			gid = u.gid;
+			Pather.moveToUnit(u, 1, 0);
+
+			for (n = 0; n < 100; n += 1) {
+				live = getUnit(1, -1, -1, gid);
+
+				if (!cageAlive(live)) {
+					return true;
+				}
+
+				if (getDistance(me, live) > 12) {
+					Pather.moveToUnit(live, 1, 0);
+				}
+
+				ClassAttack.doAttack(live, n % 10 === 0);
+				delay(100 + me.ping);
+			}
+
+			return !cageAlive(getUnit(1, -1, -1, gid));
+		}
+
+		this.status("coming barbies");
 		this.teamInGame();
-		if(!me.getQuest(36,1) && teleportingSorc){
+
+		// Free every Prison Door while Rescue isn't ready to turn in
+		if (!me.getQuest(36, 0) && !me.getQuest(36, 1) && teleportingSorc) {
 			Pather.teleport = true;
 			Pather.useWaypoint(111, false);
 			Precast.doPrecast(true);
-			barbSpots = getPresetUnits (me.area, 2, 473);
-			if (!barbSpots) {
+			barbSpots = getPresetUnits(me.area, 2, 473);
+
+			if (!barbSpots || !barbSpots.length) {
+				this.status("no barb presets in Frigid Highlands");
 				return false;
 			}
-			for ( i = 0  ; i < barbSpots.length ; i += 1) {
+
+			coords = [];
+
+			for (i = 0; i < barbSpots.length; i += 1) {
 				coords.push({
-					x: barbSpots[i].roomx * 5 + barbSpots[i].x - 3, //Dark-f: x-3
+					x: barbSpots[i].roomx * 5 + barbSpots[i].x - 3,
 					y: barbSpots[i].roomy * 5 + barbSpots[i].y
 				});
 			}
-            Config.PacketCasting = 1;
-			for ( k = 0  ; k < coords.length ; k += 1) {
-				this.status("going to barbspot "+(k+1)+"/"+barbSpots.length);
-				Pather.moveToUnit(coords[k], 2, 0);
-				door = getUnit(1, 434); 
-				if (door) {
-					Pather.moveToUnit(door, 1, 0);
-					for (i = 0; i < 20 && door.hp; i += 1) {
-						if(me.getSkill(45, 1))
-							Skill.cast(45, 0, door.x, door.y);
-						delay(50);
-						if(me.getSkill(55, 1))
-							Skill.cast(55, 0, door.x, door.y);
-						delay(50);
-						if(me.getSkill(47, 1))
-							Skill.cast(47, 0, door.x, door.y);
-                        delay(50);
-						if(me.getSkill(49, 1))
-							Skill.cast(40, 0, door.x, door.y);
-                        delay(50);
-                    }
+
+			nKilled = 0;
+
+			for (k = 0; k < coords.length; k += 1) {
+				this.status("going to barbspot " + (k + 1) + "/" + coords.length);
+				Pather.moveTo(coords[k].x, coords[k].y, 3, false);
+				delay(200 + me.ping);
+
+				door = nearestCage(coords[k].x, coords[k].y, 35);
+
+				if (!door) {
+					Packet.flash(me.gid);
+					delay(400 + me.ping);
+					door = nearestCage(coords[k].x, coords[k].y, 50);
 				}
-				delay(1500 + 2 * me.ping); //barb going to town...
+
+				if (door) {
+					this.status("barb cage " + (k + 1) + "/" + coords.length + " — killing");
+
+					if (killCage(door)) {
+						nKilled += 1;
+						this.status("barb cage " + (k + 1) + " freed (" + nKilled + "/" + coords.length + ")");
+					} else {
+						this.status("barb cage " + (k + 1) + " still up — retry");
+						killCage(nearestCage(coords[k].x, coords[k].y, 50));
+					}
+				} else {
+					this.status("barbspot " + (k + 1) + " — no living cage nearby");
+				}
+
+				delay(1200 + 2 * me.ping); // barbs pathing to town
 			}
-			delay(1000);
-			Town.goToTown();
+
+			// Sweep any leftover Prison Doors still in the area
+			for (i = 0; i < 8; i += 1) {
+				any = null;
+				door = getUnit(1, 434);
+
+				if (door) {
+					do {
+						if (cageAlive(door)) {
+							any = copyUnit(door);
+							break;
+						}
+					} while (door.getNext());
+				}
+
+				if (!any) {
+					break;
+				}
+
+				this.status("sweep leftover barb cage");
+				Pather.moveToUnit(any, 1, 0);
+				killCage(any);
+				delay(800 + me.ping);
+			}
+
+			delay(800);
+			sendPacket(1, 0x40);
+			delay(400 + me.ping);
+			Town.goToTown(5);
 		}
+
+		if (!me.inTown) {
+			Town.goToTown(5);
+		} else if (me.act !== 5) {
+			Town.goToTown(5);
+		}
+
+		if (me.getQuest(36, 0)) {
+			this.status("Qual-Kehk — Rescue already complete");
+			return true;
+		}
+
+		// Don't spam Qual until all 15 are free (quest state 1 = ready to turn in)
+		if (!me.getQuest(36, 1)) {
+			this.status("Rescue incomplete — need more barbs (no Qual yet)");
+			return true;
+		}
+
 		Town.move("qual-kehk");
-		delay(1000+me.ping);
-		qual = getUnit(1, "qual-kehk");
-		while(!me.getQuest(36,0)){
-			qual.openMenu();
+		delay(500 + me.ping);
+
+		for (tries = 0; tries < 12 && !me.getQuest(36, 0); tries += 1) {
+			this.status("Qual-Kehk — talk turn-in (" + (tries + 1) + "/12)");
+			qual = getUnit(1, "qual-kehk");
+
+			if (!qual) {
+				Town.move("qual-kehk");
+				delay(400 + me.ping);
+				continue;
+			}
+
+			if (getDistance(me, qual) > 5) {
+				Pather.moveToUnit(qual);
+			}
+
+			if (getUIFlag(0x08) || getUIFlag(0x0C)) {
+				me.cancel();
+				delay(200 + me.ping);
+			}
+
+			if (!qual.openMenu()) {
+				delay(300 + me.ping);
+				continue;
+			}
+
+			if (!Misc.useMenu(3381)) {
+				try {
+					lines = getDialogLines();
+				} catch (eDlg) {
+					lines = null;
+				}
+
+				if (lines) {
+					for (i = 0; i < lines.length; i += 1) {
+						text = (lines[i].text || "").toString().toLowerCase();
+
+						if (lines[i].selectable && text.indexOf("talk") > -1) {
+							try {
+								lines[i].handler();
+							} catch (eTalk) {}
+
+							break;
+						}
+					}
+				}
+			}
+
+			delay(900 + me.ping);
 			me.cancel();
-			delay(500);
-			sendPacket(1, 0x40); //fresh Quest state.
-			if(me.getQuest(36,0))
-				break;
+			delay(300 + me.ping);
+			sendPacket(1, 0x40);
+			delay(250 + me.ping);
 		}
+
+		if (getUIFlag(0x08) || getUIFlag(0x0C)) {
+			me.cancel();
+		}
+
+		if (!me.getQuest(36, 0)) {
+			this.status("Qual-Kehk — Rescue not turned in yet, continue");
+		} else {
+			this.status("Qual-Kehk — Rescue complete");
+		}
+
 		return true;
 	};
 
-	this.anya = function () { // Dark-f: Rewrite this.
+	this.anya = function () { // PD2: potion ice/662, scroll tr2/664. Resume from Maguffins already held.
 		this.status("anya");
-		var i, anya, malah, scroll, unit, waitAnya;
-		Town.doChores();
-		this.teamInGame();
-		if (!me.getQuest(37, 1)) {
-			if (teleportingSorc) {				
-				Precast.doPrecast(true);				
-				Pather.useWaypoint(113, false); 				
-				var clearType;				
-				if(me.classid === 1) {	//Dark-f: mind already changed, this is not correct now
+		var i, anya, scroll, waitAnya, tries, lines, text, n, clearType, frozen;
+
+		function hasMalahPotion() {
+			var it = (typeof QuestItems !== "undefined" && QuestItems.find) ?
+				QuestItems.find(QuestItems.malahPotion, "ice") : null;
+
+			if (it && it.location === 3) {
+				return true;
+			}
+
+			it = me.getItem("ice") || (typeof QuestItems !== "undefined" && me.getItem(QuestItems.malahPotion));
+
+			return !!(it && it.location === 3);
+		}
+
+		function hasScrollResist() {
+			var it = (typeof QuestItems !== "undefined" && QuestItems.find) ?
+				QuestItems.find(QuestItems.scrollResist, "tr2") : null;
+
+			if (it && it.location === 3) {
+				return true;
+			}
+
+			it = me.getItem("tr2") || (typeof QuestItems !== "undefined" && me.getItem(QuestItems.scrollResist));
+
+			return !!(it && it.location === 3);
+		}
+
+		function townAnyaNpc() {
+			var npc;
+
+			if (!me.inTown || me.act !== 5) {
+				Town.goToTown(5);
+			}
+
+			Town.move("anya");
+			npc = getUnit(1, "anya") || (typeof NPC !== "undefined" ? getUnit(1, NPC.Anya) : null);
+
+			return npc;
+		}
+
+		function ensureQuestConsumablesInInv() {
+			this.toInventory();
+		}
+
+		function talkNpc(npcName, maxTries) {
+			var t, npc;
+
+			for (t = 0; t < (maxTries || 6); t += 1) {
+				Town.move(npcName);
+				npc = getUnit(1, npcName);
+
+				if (!npc && npcName === "anya" && typeof NPC !== "undefined") {
+					npc = getUnit(1, NPC.Anya);
+				}
+
+				if (!npc) {
+					delay(300 + me.ping);
+					continue;
+				}
+
+				if (getDistance(me, npc) > 5) {
+					Pather.moveToUnit(npc);
+				}
+
+				if (getUIFlag(0x08) || getUIFlag(0x0C)) {
+					me.cancel();
+					delay(200 + me.ping);
+				}
+
+				if (!npc.openMenu()) {
+					delay(300 + me.ping);
+					continue;
+				}
+
+				if (!Misc.useMenu(3381)) {
+					try {
+						lines = getDialogLines();
+					} catch (eDlg) {
+						lines = null;
+					}
+
+					if (lines) {
+						for (n = 0; n < lines.length; n += 1) {
+							text = (lines[n].text || "").toString().toLowerCase();
+
+							if (lines[n].selectable && text.indexOf("talk") > -1) {
+								try {
+									lines[n].handler();
+								} catch (eTalk) {}
+
+								break;
+							}
+						}
+					}
+				}
+
+				delay(800 + me.ping);
+				me.cancel();
+				delay(250 + me.ping);
+				sendPacket(1, 0x40);
+				return true;
+			}
+
+			return false;
+		}
+
+		function useScrollResist() {
+			scroll = (typeof QuestItems !== "undefined" && QuestItems.find) ?
+				(QuestItems.find(QuestItems.scrollResist, "tr2") || me.getItem("tr2") || me.getItem(QuestItems.scrollResist)) :
+				(me.getItem("tr2") || me.getItem(QuestItems.scrollResist));
+
+			if (!scroll || scroll.location !== 3) {
+				return false;
+			}
+
+			this.status("Anya — using Scroll of Resistance");
+			clickItem(1, scroll);
+			delay(600 + me.ping);
+			sendPacket(1, 0x40);
+			delay(200);
+
+			return true;
+		}
+
+		function getScrollFromMalah() {
+			ensureQuestConsumablesInInv.call(this);
+
+			for (tries = 0; tries < 12 && !hasScrollResist() && !me.getQuest(37, 0); tries += 1) {
+				this.status("Malah — Scroll of Resistance (" + (tries + 1) + "/12)");
+				talkNpc("malah", 1);
+				delay(400 + me.ping);
+				ensureQuestConsumablesInInv.call(this);
+			}
+
+			return hasScrollResist() || me.getQuest(37, 0);
+		}
+
+		function talkTownAnyaReward() {
+			anya = townAnyaNpc();
+
+			if (!anya) {
+				for (waitAnya = 0; waitAnya < 20; waitAnya += 1) {
+					delay(1000);
+					anya = townAnyaNpc();
+
+					if (anya) {
+						break;
+					}
+				}
+			}
+
+			if (!anya) {
+				this.status("Anya — town NPC not up yet");
+				return false;
+			}
+
+			for (tries = 0; tries < 8 && !me.getQuest(37, 0); tries += 1) {
+				this.status("Anya — town reward talk (" + (tries + 1) + "/8)");
+				talkNpc("anya", 1);
+				delay(400 + me.ping);
+
+				if (me.getQuest(37, 0)) {
+					this.status("Anya — quest complete");
+					return true;
+				}
+			}
+
+			return !!me.getQuest(37, 0);
+		}
+
+		function thawFrozenAnya() {
+			if (!teleportingSorc) {
+				return false;
+			}
+
+			Precast.doPrecast(true);
+
+			if (me.area !== 114) {
+				if (!me.inTown) {
+					Town.goToTown(5);
+				}
+
+				Pather.useWaypoint(113, false);
+
+				if (me.classid === 1) {
 					Pather.teleport = true;
 					clearType = false;
 				} else {
 					Pather.teleport = false;
 					clearType = true;
 				}
-				try{
+
+				try {
 					Pather.moveToExit(114, true, clearType);
-				}catch(e){
-					print(e);
+				} catch (e1) {
+					print(e1);
 				}
-				if(me.area!==114){
-					try{
+
+				if (me.area !== 114) {
+					try {
 						Pather.moveToExit(114, true, clearType);
-					}catch(e){
-						print(e);
+					} catch (e2) {
+						print(e2);
 					}
 				}
-				Pather.moveToPreset(me.area, 2, 460, -5, -5);
-				Pather.makePortal();
-					
-			} else {
+			}
+
+			Pather.moveToPreset(me.area, 2, 460, -5, -5);
+			Attack.clear(30);
+			frozen = getUnit(2, 558);
+
+			if (!frozen) {
+				this.status("Anya — no frozen body (already thawed?)");
+				return false;
+			}
+
+			this.status("Anya — thawing with ice potion");
+			Pather.moveToUnit(frozen);
+
+			for (i = 0; i < 5; i += 1) {
+				frozen = getUnit(2, 558);
+
+				if (!frozen) {
+					break;
+				}
+
+				if (getDistance(me, frozen) > 3) {
+					Pather.moveToUnit(frozen);
+				}
+
+				sendPacket(1, 0x13, 4, 0x2, 4, frozen.gid);
+				delay(500 + me.ping);
+				me.cancel();
+			}
+
+			delay(500);
+			return true;
+		}
+
+		function rescueFromScratch() {
+			if (!teleportingSorc) {
 				Town.goToTown(5);
 				Town.move("portalspot");
-				while(!Pather.usePortal(114, null)){
+
+				while (!Pather.usePortal(114, null)) {
 					delay(1000);
 				}
+
+				for (i = 0; i < 3; i += 1) {
+					delay(3000);
+					Attack.clear(30);
+				}
+
+				while (!Pather.usePortal(null, null)) {
+					delay(1000);
+				}
+
+				return true;
 			}
-			Attack.clear(50); 
-			delay(me.ping+850);
-			anya = getUnit(2, 558);
-			if (anya) {
-				if (teleportingSorc) {
-					Pather.moveToUnit(anya);
-					for (i = 0; i < 3; i += 1) {
-						if (getDistance(me, anya) > 3) {
-							Pather.moveToUnit(anya);
-						}
-						anya.interact();
-						delay(300 + me.ping);
-						me.cancel();
-					}					
-					Town.goToTown(5);
-					Town.move("malah");
-					malah = getUnit(1, "malah");
-					while(true) {
-						malah.interact();
-						if (malah && malah.openMenu()) {
-							me.cancel();
-						}						
-						if ( me.getItem(644))
-							break;
-						delay(500);
-					}
-					if ( me.getItem(644)) {
-						Town.move("portalspot");
-						while(!Pather.usePortal(114, null)){
-							delay(500);
-						}					
-						for (i = 0; i < 3; i += 1) {
-							if (getDistance(me, anya) > 3) {
-								Pather.moveToUnit(anya);
-							}
-							anya.interact();
-							delay(300 + me.ping);
-							me.cancel();
-						}
-					}
-				} else {
-					for (i = 0; i < 3; i += 1) {
-						delay(3000);
-						Attack.clear(30); 
-					}
-					while(!Pather.usePortal(null, null)){ // Wait for TeleportingSorc making portal
-						delay(1000);
-					}
+
+			Precast.doPrecast(true);
+			Pather.useWaypoint(113, false);
+
+			if (me.classid === 1) {
+				Pather.teleport = true;
+				clearType = false;
+			} else {
+				Pather.teleport = false;
+				clearType = true;
+			}
+
+			try {
+				Pather.moveToExit(114, true, clearType);
+			} catch (e3) {
+				print(e3);
+			}
+
+			if (me.area !== 114) {
+				try {
+					Pather.moveToExit(114, true, clearType);
+				} catch (e4) {
+					print(e4);
 				}
 			}
+
+			Pather.moveToPreset(me.area, 2, 460, -5, -5);
+			Pather.makePortal();
+			Attack.clear(50);
+			delay(me.ping + 850);
+			frozen = getUnit(2, 558);
+
+			if (!frozen) {
+				this.status("Anya — frozen body missing on first visit");
+				Town.goToTown(5);
+				return false;
+			}
+
+			Pather.moveToUnit(frozen);
+
+			for (i = 0; i < 3; i += 1) {
+				sendPacket(1, 0x13, 4, 0x2, 4, frozen.gid);
+				delay(400 + me.ping);
+				me.cancel();
+			}
+
 			Town.goToTown(5);
-			Town.move("malah");
-			malah = getUnit(1, "malah");
-			while(true) {
-				malah.interact();
-				malah.openMenu();
-				me.cancel(1);
-				if(me.getItem(QuestItems.scrollResist))
-					break;
-				delay(1000);
+			ensureQuestConsumablesInInv.call(this);
+
+			for (tries = 0; tries < 12 && !hasMalahPotion(); tries += 1) {
+				this.status("Malah — thaw potion (" + (tries + 1) + "/12)");
+				talkNpc("malah", 1);
+				delay(400 + me.ping);
+				ensureQuestConsumablesInInv.call(this);
 			}
+
+			if (!hasMalahPotion()) {
+				this.status("Malah — no ice potion, abort");
+				return false;
+			}
+
+			Town.move("portalspot");
+
+			while (!Pather.usePortal(114, null)) {
+				delay(500);
+			}
+
+			return thawFrozenAnya.call(this);
 		}
+
+		// ----- main -----
+		if (me.getQuest(37, 0)) {
+			this.status("Anya — already complete");
+			return true;
+		}
+
+		Town.doChores();
+		this.teamInGame();
+		ensureQuestConsumablesInInv.call(this);
+
+		// 1) Already have Scroll of Resistance → use it, town Anya reward, done
+		if (hasScrollResist()) {
+			this.status("Anya — already have scroll, finishing in town");
+			useScrollResist.call(this);
+			talkTownAnyaReward.call(this);
+			return true;
+		}
+
+		// 2) Anya already in town (thawed) / quest mid-state → skip Frozen River
+		if (me.getQuest(37, 1) || townAnyaNpc()) {
+			this.status("Anya — already thawed, get scroll / reward");
+			getScrollFromMalah.call(this);
+
+			if (hasScrollResist()) {
+				useScrollResist.call(this);
+			}
+
+			talkTownAnyaReward.call(this);
+			return true;
+		}
+
+		// 3) Have thaw potion, Anya not in town yet → thaw only
+		if (hasMalahPotion()) {
+			this.status("Anya — have ice potion, thawing only");
+			thawFrozenAnya.call(this);
+			Town.goToTown(5);
+			getScrollFromMalah.call(this);
+
+			if (hasScrollResist()) {
+				useScrollResist.call(this);
+			}
+
+			talkTownAnyaReward.call(this);
+			return true;
+		}
+
+		// 4) Fresh rescue
+		this.status("Anya — full rescue");
+		rescueFromScratch.call(this);
 		Town.goToTown(5);
-		scroll = me.getItem(QuestItems.scrollResist);
-		if (scroll) {
-			clickItem(1, scroll);
+		getScrollFromMalah.call(this);
+
+		if (hasScrollResist()) {
+			useScrollResist.call(this);
 		}
-		anya = getUnit(1, "anya");
-		Town.move("anya");
-		if(!anya){
-			for (waitAnya=0 ; waitAnya<30 ; waitAnya+=1){
-				delay(1000);
-				anya = getUnit(1, "anya");
-				if(anya){
-					break;
-				}
-			}
-		}
-		if(anya){
-			Town.move("anya");
-			anya.openMenu();
-			me.cancel();
-		}
+
+		talkTownAnyaReward.call(this);
 		return true;
 	};
 
@@ -8187,6 +9046,10 @@ function AutoSmurf() {
 		Config.TownMP = 0; // Go to town if mana is under designated percent.
 		Config.TownCheck = false; // Go to town if out of potions
 		Config.MercWatch = false; // Don't revive merc during battle.
+		// The Config.* edits above only affect THIS script's own copy of Config — ToolsThread.js
+		// and TownChicken.js run as separate scripts with their own Config instance, so they
+		// never see them. Broadcast so their chicken checks actually get suppressed too.
+		scriptBroadcast("suppressChicken");
 		Pather.teleport = true;
 		altar = getUnit(2, 546);
 		for(time=0; time<80 ; time+=1){
@@ -8218,6 +9081,7 @@ function AutoSmurf() {
 			if(me.getQuest(39,0))
 				break;
 		}
+		scriptBroadcast("resumeChicken"); // Fight's over — restore normal chicken safety.
 		Pather.moveToExit(128, true, true);
 		if(teleportingSorc){
 			Pather.moveToExit(129, true, false);
@@ -8229,7 +9093,7 @@ function AutoSmurf() {
 	
 	this.baal = function () {
 		this.status("Baal");
-		var portal, tick, questTry, quest = true;
+		var portal, tick, questTry, announceTry, quest = true;
 		this.preattack = function () {
 			var check;
 			switch (me.classid) {
@@ -8354,6 +9218,19 @@ function AutoSmurf() {
 		this.teamInGame();
 		Town.doChores();
 		Pather.teleport = true;
+		// Don't chicken mid-fight (wave clear or Baal himself) — just push through and kill him.
+		Config.LifeChicken = 0;
+		Config.ManaChicken = 0;
+		Config.MercChicken = 0;
+		Config.TownHP = 0;
+		Config.TownMP = 0;
+		Config.TownCheck = false;
+		Config.MercWatch = false;
+		// The Config.* edits above only affect THIS script's own copy of Config — ToolsThread.js
+		// and TownChicken.js run as separate scripts with their own Config instance, so they
+		// never see them. Broadcast so their chicken checks actually get suppressed too
+		// (this is what was actually firing the chicken after wave 5).
+		scriptBroadcast("suppressChicken");
 		for(questTry = 0 ; questTry < 10 ; questTry +=1 ){
 			if(me.getQuest(40,0)){
 				quest = false;
@@ -8428,7 +9305,12 @@ function AutoSmurf() {
 			}
 			delay(10);
 		}
-		if (!this.partyLevel(baalLvl) || (me.diff === 1 && !this.partyLevel(baalLvlnm)) || (me.diff === 2 && !this.partyLevel(baalLvlhell))) { // If the team hasn't met the level requirement in Normal or Nightmare, don't kill baal.
+		// Level gate is a TEAM leveling aid (keep farming waves until everyone is baalLvl).
+		// Solo it silently ended the run after wave 5 (looked like a chicken) — always kill Baal solo.
+		if (Config.AutoSmurf && Config.AutoSmurf.TeamSize > 1 &&
+				(!this.partyLevel(baalLvl) || (me.diff === 1 && !this.partyLevel(baalLvlnm)) || (me.diff === 2 && !this.partyLevel(baalLvlhell)))) {
+			this.status("Baal — team under level req (" + (me.diff === 2 ? baalLvlhell : me.diff === 1 ? baalLvlnm : baalLvl) + "), leaving without killing");
+			scriptBroadcast("resumeChicken");
 			return true;
 		}
 		Pather.moveTo(15090, 5008);
@@ -8450,6 +9332,15 @@ function AutoSmurf() {
 			print(e);
 			Attack.clear(20);
 		}	
+		scriptBroadcast("resumeChicken"); // Baal fight's over — restore normal chicken safety.
+		if (!getUnit(1, 544) && me.diff === 0) {
+			// Baal down in Normal — no Nightmare automation yet, so keep flashing this
+			// until the operator notices and switches the difficulty manually.
+			for (announceTry = 0; announceTry < 6; announceTry += 1) {
+				this.status("~BAAL'S DEAD, HEAD TO NIGHTMARE~");
+				delay(2000);
+			}
+		}
 		Pickit.pickItems();
 		if(!Pather.usePortal(null, null)){
 			if(teleportingSorc) {
@@ -8481,7 +9372,7 @@ function AutoSmurf() {
 		Town.goToTown(1);
 		this.teamInGame();
 		Town.doChores();
-		Pather.teleport = !!(me.getSkill(54, 1));
+		Pather.teleport = Pather.teleSkill() > 0;
 
 		if (teleportingSorc || Config.AutoSmurf.TeamSize === 1) {
 			if (!Pather.useWaypoint(6, true)) {
@@ -8560,7 +9451,7 @@ function AutoSmurf() {
 			Town.goToTown(1);
 		}
 
-		Pather.teleport = !!(me.getSkill(54, 1));
+		Pather.teleport = Pather.teleSkill() > 0;
 		Pather.useWaypoint(5); // Dark Wood
 		this.waitForPartyMembers();
 		Precast.doPrecast(true);
@@ -8714,7 +9605,7 @@ function AutoSmurf() {
 		// No pre-quest Charsi visit — quest bits + packet refresh above are enough.
 		// Talk to Charsi only after Malus for turn-in.
 
-		Pather.teleport = !!(me.getSkill(54, 1));
+		Pather.teleport = Pather.teleSkill() > 0;
 
 		if (!getWaypoint(5)) {
 			this.status("Pathing to Outer Cloister WP");
@@ -8818,7 +9709,7 @@ function AutoSmurf() {
 		}
 
 		this.status("Back in Barracks via TP — continuing toward Jail / Catacombs");
-		Pather.teleport = !!(me.getSkill(54, 1));
+		Pather.teleport = Pather.teleSkill() > 0;
 
 		if (Pather.moveToExit(29, true, true) && me.area === 29) {
 			this.clickWP();
@@ -9526,13 +10417,14 @@ function AutoSmurf() {
 	if (!me.getQuest(23, 0) && this.isAct2Done()) { // Act4 not open yet; Act2/Duriel done (quest 15 flaky on PD2)
 		Town.goToTown(3);
 		this.status(this.nextAct3Objective());
-		if (teleportingSorc ) { // I am the Teleporting Sorc
+		if (teleportingSorc || (Config.AutoSmurf && Config.AutoSmurf.TeamSize <= 1)) { // Leader / solo
 			this.travel(6); // Travel to all waypoints up to and including Travincal if I don't have them.
 			if (teamFigurine) { // Someone has the Jade Figurine!
 				Messaging.sendToList(Config.AutoSmurf.AllTeamProfiles, "figurine");				
 				this.figurine();
 			}
-			if (!me.getQuest(17, 0)) { // Haven't completed Lam Esen's Tome.
+			// Lam Esen first (stat points) — must use real tome code bbb, not Horadric Cube
+			if (!me.getQuest(17, 0)) {
 				this.status("Act 3 — Lam Esen's Tome");
 				this.lamEsen();
 			}
@@ -9684,20 +10576,9 @@ function AutoSmurf() {
 		if (!me.getQuest(39, 0)) // Rite of Passage is not complete.
 			this.ancients();
 		if (teleportingSorc && !getWaypoint(38))
-			Pather.getWP(129, false);			
-		if(runDiablo === 0 && me.diff === 0) { // running diablo
-			this.eldritch();
-			this.shenk();
-			this.pindleskin(false);
-			Town.goToTown(4);
-			this.diablo(); 
-			Town.goToTown(4);
-			Town.doChores();
-			Town.goToTown(3);
-			this.mephisto();
-			Town.goToTown(5);
-			Town.doChores();
-		}
+			Pather.getWP(129, false);
+		// After Ancients/WSK WP: Baal only — do NOT detour to Eldritch/Shenk/Pindle/Diablo/Meph.
+		// (Old runDiablo===0 block fired whenever Act 4 Diablo was skipped this game, i.e. already in Act 5.)
 		this.baal(); // Won't kill Baal until the team has met the baalLvl requirement.			
 	}
 	return true;
