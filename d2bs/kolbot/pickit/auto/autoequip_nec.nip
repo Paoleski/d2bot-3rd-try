@@ -45,7 +45,9 @@
 [name] == deathmask && [quality] == set # [FireResist] >= 12 && [LightResist] >= 12  # [tier] == 103  
 [name] == crown && [quality] == set # [FireResist] == 30 && [LightResist] == 30  # [tier] == 104
 [type] == helm && [flag] == runeword # [LightResist] >= 25 # [tier] == 80 // Lore
+[type] == circlet && [flag] == runeword # [LightResist] >= 25 # [tier] == 80 // Lore circlet
 [type] == helm && [flag] == runeword # [LightResist] >= 30 # [tier] == 105
+[type] == circlet && [flag] == runeword # [LightResist] >= 30 # [tier] == 105
 [name] == shako && [quality] == unique # [itemallskills] == 2 # [tier] == 106
 
 // armor盔甲

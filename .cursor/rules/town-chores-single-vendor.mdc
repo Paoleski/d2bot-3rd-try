@@ -15,6 +15,7 @@ alwaysApply: true
 - Helpers used from that pass must take `shopAlreadyOpen` / `keepShopOpen` / `keepOpen` and reuse `getInteractedNPC()`.
 - Same Heal+Shop NPC (Akara etc.): do **not** `initNPC("Heal")` then `initNPC("Shop")` — one Shop open heals via menu.
 - After the vendor `me.cancel()`, Repair/Gamble/Merc are separate NPCs (allowed).
+- **Zero visits when nothing is needed**: `needFullChores` has no "first chores this game" / "older than N min" auto-yes, and the Shop open is gated by `needShopPass(tasks)` (heal at Shop NPC / shop-ID or sell / pots we can afford / tome / keys / MiniShop with gold). Fresh char, full HP, empty inv → straight to the objective.
 
 ## Checklist after any `doChores` / shop-helper edit
 

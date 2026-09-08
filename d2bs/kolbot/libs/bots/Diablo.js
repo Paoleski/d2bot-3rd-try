@@ -173,7 +173,7 @@ function Diablo() {
 		}
 	};
 
-	this.getBoss = function (name, pullFight, holdX, holdY, baitX, baitY) {
+	this.getBoss = function (name, pullFight, holdX, holdY, baitX, baitY, walkBait) {
 		var i, boss, dist, waitTicks, engageDist, glow, mon, best, bestD, d,
 			idle, farIdle, engaged, sawBoss, baitPulses, self = this;
 
@@ -185,6 +185,7 @@ function Diablo() {
 		engaged = false;
 		sawBoss = false;
 		baitPulses = 0;
+		walkBait = !!walkBait;
 
 		function snapHold() {
 			if (holdX === undefined || holdY === undefined) {
@@ -279,6 +280,57 @@ function Diablo() {
 			snapHold();
 		}
 
+		function walkAggro() {
+			var bx, by, savedTele, j, saw;
+
+			bx = (baitX !== undefined) ? baitX : holdX;
+			by = (baitY !== undefined) ? baitY : (holdY - 16);
+
+			if (bx === undefined || by === undefined) {
+				return false;
+			}
+
+			baitPulses += 1;
+			saw = false;
+			print("Seal pull — walk aggro @ " + bx + "," + by);
+
+			savedTele = Pather.teleport;
+			Pather.teleport = false;
+			Pather.moveTo(bx, by, 2);
+			Pather.teleport = savedTele;
+
+			if (me.getSkill(44, 1)) {
+				Skill.cast(44, 0);
+				delay(80);
+			}
+
+			if (Config.AttackSkill[1] > 0) {
+				Skill.cast(Config.AttackSkill[1], Skill.getHand(Config.AttackSkill[1]), bx, by - 8);
+			}
+
+			for (j = 0; j < 18; j += 1) {
+				boss = getUnit(1, name);
+
+				if ((boss && Attack.checkMonster(boss) && getDistance(me, boss) <= 30) || packNear(22)) {
+					saw = true;
+					break;
+				}
+
+				delay(100);
+			}
+
+			snapHold();
+			return saw;
+		}
+
+		function doAggro() {
+			if (walkBait) {
+				walkAggro();
+			} else {
+				pulseAggro();
+			}
+		}
+
 		function tpToBoss(unit) {
 			var tx, ty;
 
@@ -338,7 +390,7 @@ function Diablo() {
 			}
 
 			snapHold();
-			pulseAggro();
+			doAggro();
 
 			for (i = 0; i < waitTicks; i += 1) {
 				snapHold();
@@ -358,7 +410,7 @@ function Diablo() {
 
 					if (idle >= 6) {
 						if (baitPulses < 2) {
-							pulseAggro();
+							doAggro();
 						} else {
 							tpToBoss(boss);
 							break;
@@ -379,7 +431,7 @@ function Diablo() {
 					idle += 1;
 
 					if (idle >= 8) {
-						pulseAggro();
+						doAggro();
 						idle = 0;
 					}
 				}
@@ -442,7 +494,7 @@ function Diablo() {
 				farIdle += 1;
 
 				if (farIdle >= 8) {
-					pulseAggro();
+					doAggro();
 					farIdle = 0;
 				}
 
@@ -498,7 +550,8 @@ function Diablo() {
 	};
 
 	this.seisSeal = function () {
-		var seal, pullX, pullY, baitX, baitY, i, savedTele, savedDelay, opened;
+		var seal, pullX, pullY, baitX, baitY, i, savedTele, savedDelay, opened,
+			dx, dy, dist, step;
 
 		print("Seis layout " + this.seisLayout);
 		this.followPath(this.seisLayout === 1 ? this.starToSeisA : this.starToSeisB);
@@ -541,35 +594,52 @@ function Diablo() {
 
 		seal = getUnit(2, 394);
 
-		if (seal) {
-			pullX = Math.round(seal.x);
-			pullY = Math.round(seal.y + 12);
-			baitX = Math.round(seal.x);
-			baitY = Math.round(seal.y + 4);
-
-			if (!Attack.validSpot(pullX, pullY)) {
-				pullX = Math.round(seal.x - 8);
-				pullY = Math.round(seal.y + 12);
-				baitX = Math.round(seal.x - 8);
-				baitY = Math.round(seal.y + 4);
-			}
-
-			if (!Attack.validSpot(pullX, pullY)) {
-				pullX = Math.round(seal.x + 8);
-				pullY = Math.round(seal.y + 14);
-				baitX = Math.round(seal.x + 8);
-				baitY = Math.round(seal.y + 6);
-			}
-		} else if (this.seisLayout === 1) {
-			pullX = 7780;
-			pullY = 5238;
-			baitX = 7780;
-			baitY = 5228;
+		// Hold on stock kolbot post-seal node (~35-40y south); walk north to aggro
+		if (this.seisLayout === 1) {
+			pullX = 7771;
+			pullY = 5196;
 		} else {
-			pullX = 7800;
-			pullY = 5228;
-			baitX = 7800;
-			baitY = 5218;
+			pullX = 7798;
+			pullY = 5186;
+		}
+
+		if (!Attack.validSpot(pullX, pullY) && seal) {
+			pullX = Math.round(seal.x - 8);
+			pullY = Math.round(seal.y + 38);
+
+			if (!Attack.validSpot(pullX, pullY)) {
+				pullX = Math.round(seal.x + 6);
+				pullY = Math.round(seal.y + 34);
+			}
+		}
+
+		if (seal) {
+			dx = seal.x - pullX;
+			dy = seal.y - pullY;
+			dist = Math.sqrt(dx * dx + dy * dy);
+
+			if (dist > 1) {
+				step = Math.min(16, dist * 0.45);
+				baitX = Math.round(pullX + dx * (step / dist));
+				baitY = Math.round(pullY + dy * (step / dist));
+
+				if (!Attack.validSpot(baitX, baitY)) {
+					step = Math.min(10, dist * 0.3);
+					baitX = Math.round(pullX + dx * (step / dist));
+					baitY = Math.round(pullY + dy * (step / dist));
+				}
+			} else {
+				baitX = pullX;
+				baitY = pullY - 16;
+			}
+		} else {
+			baitX = pullX;
+			baitY = pullY - 16;
+		}
+
+		if (!Attack.validSpot(baitX, baitY)) {
+			baitX = pullX;
+			baitY = pullY - 10;
 		}
 
 		Pather._lastTeleTick = 0;
@@ -588,7 +658,9 @@ function Diablo() {
 			throw new Error("Failed to open de Seis seal.");
 		}
 
-		if (!this.getBoss(getLocaleString(2852), true, pullX, pullY, baitX, baitY)) {
+		print("Lord De Seis — TP pull @ " + pullX + "," + pullY + " (hold + walk aggro)");
+
+		if (!this.getBoss(getLocaleString(2852), true, pullX, pullY, baitX, baitY, true)) {
 			throw new Error("Failed to kill de Seis");
 		}
 
@@ -786,7 +858,7 @@ function Diablo() {
 	this.entranceToStar = [7794, 5517, 7791, 5491, 7768, 5459, 7775, 5424, 7817, 5458, 7777, 5408, 7769, 5379, 7777, 5357, 7809, 5359, 7805, 5330, 7780, 5317, 7791, 5293];
 	this.starToVizA = [7759, 5295, 7734, 5295, 7716, 5295, 7718, 5276, 7697, 5292, 7678, 5293, 7665, 5276, 7662, 5314];
 	this.starToVizB = [7759, 5295, 7734, 5295, 7716, 5295, 7701, 5315, 7666, 5313, 7653, 5284];
-	// Seis: corridor mouth only — openSeal TPs to seal, pull holds south (never nest 5228/5218)
+	// Seis: corridor mouth only — openSeal TPs to seal, pull holds on post-seal node (5196/5186)
 	this.starToSeisA = [7781, 5259, 7805, 5258];
 	this.starToSeisB = [7781, 5259, 7805, 5258];
 	this.starToInfA = [7809, 5268, 7834, 5306, 7852, 5280, 7868, 5295];

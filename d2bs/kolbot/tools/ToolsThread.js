@@ -857,12 +857,14 @@ function main() {
 			}
 
 			break;
-		case 121: // F10 — Pd2Stack CLIENT coords (MUST match bot: stash OPEN)
-			// Pause → open stash (bank) → hover the inv slot where runes land → F10
-			// Inv panel moves when stash is closed — don't calibrate with only I open.
+		case 121: // F10 — Pd2Stack peel cell (MUST match bot: stash OPEN)
+			// Pause → open stash (bank) → hover the EMPTY inv slot → F10
+			// Saves client pixels + nearest empty inv col/row (peel uses clickItem on that cell)
 			try {
 				var emc = getMouseCoords(0),
-					stashOpen = false;
+					stashOpen = false,
+					near = null,
+					cellLine = "";
 
 				try {
 					stashOpen = !!getUIFlag(0x19);
@@ -881,9 +883,31 @@ function main() {
 					break;
 				}
 
-				print("ÿc2Pd2Stack F10ÿc0 :: client " + emc[0] + "," + emc[1] +
-					" (stash OPEN) — EMPTY first inv slot: separate drops here, then Ctrl+Shift clear+");
-				me.overhead("F10 " + emc[0] + "," + emc[1]);
+				try {
+					if (typeof Pd2Stack !== "undefined" && typeof Pd2Stack.nearestEmptyInvCell === "function") {
+						near = Pd2Stack.nearestEmptyInvCell(emc[0], emc[1]);
+					}
+				} catch (eNear) {
+					near = null;
+				}
+
+				if (near) {
+					try {
+						FileTools.writeText("data/pd2_f10_cell.txt", near.col + " " + near.row);
+					} catch (eCell) {}
+
+					cellLine = " → inv cell " + near.col + "," + near.row;
+				} else {
+					// Fallback from default F10 layout (col 0 row 0 on widescreen)
+					try {
+						FileTools.writeText("data/pd2_f10_cell.txt", "0 0");
+					} catch (eCell2) {}
+					cellLine = " → inv cell 0,0 (fallback)";
+				}
+
+				print("ÿc2Pd2Stack F10ÿc0 :: client " + emc[0] + "," + emc[1] + cellLine +
+					" — peel uses that inv cell");
+				me.overhead("F10 " + emc[0] + "," + emc[1] + (near ? (" c" + near.col + "," + near.row) : ""));
 			} catch (eEmpty) {
 				print("ÿc1Pd2Stack F10 error: " + eEmpty);
 			}
@@ -1053,7 +1077,10 @@ function main() {
 
 			if (obj) {
 				// PD2 stack toggle: main bot asks us to ctrl+shift+click
-				if (obj.event === "pd2Stack" && obj.op === "modClick") {
+				// Guard with hasOwnProperty — most scriptmsg payloads are debugInfo
+				// updates without event/op; bare obj.event trips Strict Warning (102).
+				if (obj.hasOwnProperty("event") && obj.hasOwnProperty("op") &&
+						obj.event === "pd2Stack" && obj.op === "modClick") {
 					(function () {
 						var reply, res;
 

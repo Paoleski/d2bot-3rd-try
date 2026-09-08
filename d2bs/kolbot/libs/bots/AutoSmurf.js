@@ -6844,9 +6844,10 @@ function AutoSmurf() {
 			}
 		};
 		// pullFight: TP to hold, cast in place — never Attack.clear / walk toward pack
-		// baitX/baitY: brief re-aggro TP closer to spawn if nothing comes, then snapHold
+		// baitX/baitY: re-aggro closer to spawn if nothing comes, then snapHold
+		// walkBait: walk to bait (Seis) instead of TP pulse (Infector)
 		// If boss is visible but won't come — TP onto him and re-anchor hold there (no bait loop)
-		this.getBoss = function (name, pullFight, holdX, holdY, baitX, baitY) {
+		this.getBoss = function (name, pullFight, holdX, holdY, baitX, baitY, walkBait) {
 			var i, boss, dist, waitTicks, engageDist, glow, mon, best, bestD, d,
 				idle, farIdle, engaged, sawBoss, baitPulses, self = this;
 
@@ -6858,6 +6859,7 @@ function AutoSmurf() {
 			engaged = false;
 			sawBoss = false;
 			baitPulses = 0;
+			walkBait = !!walkBait;
 
 			function snapHold() {
 				if (holdX === undefined || holdY === undefined) {
@@ -6959,6 +6961,63 @@ function AutoSmurf() {
 				snapHold();
 			}
 
+			// Walk toward spawn for LOS/aggro (Seis), poll briefly, then TP back to hold
+			function walkAggro() {
+				var bx, by, savedTele, j, saw;
+
+				bx = (baitX !== undefined) ? baitX : holdX;
+				by = (baitY !== undefined) ? baitY : (holdY - 16);
+
+				if (bx === undefined || by === undefined) {
+					return false;
+				}
+
+				baitPulses += 1;
+				saw = false;
+
+				if (typeof self.status === "function") {
+					self.status("Seal pull — walk aggro @ " + bx + "," + by);
+				} else {
+					print("Seal pull — walk aggro @ " + bx + "," + by);
+				}
+
+				savedTele = Pather.teleport;
+				Pather.teleport = false;
+				Pather.moveTo(bx, by, 2);
+				Pather.teleport = savedTele;
+
+				if (me.getSkill(44, 1)) {
+					Skill.cast(44, 0);
+					delay(80);
+				}
+
+				if (Config.AttackSkill[1] > 0) {
+					Skill.cast(Config.AttackSkill[1], Skill.getHand(Config.AttackSkill[1]), bx, by - 8);
+				}
+
+				for (j = 0; j < 18; j += 1) {
+					boss = getUnit(1, name);
+
+					if ((boss && Attack.checkMonster(boss) && getDistance(me, boss) <= 30) || packNear(22)) {
+						saw = true;
+						break;
+					}
+
+					delay(100);
+				}
+
+				snapHold();
+				return saw;
+			}
+
+			function doAggro() {
+				if (walkBait) {
+					walkAggro();
+				} else {
+					pulseAggro();
+				}
+			}
+
 			// Aggro failed — TP to boss, re-anchor hold nearby (stops bait↔hold loop)
 			function tpToBoss(unit) {
 				var tx, ty;
@@ -7024,7 +7083,7 @@ function AutoSmurf() {
 
 				snapHold();
 				// First peek closer so we don't wait forever with no LOS
-				pulseAggro();
+				doAggro();
 
 				for (i = 0; i < waitTicks; i += 1) {
 					snapHold();
@@ -7045,7 +7104,7 @@ function AutoSmurf() {
 						// Visible but not coming: 1–2 bait pulses, then TP onto him
 						if (idle >= 6) {
 							if (baitPulses < 2) {
-								pulseAggro();
+								doAggro();
 							} else {
 								tpToBoss(boss);
 								break;
@@ -7066,7 +7125,7 @@ function AutoSmurf() {
 						idle += 1;
 
 						if (idle >= 8) {
-							pulseAggro();
+							doAggro();
 							idle = 0;
 						}
 					}
@@ -7131,7 +7190,7 @@ function AutoSmurf() {
 					farIdle += 1;
 
 					if (farIdle >= 8) {
-						pulseAggro();
+						doAggro();
 						farIdle = 0;
 					}
 
@@ -7182,7 +7241,8 @@ function AutoSmurf() {
 			return true;
 		};
 		this.seisSeal = function () {
-			var seal, pullX, pullY, baitX, baitY, i, savedTele, savedDelay, opened;
+			var seal, pullX, pullY, baitX, baitY, i, savedTele, savedDelay, opened,
+				dx, dy, dist, step;
 
 			this.status("Seis layout " + this.seisLayout);
 			this.followPath(this.seisLayout === 1 ? this.starToSeisA : this.starToSeisB);
@@ -7226,36 +7286,53 @@ function AutoSmurf() {
 
 			seal = getUnit(2, 394);
 
-			// Hold ~12 south of seal (was 22 — too far, no aggro); bait ~4 south
-			if (seal) {
-				pullX = Math.round(seal.x);
-				pullY = Math.round(seal.y + 12);
-				baitX = Math.round(seal.x);
-				baitY = Math.round(seal.y + 4);
-
-				if (!Attack.validSpot(pullX, pullY)) {
-					pullX = Math.round(seal.x - 8);
-					pullY = Math.round(seal.y + 12);
-					baitX = Math.round(seal.x - 8);
-					baitY = Math.round(seal.y + 4);
-				}
-
-				if (!Attack.validSpot(pullX, pullY)) {
-					pullX = Math.round(seal.x + 8);
-					pullY = Math.round(seal.y + 14);
-					baitX = Math.round(seal.x + 8);
-					baitY = Math.round(seal.y + 6);
-				}
-			} else if (this.seisLayout === 1) {
-				pullX = 7780;
-				pullY = 5238;
-				baitX = 7780;
-				baitY = 5228;
+			// Hold on stock kolbot post-seal node (~35-40y south); walk north to aggro
+			if (this.seisLayout === 1) {
+				pullX = 7771;
+				pullY = 5196;
 			} else {
-				pullX = 7800;
-				pullY = 5228;
-				baitX = 7800;
-				baitY = 5218;
+				pullX = 7798;
+				pullY = 5186;
+			}
+
+			if (!Attack.validSpot(pullX, pullY) && seal) {
+				pullX = Math.round(seal.x - 8);
+				pullY = Math.round(seal.y + 38);
+
+				if (!Attack.validSpot(pullX, pullY)) {
+					pullX = Math.round(seal.x + 6);
+					pullY = Math.round(seal.y + 34);
+				}
+			}
+
+			// Bait ~16y from hold toward seal (shorten to 10y if invalid)
+			if (seal) {
+				dx = seal.x - pullX;
+				dy = seal.y - pullY;
+				dist = Math.sqrt(dx * dx + dy * dy);
+
+				if (dist > 1) {
+					step = Math.min(16, dist * 0.45);
+					baitX = Math.round(pullX + dx * (step / dist));
+					baitY = Math.round(pullY + dy * (step / dist));
+
+					if (!Attack.validSpot(baitX, baitY)) {
+						step = Math.min(10, dist * 0.3);
+						baitX = Math.round(pullX + dx * (step / dist));
+						baitY = Math.round(pullY + dy * (step / dist));
+					}
+				} else {
+					baitX = pullX;
+					baitY = pullY - 16;
+				}
+			} else {
+				baitX = pullX;
+				baitY = pullY - 16;
+			}
+
+			if (!Attack.validSpot(baitX, baitY)) {
+				baitX = pullX;
+				baitY = pullY - 10;
 			}
 
 			Pather._lastTeleTick = 0;
@@ -7274,9 +7351,9 @@ function AutoSmurf() {
 				this.status("Lord De Seis — seal may be closed, fighting from pull anyway");
 			}
 
-			this.status("Lord De Seis — TP pull @ " + pullX + "," + pullY + " (hold + re-aggro)");
+			this.status("Lord De Seis — TP pull @ " + pullX + "," + pullY + " (hold + walk aggro)");
 
-			if (!this.getBoss(getLocaleString(2852), true, pullX, pullY, baitX, baitY)) {
+			if (!this.getBoss(getLocaleString(2852), true, pullX, pullY, baitX, baitY, true)) {
 				// stay on hold — no clear chase
 				//throw new Error("Failed to kill de Seis");
 			}
@@ -7419,7 +7496,7 @@ function AutoSmurf() {
 		this.entranceToStar = [7794, 5517, 7791, 5491, 7768, 5459, 7775, 5424, 7817, 5458, 7777, 5408, 7769, 5379, 7777, 5357, 7809, 5359, 7805, 5330, 7780, 5317, 7791, 5293];
 		this.starToVizA = [7759, 5295, 7734, 5295, 7716, 5295, 7718, 5276, 7697, 5292, 7678, 5293, 7665, 5276, 7662, 5314];
 		this.starToVizB = [7759, 5295, 7734, 5295, 7716, 5295, 7701, 5315, 7666, 5313, 7653, 5284];
-		// Seis: stop at corridor mouth — never walk nest (5228/5218). openSeal TPs to seal, then pull holds south.
+		// Seis: stop at corridor mouth — openSeal TPs to seal, then pull holds on post-seal node (5196/5186)
 		this.starToSeisA = [7781, 5259, 7805, 5258];
 		this.starToSeisB = [7781, 5259, 7805, 5258];
 		// Infector: stop west of pit — openSeal + pull node handle the rest

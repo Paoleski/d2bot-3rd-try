@@ -226,8 +226,12 @@ var Config = {
 	RepairPercent: 0, // 0 = only when broken (0 durability) / empty stack
 	Recipes: [],
 	MakeRunewords: false,
-	PauseOnRunewordFail: true, // lab: freeze bot on Lore/RW make fail so we can debug unstack
 	RunewordWatchDelay: 500, // lab: ms pause between unstack/separate/socket steps (0=off)
+	RunewordDebug: false, // Lore/Stealth diagnose dumps, cull notes, helper status, Pd2Stack verbose — only the make itself logs when false
+	// Loot-filter marker that means a rune is socketable (Ctrl+Shift cleared +form). Override if your filter wording differs.
+	Pd2UnstackedNameRegex: /UNSTACKED|WILL\s*SOCKET/i,
+	Pd2ClientWidth: 0, // 0 = read from helper heartbeat; set if helper has no W H yet
+	Pd2ClientHeight: 0,
 	Runewords: [],
 	KeepRunewords: [],
 	Gamble: false,
@@ -235,6 +239,7 @@ var Config = {
 	GambleGoldStart: 0,
 	GambleGoldStop: 0,
 	MiniShopBot: false,
+	MiniShopMinGold: 2000, // MiniShop scan is only a reason to visit the vendor with this much gold (RW base hunts ignore it)
 	TeleSwitch: false,
 	MFSwitch: 0,
 	MFSwitchPercent: 0,

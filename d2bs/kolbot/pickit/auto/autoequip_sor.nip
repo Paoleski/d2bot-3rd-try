@@ -109,7 +109,9 @@
 [name] == sallet && [quality] == unique && [Flag] != Ethereal # [FireResist] >= 12 && [LightResist] >= 12  # [tier] == 102 
 [name] == crown && [quality] == set && [Flag] != Ethereal # [FireResist] == 30 && [LightResist] == 30  # [tier] == 103
 [type] == helm && [flag] == runeword # [LightResist] >= 25 # [tier] == 80 // Lore — priority over early rares
+[type] == circlet && [flag] == runeword # [LightResist] >= 25 # [tier] == 80 // Lore circlet
 [type] == helm && [flag] == runeword # [LightResist] >= 30 # [tier] == 104
+[type] == circlet && [flag] == runeword # [LightResist] >= 30 # [tier] == 104
 [name] == deathmask && [quality] == set && [Flag] != Ethereal # [FireResist] >= 12 && [LightResist] >= 12  # [tier] == 105
 [name] == shako && [quality] == unique && [Flag] != Ethereal # [itemallskills] == 2 # [tier] == 106
 [Name] == DeathMask && [Quality] == Set && [Flag] != Ethereal # [Defense] >= 99  # [maxquantity] == 1 && [tier] == 107

@@ -203,6 +203,40 @@ var Runewords = {
 		return list;
 	},
 
+	// Short-lived memo for whole-storage scans (hasCompleted*, best empty bases, haveRunes).
+	// Pickit.checkItem / Town.shouldStashItem / Item.isProtectedRWBase call these once per item,
+	// so without this every item evaluation re-walked the whole inventory + stash (O(n²)).
+	_memo: {},
+	MEMO_TTL: 1500,
+
+	memo: function (key, fn) {
+		var now = getTickCount(), e, v;
+
+		key += getUIFlag(0x19) ? ":s" : ":n";
+		e = this._memo[key];
+
+		if (e && now - e.t < this.MEMO_TTL) {
+			return e.v;
+		}
+
+		v = fn.call(this);
+		this._memo[key] = {t: now, v: v};
+
+		return v;
+	},
+
+	// Call after anything that changes storage in a way the memo must see now (make, equip, cull, peel)
+	invalidateCache: function () {
+		this._memo = {};
+	},
+
+	// Diagnostic spam (Lore/Stealth diagnose, cull notes, helper status) — off unless Config.RunewordDebug
+	dbg: function (line) {
+		if (Config.RunewordDebug) {
+			this.rwLog(line);
+		}
+	},
+
 	// print once + pd2stack.log — do NOT print then Pd2Stack.log (that double-prints)
 	rwLog: function (line) {
 		if (typeof Pd2Stack !== "undefined" && typeof Pd2Stack.log === "function") {
@@ -563,77 +597,31 @@ var Runewords = {
 		return String(unit.code || unit.classid || "?");
 	},
 
-	// Lab: stop chicken/bot after RW make fail so we can fix F10 / unstack by hand
-	pauseOnMakeFail: function (reason) {
-		var i, script,
-			scripts = ["tools/townchicken.js", "tools/antihostile.js", "tools/party.js", "tools/rushthread.js"];
-
-		if (Config.PauseOnRunewordFail === false) {
-			return false;
-		}
-
-		reason = reason || "runeword make failed";
-
-		print("ÿc1RWÿc0 :: FAIL PAUSE — " + reason);
-		print("ÿc8RWÿc0 :: everything held. Fix helper/F10/runes, then reload scripts (or set Config.PauseOnRunewordFail=false).");
-		me.overhead("RW FAIL — PAUSED");
-
-		try {
-			D2Bot.printToConsole("Runeword FAIL paused: " + reason, 9);
-		} catch (e0) {}
-
-		try {
-			scriptBroadcast("userPause");
-		} catch (e1) {}
-
-		for (i = 0; i < scripts.length; i += 1) {
-			script = getScript(scripts[i]);
-
-			if (script && script.running) {
-				try {
-					script.pause();
-				} catch (e2) {}
-			}
-		}
-
-		// Hold default.dbj here — do not return into AutoSmurf / chores
-		while (true) {
-			delay(2500);
-			me.overhead("RW FAIL — PAUSED");
-		}
-	},
-
 	// Unstack via Pd2Stack — cube recipes are obsolete
 	unstackOneRune: function (stack) {
-		var item, label;
+		var item;
 
 		if (!stack) {
 			return false;
 		}
 
 		if (typeof Pd2Stack === "undefined" || typeof Pd2Stack.unstackOne !== "function") {
-			print("ÿc1RWÿc0 :: unstack fail — Pd2Stack missing");
+			print("ÿc1peel failÿc0 :: Pd2Stack missing");
 			return false;
 		}
 
-		label = this.runeLogLabel(stack);
-
 		if (this.canSocketRune(stack)) {
-			print("ÿc2RWÿc0 :: unstack skip — already socketable " + label);
 			return copyUnit(stack);
 		}
 
-		print("ÿc4RWÿc0 :: unstack " + label +
-			" qty=" + this.runeQty(stack) +
-			" stack=" + this.isPd2RuneStack(stack));
 		item = Pd2Stack.unstackOne(stack);
 
 		if (item && this.canSocketRune(item)) {
-			print("ÿc2RWÿc0 :: unstack ok " + this.runeLogLabel(item));
 			return item;
 		}
 
-		print("ÿc1RWÿc0 :: unstack fail " + label);
+		print("ÿc1peel failÿc0 :: " + this.runeLogLabel(stack) +
+			(item ? (" still not socketable") : " aborted"));
 		return false;
 	},
 
@@ -658,11 +646,21 @@ var Runewords = {
 
 	// True if inv/stash/cube holds every rune in the recipe (singles or PD2 stacks)
 	haveRunes: function (runeIds, openStashFirst) {
-		var i, j, items, need;
-
 		if (!runeIds || !runeIds.length) {
 			return false;
 		}
+
+		if (openStashFirst === true) {
+			return this._haveRunesRaw(runeIds, true);
+		}
+
+		return this.memo("haveRunes:" + runeIds.join(","), function () {
+			return this._haveRunesRaw(runeIds, false);
+		});
+	},
+
+	_haveRunesRaw: function (runeIds, openStashFirst) {
+		var i, j, items, need;
 
 		// Never walk — if stash UI is already open, loc 7 enumerates; else inv/cube only
 		items = this.listStorageItems(openStashFirst === true);
@@ -752,6 +750,10 @@ var Runewords = {
 
 	// Already wearing/stashing a finished Stealth (or other KeepRunewords armor match)
 	hasCompletedArmorRuneword: function () {
+		return this.memo("doneArmor", this._hasCompletedArmorRunewordRaw);
+	},
+
+	_hasCompletedArmorRunewordRaw: function () {
 		var item = me.getItem(-1),
 			i;
 
@@ -823,6 +825,10 @@ var Runewords = {
 	},
 
 	hasCompletedInsight: function () {
+		return this.memo("doneInsight", this._hasCompletedInsightRaw);
+	},
+
+	_hasCompletedInsightRaw: function () {
 		var item = me.getItem(-1), merc;
 
 		if (item) {
@@ -962,6 +968,10 @@ var Runewords = {
 	},
 
 	listEmptyInsightBases: function () {
+		return this.memo("emptyInsight", this._listEmptyInsightBasesRaw);
+	},
+
+	_listEmptyInsightBasesRaw: function () {
 		var item = me.getItem(-1, -1), list = [], score;
 
 		if (!item) {
@@ -1003,11 +1013,12 @@ var Runewords = {
 	wantInsightBase: function (unit) {
 		var best, score;
 
-		if (!unit || this.hasCompletedInsight() || !this.hasInsightRecipe()) {
+		// Cheap rejects first (type/config) — hasCompletedInsight walks all items
+		if (!unit || unit.itemType !== 34 || !this.hasInsightRecipe() || !this.isConfiguredInsightBase(unit)) {
 			return false;
 		}
 
-		if (!this.isConfiguredInsightBase(unit)) {
+		if (this.hasCompletedInsight()) {
 			return false;
 		}
 
@@ -1034,7 +1045,7 @@ var Runewords = {
 			return 0;
 		}
 
-		print("ÿc2Runewordsÿc0 :: Insight — keeping best base score=" + list[0].score +
+		this.dbg("ÿc2Runewordsÿc0 :: Insight — keeping best base score=" + list[0].score +
 			" (" + (list[0].item.name || list[0].item.classid) + "), culling " + (list.length - 1));
 
 		for (i = 1; i < list.length; i += 1) {
@@ -1060,6 +1071,10 @@ var Runewords = {
 					n += 1;
 				} catch (eDrop) {}
 			}
+		}
+
+		if (n > 0) {
+			this.invalidateCache();
 		}
 
 		return n;
@@ -1172,13 +1187,18 @@ var Runewords = {
 
 	// Empty 2os Lore helms/circlets. Never auto-walk — pass true only when stash already needed.
 	listEmptyLoreBases: function (openStashFirst) {
-		var item, list = [], score, def;
-
 		if (openStashFirst === true && typeof Town !== "undefined" &&
 				typeof Town.openStash === "function" && !getUIFlag(0x19)) {
 			Town.openStash();
 			delay(80 + me.ping);
+			this.invalidateCache();
 		}
+
+		return this.memo("emptyLore", this._listEmptyLoreBasesRaw);
+	},
+
+	_listEmptyLoreBasesRaw: function () {
+		var item, list = [], score, def;
 
 		item = me.getItem(-1, -1);
 		list = [];
@@ -1281,11 +1301,13 @@ var Runewords = {
 	wantLoreBase: function (unit) {
 		var best, score;
 
-		if (!unit || this.hasCompletedLoreHelm() || !this.hasLoreRecipe()) {
+		// Cheap rejects first (type/config) — hasCompletedLoreHelm walks all items
+		if (!unit || (unit.itemType !== 37 && unit.itemType !== 75) || !this.hasLoreRecipe() ||
+				!this.isConfiguredLoreBase(unit)) {
 			return false;
 		}
 
-		if (!this.isConfiguredLoreBase(unit)) {
+		if (this.hasCompletedLoreHelm()) {
 			return false;
 		}
 
@@ -1313,7 +1335,7 @@ var Runewords = {
 			return 0;
 		}
 
-		print("ÿc2Runewordsÿc0 :: Lore — keeping best def=" + list[0].def +
+		this.dbg("ÿc2Runewordsÿc0 :: Lore — keeping best def=" + list[0].def +
 			" (" + (list[0].item.name || list[0].item.classid) + "), culling " + (list.length - 1));
 
 		for (i = 1; i < list.length; i += 1) {
@@ -1339,6 +1361,10 @@ var Runewords = {
 			}
 		}
 
+		if (n > 0) {
+			this.invalidateCache();
+		}
+
 		return n;
 	},
 
@@ -1361,6 +1387,10 @@ var Runewords = {
 	},
 
 	hasCompletedLoreHelm: function () {
+		return this.memo("doneLore", this._hasCompletedLoreHelmRaw);
+	},
+
+	_hasCompletedLoreHelmRaw: function () {
 		var item = me.getItem(-1);
 
 		if (!item) {
@@ -1370,16 +1400,77 @@ var Runewords = {
 		do {
 			// Helm or circlet Lore
 			if ((item.itemType === 37 || item.itemType === 75) && item.getFlag(0x4000000)) {
-				if (this.pickitEntries.length) {
-					if (NTIP.CheckItem(item, this.pickitEntries)) {
-						return true;
-					}
-				} else if ((item.getStat(39) || 0) >= 25) {
-					// Lore: +25 light res fallback
+				if (this.pickitEntries.length && NTIP.CheckItem(item, this.pickitEntries)) {
+					return true;
+				}
+
+				// Lore always grants +25 light res — works even when KeepRunewords/nip miss circlets
+				if ((item.getStat(39) || 0) >= 25) {
 					return true;
 				}
 			}
 		} while (item.getNext());
+
+		return false;
+	},
+
+	// After make: wear finished Lore (or any tiered RW) from stash/inv before chores continues
+	equipMadeItem: function (unit, madeName) {
+		var bodyLoc, j, tier, eqTier, gid, live;
+
+		if (!Config.AutoEquip || typeof Item === "undefined" || !unit) {
+			return false;
+		}
+
+		gid = unit.gid;
+		live = me.getItem(-1, -1, gid) || unit;
+
+		if (!live || live.mode === 1) {
+			return false;
+		}
+
+		if (!Item.canEquip(live)) {
+			print("ÿc8RWÿc0 :: cannot equip yet " + (madeName || this.runeLogLabel(live)) +
+				" (str/dex/lvl)");
+			return false;
+		}
+
+		bodyLoc = Item.getBodyLoc(live);
+
+		if (!bodyLoc || !bodyLoc.length) {
+			return false;
+		}
+
+		tier = NTIP.GetTier(live) || 0;
+
+		// Lore circlet/helm with no #tier line yet — still better than empty starter helms
+		if (tier < 1 && (live.itemType === 37 || live.itemType === 75) &&
+				live.getFlag(0x4000000) && (live.getStat(39) || 0) >= 25) {
+			tier = 80;
+		}
+
+		if (tier < 1) {
+			return false;
+		}
+
+		for (j = 0; j < bodyLoc.length; j += 1) {
+			eqTier = Item.getEquippedItem(bodyLoc[j]).tier;
+
+			if (eqTier < 0) {
+				eqTier = 0;
+			}
+
+			if (tier > eqTier) {
+				print("ÿc2RWÿc0 :: equipping " + (madeName || live.name || "?") +
+					" (tier " + tier + " > " + eqTier + ")");
+
+				if (Item.equip(live, bodyLoc[j])) {
+					Misc.logItem("Equipped", me.getItem(-1, -1, gid) || live);
+					this.invalidateCache();
+					return true;
+				}
+			}
+		}
 
 		return false;
 	},
@@ -1391,11 +1482,15 @@ var Runewords = {
 
 	// Fire Leaf: stop hunting once a real skill orb exists (tier >= 50)
 	hasBetterThanLeafOrb: function () {
-		var item, tier;
-
 		if (typeof Item === "undefined" || typeof Item.isOrbItem !== "function") {
 			return false;
 		}
+
+		return this.memo("betterLeafOrb", this._hasBetterThanLeafOrbRaw);
+	},
+
+	_hasBetterThanLeafOrbRaw: function () {
+		var item, tier;
 
 		item = me.getItem(-1, -1);
 
@@ -1584,6 +1679,10 @@ var Runewords = {
 	},
 
 	hasCompletedSpiritSword: function () {
+		return this.memo("doneSpirit", this._hasCompletedSpiritSwordRaw);
+	},
+
+	_hasCompletedSpiritSwordRaw: function () {
 		var item = me.getItem(-1);
 
 		if (!item) {
@@ -1985,7 +2084,7 @@ RuneLore:
 					k = this.findRecipeRune(items, recipe[j]);
 
 					if (k < 0) {
-						print("ÿc1RWÿc0 :: Lore — have base but missing rune classid=" + recipe[j] +
+						this.dbg("ÿc1RWÿc0 :: Lore — have base but missing rune classid=" + recipe[j] +
 							" (Ort=636 Sol=639); stash runes scanned=" + items.length);
 						break RuneLore;
 					}
@@ -2048,9 +2147,36 @@ RuneLoop:
 	},
 
 	checkItem: function (unit) { // for pickit + MiniShopBot
-		var i;
+		var i, sockets;
 
 		if (!Config.MakeRunewords || !unit) {
+			return false;
+		}
+
+		// Needed runes — match any PD2 form (single / stack / rXXg) against needList singles
+		if (typeof Pickit !== "undefined" && Pickit.isRuneItem(unit)) {
+			for (i = 0; i < this.needList.length; i += 1) {
+				if (this.runeMatchesClassid(unit, this.needList[i])) {
+					return true;
+				}
+			}
+
+			return false;
+		}
+
+		// Cheap reject: a RW base must be an empty socketed white/grey item.
+		// Potions/junk/magic gear never reach the whole-storage scans below.
+		if (unit.getItem() || unit.quality > 3) {
+			return false;
+		}
+
+		sockets = unit.getStat(194) || 0;
+
+		if (typeof unit.getStatEx === "function") {
+			sockets = Math.max(sockets, unit.getStatEx(194) || 0);
+		}
+
+		if (sockets < 1) {
 			return false;
 		}
 
@@ -2067,15 +2193,6 @@ RuneLoop:
 		// Priority: empty RW base when we already have the runes (e.g. Tal+Eth → Stealth base)
 		if (this.wantBaseForRunes(unit)) {
 			return true;
-		}
-
-		// Needed runes — match any PD2 form (single / stack / rXXg) against needList singles
-		if (typeof Pickit !== "undefined" && Pickit.isRuneItem(unit)) {
-			for (i = 0; i < this.needList.length; i += 1) {
-				if (this.runeMatchesClassid(unit, this.needList[i])) {
-					return true;
-				}
-			}
 		}
 
 		return false;
@@ -2437,22 +2554,19 @@ RuneLoop:
 		}
 
 		var i, items, stealthWanted, loreWanted, baseGid, rune, sockOk, base,
-			baseName, runeLabel, madeName, prefix, asideN;
+			baseName, runeLabel, madeName, prefix, asideN, made;
 
-		stealthWanted = this.hasStealthRecipe() && !this.hasCompletedArmorRuneword();
-		loreWanted = this.hasLoreRecipe() && !this.hasCompletedLoreHelm();
-		// Fresh diagnose each chores pass while Lore still wanted
-		this._loreDiagnosed = false;
-		this._stealthDiagnosed = false;
+		// Storage may have changed since the last memo (pickups, stash moves) — start clean
+		this.invalidateCache();
 
 		// Nothing still wanted (e.g. Lore already on head) — don't walk to stash
 		if (!this.hasWantedRecipe()) {
 			return false;
 		}
 
-		if (typeof Pd2Stack !== "undefined" && typeof Pd2Stack.reportHelperStatus === "function") {
-			Pd2Stack.reportHelperStatus(false);
-		}
+		stealthWanted = this.hasStealthRecipe() && !this.hasCompletedArmorRuneword();
+		loreWanted = this.hasLoreRecipe() && !this.hasCompletedLoreHelm();
+		made = false;
 
 		// Only clear cube UI if it's open — do NOT walk to stash yet
 		if (getUIFlag(0x1a)) {
@@ -2461,48 +2575,42 @@ RuneLoop:
 		}
 
 		while (true) {
-			// Inv/cube-only scan first — do NOT walk to stash yet
+			// Scan inv + stash contents (getItem sees stash without UI). Never walk to stash just to check.
 			this.buildLists();
 			items = this.checkRunewords();
 
-			if (!items && !getUIFlag(0x19)) {
-				// Materials may be in closed stash (PD2) — open once, then rescan
-				print("ÿc4RWÿc0 :: no inv recipe — opening stash to scan");
-
-				if (!Town.openStash()) {
-					print("ÿc1RWÿc0 :: make fail — stash");
-					return this.pauseOnMakeFail("stash open failed");
-				}
-
-				delay(80 + me.ping);
-				this.buildLists();
-				items = this.checkRunewords();
-			}
-
 			if (!items) { // can't make runewords - exit loop
-				if (stealthWanted && !this._stealthDiagnosed) {
-					this._stealthDiagnosed = true;
-					this.diagnoseStealth();
-				}
+				// Diagnose dumps are debug-only and once per game (Config.RunewordDebug)
+				if (Config.RunewordDebug) {
+					if (stealthWanted && !this._stealthDiagnosed) {
+						this._stealthDiagnosed = true;
+						this.diagnoseStealth();
+					}
 
-				if (loreWanted && !this._loreDiagnosed) {
-					this._loreDiagnosed = true;
-					this.rwLog("ÿc1RWÿc0 :: Lore not ready — emptyBase=" + !!this.getBestEmptyLoreBase() +
-						" haveOrtSol=" + this.haveRunes(Runeword.Lore, false) +
-						" storageItems=" + this.listStorageItems(false).length +
-						" stashOpen=" + !!getUIFlag(0x19));
-					this.diagnoseLoreRunes();
-					this.diagnoseLoreBases();
+					if (loreWanted && !this._loreDiagnosed) {
+						this._loreDiagnosed = true;
+						this.rwLog("ÿc1RWÿc0 :: Lore not ready — emptyBase=" + !!this.getBestEmptyLoreBase() +
+							" haveOrtSol=" + this.haveRunes(Runeword.Lore, false) +
+							" storageItems=" + this.listStorageItems(false).length +
+							" stashOpen=" + !!getUIFlag(0x19));
+						this.diagnoseLoreRunes();
+						this.diagnoseLoreBases();
+					}
 				}
 
 				break;
 			}
 
-			// Have a recipe — stash must stay open for F10 peel + in-stash socket
+			// About to peel/socket — now the ForceKeys helper matters (probe can cost ~2s, so only here)
+			if (typeof Pd2Stack !== "undefined" && typeof Pd2Stack.reportHelperStatus === "function") {
+				Pd2Stack.reportHelperStatus(false);
+			}
+
+			// Have a recipe — open stash only to prepare/socket (not for a dry check)
 			if (!getUIFlag(0x19)) {
 				if (!Town.openStash()) {
 					print("ÿc1RWÿc0 :: make fail — stash for prepare");
-					return this.pauseOnMakeFail("stash open failed");
+					return false;
 				}
 
 				delay(80 + me.ping);
@@ -2529,20 +2637,9 @@ RuneLoop:
 				asideN = Pd2Stack.stashAsideInvGear([]);
 
 				if (asideN > 0) {
-					print("ÿc4RWÿc0 :: stashAside " + asideN + " gear (keep F10 clear)");
 					items[0] = me.getItem(-1, -1, baseGid) || items[0];
 					this.watchPause("after stashAside base");
 				}
-			}
-
-			// Log every recipe slot first (Lore = Ort then Sol — never qty-sorted)
-			for (i = 1; i < items.length; i += 1) {
-				rune = items[i];
-				print("ÿc4RWÿc0 :: slot " + i + "/" + (items.length - 1) + " " +
-					this.runeLogLabel(rune) +
-					" qty=" + this.runeQty(rune) +
-					" stack=" + this.isPd2RuneStack(rune) +
-					" sock=" + this.canSocketRune(rune));
 			}
 
 			// Prepare in recipe order (Ort before Sol). Same peel for every rune:
@@ -2554,32 +2651,33 @@ RuneLoop:
 				if (!rune) {
 					print("ÿc1RWÿc0 :: make abort — missing rune slot " + i);
 					me.cancel();
-					return this.pauseOnMakeFail("missing rune slot " + i);
+					return false;
 				}
 
 				runeLabel = this.runeLogLabel(rune);
 
 				if (!this.isPd2RuneStack(rune) && this.canSocketRune(rune)) {
-					print("ÿc2RWÿc0 :: slot " + i + " ready " + runeLabel);
+					if (i < items.length - 1) {
+						print("Moving to next rune");
+					}
 					continue;
 				}
-
-				print("ÿc4RWÿc0 :: prepare slot " + i + "/" + (items.length - 1) + " " +
-					runeLabel + " qty=" + this.runeQty(rune) +
-					(this.runeQty(rune) > 1 ? " (separate then clear+)" : " (clear+ only)"));
 
 				this.watchPause("before unstack slot " + i);
 				rune = this.unstackOneRune(rune);
 
 				if (!rune || !this.canSocketRune(rune)) {
-					print("ÿc1RWÿc0 :: make abort — unstack failed slot " + i + " " + runeLabel +
-						" (later slots not attempted)");
+					print("ÿc1RWÿc0 :: make abort — unstack failed slot " + i + " " + runeLabel);
 					me.cancel();
-					return this.pauseOnMakeFail("unstack fail slot " + i + " " + runeLabel);
+					return false;
 				}
 
 				items[i] = rune;
-				print("ÿc2RWÿc0 :: prepared slot " + i + " " + this.runeLogLabel(rune));
+
+				if (i < items.length - 1) {
+					print("Moving to next rune");
+				}
+
 				this.watchPause("after unstack slot " + i);
 			}
 
@@ -2590,7 +2688,7 @@ RuneLoop:
 
 				if (!Town.openStash()) {
 					print("ÿc1RWÿc0 :: make abort — stash for socket");
-					return this.pauseOnMakeFail("stash for socket");
+					return false;
 				}
 			}
 
@@ -2599,7 +2697,7 @@ RuneLoop:
 			if (!base) {
 				print("ÿc1RWÿc0 :: make abort — lost base");
 				me.cancel();
-				return this.pauseOnMakeFail("lost base gid=" + baseGid);
+				return false;
 			}
 
 			// Socket while base stays in stash (loc 7). If somehow in inv, park it first.
@@ -2624,7 +2722,7 @@ RuneLoop:
 					print("ÿc1RWÿc0 :: socket preflight fail — slot " + i + " " +
 						this.runeLogLabel(rune) + " still stacked (no sockets written)");
 					me.cancel();
-					return this.pauseOnMakeFail("preflight still stacked slot " + i);
+					return false;
 				}
 			}
 
@@ -2652,7 +2750,7 @@ RuneLoop:
 			if (!sockOk || !items[0].getFlag(0x4000000)) {
 				print("ÿc1RWÿc0 :: make incomplete — stop");
 				me.cancel();
-				return this.pauseOnMakeFail("make incomplete (socket/RW flag)");
+				return false;
 			}
 
 			madeName = items[0].fname.split("\n").reverse().join(" ").replace(/ÿc[0-9!"+<;.*]/, "");
@@ -2663,6 +2761,17 @@ RuneLoop:
 				Misc.itemLogger("Runeword Kept", items[0]);
 				Misc.logItem("Runeword Kept", items[0]);
 			}
+
+			made = true;
+			this.invalidateCache();
+
+			// Wear Lore/Stealth/etc immediately — chores autoEquip can miss circlets with no #tier
+			this.equipMadeItem(me.getItem(-1, -1, baseGid) || items[0], madeName);
+		}
+
+		if (!made) {
+			// Dry pass: nothing socketed, nothing to reroll, no lists to rebuild
+			return false;
 		}
 
 		me.cancel();

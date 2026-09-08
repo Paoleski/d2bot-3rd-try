@@ -462,3 +462,4 @@ var AutoSkill = new function () {
 };
 
 };
+};

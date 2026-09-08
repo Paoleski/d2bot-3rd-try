@@ -76,7 +76,60 @@ var Town = {
 	lastFullChores: 0,
 	forceNextChores: false, // set true for boss prep (Andy antidotes / Duriel thawing, etc.)
 
-	// Full vendor+stash pass only when something still needs doing
+	// Gold needed before a potion top-up is worth a vendor walk (buyPotions bails below this anyway)
+	potionGoldMin: function () {
+		return me.charlvl < 12 ? 50 : 500;
+	},
+
+	// True only when the single chores Shop trade has real work:
+	// heal (Shop NPC also heals) / shop-ID or sell / pots we can afford / tome / keys / MiniShop.
+	// Nothing here → doChores skips initNPC("Shop") and the bot heads straight to the objective.
+	needShopPass: function (tasks) {
+		var i, items;
+
+		if (!tasks) {
+			tasks = this.tasks[me.act - 1];
+		}
+
+		if (tasks && tasks.Heal === tasks.Shop && this.needHealing()) {
+			return true;
+		}
+
+		if (this.identifyNeedsShop(!!this._choresUsedCain)) {
+			return true;
+		}
+
+		items = Storage.Inventory.Compare(Config.Inventory);
+
+		for (i = 0; !!items && i < items.length; i += 1) {
+			if (this.isTownJunk(items[i])) {
+				return true;
+			}
+		}
+
+		if (me.gold >= this.potionGoldMin() &&
+				(this.potionNeedCount("hp") > 0 || this.potionNeedCount("mp") > 0)) {
+			return true;
+		}
+
+		if (me.gold >= 50 && (this.tomeNeedsFill("tbk") || (Config.FieldID && this.tomeNeedsFill("ibk")))) {
+			return true;
+		}
+
+		if (tasks && tasks.Key === tasks.Shop && this.wantKeys()) {
+			return true;
+		}
+
+		if (this.miniShopWanted()) {
+			return true;
+		}
+
+		return false;
+	},
+
+	// Full vendor+stash pass only when something still needs doing.
+	// No "first chores this game" / "older than N min" auto-yes: a fresh char with full HP,
+	// empty inv and no gold goes straight to the objective.
 	needFullChores: function (repair) {
 		var age, unids, items, i, repairNeed;
 
@@ -84,11 +137,7 @@ var Town = {
 			return true;
 		}
 
-		if (!this.lastFullChores) {
-			return true; // first chores this game
-		}
-
-		age = getTickCount() - this.lastFullChores;
+		age = this.lastFullChores ? (getTickCount() - this.lastFullChores) : Infinity;
 
 		// Just finished chores (start → next objective) — do NOT re-vendor for buffer top-ups.
 		// TownChicken sets forceNextChores when it TPs for a real pot need.
@@ -121,16 +170,13 @@ var Town = {
 			return false;
 		}
 
-		// Field time — refresh even if checks look fine
-		if (age > 4 * 60 * 1000) {
-			return true;
-		}
-
 		if (this.needHealing()) {
 			return true;
 		}
 
-		if (this.potionNeedCount("hp") > 0 || this.potionNeedCount("mp") > 0) {
+		// Belt/buffer top-up only counts when we can pay for it (buyPotions bails on low gold)
+		if (me.gold >= this.potionGoldMin() &&
+				(this.potionNeedCount("hp") > 0 || this.potionNeedCount("mp") > 0)) {
 			return true;
 		}
 
@@ -160,6 +206,27 @@ var Town = {
 			return true;
 		}
 
+		// Stashed pots + belt/buffer gaps — pulling them costs no gold
+		if (this.hasStashedPotions() &&
+				(this.potionNeedCount("hp") > 0 || this.potionNeedCount("mp") > 0)) {
+			return true;
+		}
+
+		// TP tome missing / low and we can pay for scrolls
+		if (me.gold >= 50 && (this.tomeNeedsFill("tbk") || (Config.FieldID && this.tomeNeedsFill("ibk")))) {
+			return true;
+		}
+
+		// Dead merc we can afford to revive
+		if (typeof this.needMerc === "function" && this.needMerc()) {
+			return true;
+		}
+
+		if (typeof this.needGamble === "function" && Config.GambleItems && Config.GambleItems.length &&
+				this.needGamble()) {
+			return true;
+		}
+
 		unids = this.getUnids();
 
 		if (unids && unids.length > 0) {
@@ -174,8 +241,57 @@ var Town = {
 			}
 		}
 
-		// Within 4 min and nothing urgent — skip
+		if (this.miniShopWanted()) {
+			return true;
+		}
+
+		// Nothing needs a vendor / stash — skip
 		return false;
+	},
+
+	// Runes for Stealth/Lore/Spirit are banked but no empty base yet — shop scan is the way to get one
+	rwBaseHuntActive: function () {
+		if (typeof Runewords === "undefined" || typeof Runeword === "undefined" || !Config.MakeRunewords) {
+			return false;
+		}
+
+		if (Runeword.Stealth && me.charlvl >= 17 && Runewords.hasStealthRecipe() &&
+				!Runewords.hasCompletedArmorRuneword() && !Runewords.hasEmptyStealthBase() &&
+				Runewords.haveRunes(Runeword.Stealth)) {
+			return true;
+		}
+
+		if (Runeword.Lore && me.charlvl >= 20 && Runewords.hasLoreRecipe() &&
+				!Runewords.hasCompletedLoreHelm() && !Runewords.hasEmptyLoreBase() &&
+				Runewords.haveRunes(Runeword.Lore)) {
+			return true;
+		}
+
+		if (Runeword.Spirit && me.charlvl >= 18 && Runewords.hasSpiritRecipe() &&
+				!Runewords.hasCompletedSpiritSword() && !Runewords.hasEmptySpiritBase() &&
+				Runewords.haveRunes(Runeword.Spirit)) {
+			return true;
+		}
+
+		return false;
+	},
+
+	// MiniShop is a soft need: right away when a RW base hunt is active, otherwise only with
+	// gold to spend (Config.MiniShopMinGold) and not more often than every 4 min.
+	miniShopWanted: function () {
+		if (!Config.MiniShopBot) {
+			return false;
+		}
+
+		if (this.rwBaseHuntActive()) {
+			return true;
+		}
+
+		if (me.gold < (Config.MiniShopMinGold || 2000)) {
+			return false;
+		}
+
+		return !this.lastFullChores || (getTickCount() - this.lastFullChores) >= 4 * 60 * 1000;
 	},
 
 	// Do town chores: ID → vendor (once) → stash (once if needed) → repair → done
@@ -187,6 +303,11 @@ var Town = {
 		if (!this.needFullChores(repair)) {
 			print("ÿc2Townÿc0 :: chores skip (already done / nothing needed)");
 			this.forceNextChores = false;
+
+			// No NPC / stash walk — but still do the local-only steps a full pass would
+			this.spendSkillStatPoints();
+			Item.autoEquip();
+			me.cancel();
 
 			// Skip vendor, but still park inv mana (picked pots / shop leftovers)
 			if (this.needsManaOrganize()) {
@@ -246,8 +367,11 @@ var Town = {
 			delay(150 + me.ping);
 		}
 
-		// Same NPC as Shop (Akara/Jamella/Malah): ONE openMenu+trade heals — never init Heal then Shop
-		if (!this.initNPC("Shop", "choresVendor")) {
+		// Same NPC as Shop (Akara/Jamella/Malah): ONE openMenu+trade heals — never init Heal then Shop.
+		// Only walk there when the trade has real work (heal / ID / sell / pots / tome / keys / MiniShop).
+		if (!this.needShopPass(tasks)) {
+			print("ÿc2Townÿc0 :: chores vendor skip (nothing to heal / ID / sell / buy)");
+		} else if (!this.initNPC("Shop", "choresVendor")) {
 			print("ÿc8Townÿc0 :: chores vendor unavailable — skip shop pass");
 		} else {
 			// 1) Shop-ID if no Cain + sell ID junk
@@ -309,24 +433,11 @@ var Town = {
 		me.cancel();
 		delay(150 + me.ping);
 
-		// --- 3) Stash ONCE if needed (pots out + bank + gold in one open) ---
+		// --- 3) Stash ONCE if needed (pots out + bank + gold + RW make in one open) ---
 		print("ÿc2Townÿc0 :: chores step 3/4 — stash");
 		this.doStashVisit(true);
 
 		Cubing.doCubing();
-
-		// Insight / Lore: keep one best empty base — sell/drop worse before socketing
-		if (typeof Runewords !== "undefined") {
-			if (Runewords.cullWorseInsightBases) {
-				Runewords.cullWorseInsightBases();
-			}
-
-			if (Runewords.cullWorseLoreBases) {
-				Runewords.cullWorseLoreBases();
-			}
-		}
-
-		Runewords.makeRunewords();
 
 		// PD2: merge leftover loose runes/gems AFTER make (never fold socketables mid-RW)
 		if (typeof Pd2Stack !== "undefined" && typeof Pd2Stack.stackLooseAtStash === "function") {
@@ -3115,6 +3226,25 @@ var Town = {
 		return hit;
 	},
 
+	// Same thresholds fillTome() uses — true when the tome is missing or below its keep level
+	tomeNeedsFill: function (tomeCode) {
+		var keepMin;
+
+		if (tomeCode === "tbk") {
+			keepMin = me.charlvl >= 30 ? 80 : 20;
+		} else if (tomeCode === "ibk") {
+			keepMin = 13;
+		} else {
+			return false;
+		}
+
+		if (!me.findItem(tomeCode, 0, 3)) {
+			return true;
+		}
+
+		return this.checkScrolls(tomeCode) < keepMin;
+	},
+
 	fillTome: function (code, shopAlreadyOpen) {
 		if (me.gold < 50) {
 			return false;
@@ -3145,7 +3275,7 @@ var Town = {
 
 		cur = this.checkScrolls(tomeCode);
 
-		if (me.findItem(tomeCode, 0, 3) && cur >= keepMin) {
+		if (!this.tomeNeedsFill(tomeCode)) {
 			return true;
 		}
 
@@ -3346,18 +3476,10 @@ var Town = {
 		return n;
 	},
 
-	identify: function (shopAlreadyOpen) {
-		var i, item, tome, scroll, npc, list, timer, tpTome, result,
-			tpTomePos = {},
-			usedCain = false,
-			needShop = false;
-
-		// Never re-call cainID while shop is open — it cancels the trade
-		if (shopAlreadyOpen) {
-			usedCain = !!this._choresUsedCain;
-		} else {
-			usedCain = this.cainID();
-		}
+	// True when identify() would need the vendor: unid items to shop-ID (no Cain) or IDed sellables.
+	// Shared by identify() and needShopPass() so the chores Shop is only opened for real work.
+	identifyNeedsShop: function (usedCain) {
+		var i, list, result;
 
 		list = Storage.Inventory.Compare(Config.Inventory);
 
@@ -3367,29 +3489,26 @@ var Town = {
 
 		// Cain already IDed — shop only to sell junk (no Akara/Drognan tome/scroll ID)
 		for (i = 0; i < list.length; i += 1) {
-			result = Pickit.checkItem(list[i]);
-
 			if (list[i].location !== 3 || this.ignoredItemTypes.indexOf(list[i].itemType) > -1) {
 				continue;
 			}
 
+			result = Pickit.checkItem(list[i]);
+
 			if (!list[i].getFlag(0x10)) {
 				// Charms must be IDed before stash/sell (early: use inv isc)
 				if (this.isCharmItem(list[i])) {
-					needShop = true;
-					break;
+					return true;
 				}
 
 				// Magic/rare rings & amulets — always ID (keep/sell/equip needs stats)
 				if ((list[i].itemType === 10 || list[i].itemType === 12) &&
 						(list[i].quality === 4 || list[i].quality === 6)) {
-					needShop = true;
-					break;
+					return true;
 				}
 
 				if (!usedCain && ([-1, 4].indexOf(result.result) > -1 || Item.hasTier(list[i]))) {
-					needShop = true;
-					break;
+					return true;
 				}
 
 				continue;
@@ -3402,13 +3521,33 @@ var Town = {
 					((list[i].itemType === 5 || list[i].itemType === 6) && list[i].quality !== 6 && list[i].quality !== 7) ||
 					list[i].itemType === 80 || list[i].itemType === 81) {
 				if (!Item.autoEquipCheck(list[i])) {
-					needShop = true;
-					break;
+					return true;
 				}
 			}
 		}
 
-		if (!needShop) {
+		return false;
+	},
+
+	identify: function (shopAlreadyOpen) {
+		var i, item, tome, scroll, npc, list, timer, tpTome, result,
+			tpTomePos = {},
+			usedCain = false;
+
+		// Never re-call cainID while shop is open — it cancels the trade
+		if (shopAlreadyOpen) {
+			usedCain = !!this._choresUsedCain;
+		} else {
+			usedCain = this.cainID();
+		}
+
+		if (!this.identifyNeedsShop(usedCain)) {
+			return false;
+		}
+
+		list = Storage.Inventory.Compare(Config.Inventory);
+
+		if (!list) {
 			return false;
 		}
 
@@ -5434,7 +5573,7 @@ MainLoop:
 
 	// Same keep rules as stash() — used by needStash so we don't walk for junk that won't bank
 	shouldStashItem: function (item) {
-		var result, tier;
+		var result, tier, pickResult, protectedBase;
 
 		if (!item || !this.canStash(item)) {
 			return false;
@@ -5452,23 +5591,25 @@ MainLoop:
 			return true;
 		}
 
-		result = (Pickit.checkItem(item).result > 0 && Pickit.checkItem(item).result < 4) ||
+		// One pickit + one protected-base evaluation per item (needStash calls this for every inv item)
+		pickResult = Pickit.checkItem(item).result;
+		protectedBase = !!(typeof Item !== "undefined" && Item.isProtectedRWBase && Item.isProtectedRWBase(item));
+
+		result = (pickResult > 0 && pickResult < 4) ||
 			Cubing.keepItem(item) || Runewords.keepItem(item) || CraftingSystem.keepItem(item);
 
 		// Empty RW bases must bank even if nip miss / result 0
-		if (!result && typeof Item !== "undefined" && Item.isProtectedRWBase && Item.isProtectedRWBase(item)) {
+		if (!result && protectedBase) {
 			result = true;
 		}
 
 		// Tiered autoequip leftovers stay in inv — BUT empty Stealth/Lore bases match armor
 		// starter #tier == 1 and must still bank (ProtectRWBases blocks wear).
-		if (Config.AutoEquip && Pickit.checkItem(item).result === 1) {
+		if (Config.AutoEquip && pickResult === 1) {
 			tier = NTIP.GetTier(item);
 
-			if (tier > 0 && tier < 100) {
-				if (!(typeof Item !== "undefined" && Item.isProtectedRWBase && Item.isProtectedRWBase(item))) {
-					result = false;
-				}
+			if (tier > 0 && tier < 100 && !protectedBase) {
+				result = false;
 			}
 		}
 
@@ -5552,6 +5693,19 @@ MainLoop:
 		if (stashGold && Config.StashGold && me.getStat(14) >= Config.StashGold && me.getStat(15) < 25e5) {
 			gold(me.getStat(14), 3);
 			delay(500 + me.ping);
+		}
+
+		// RW check/make only when we already opened stash for a real need (bank/pots/…)
+		if (typeof Runewords !== "undefined") {
+			if (Runewords.cullWorseInsightBases) {
+				Runewords.cullWorseInsightBases();
+			}
+
+			if (Runewords.cullWorseLoreBases) {
+				Runewords.cullWorseLoreBases();
+			}
+
+			Runewords.makeRunewords();
 		}
 
 		me.cancel();
@@ -6893,8 +7047,7 @@ MainLoop:
 
 	visitTown: function (repair = false) {
 		if (me.inTown) {
-			this.doChores();
-			this.move("stash");
+			this.doChores(repair);
 
 			return true;
 		}

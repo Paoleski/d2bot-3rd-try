@@ -23,7 +23,7 @@ var Pd2Stack = {
 		}
 
 		if (tag) {
-			this.log("ÿc8Pd2Stackÿc0 :: watch " + tag + " (" + ms + "ms)");
+			this.vlog("ÿc8Pd2Stackÿc0 :: watch " + tag + " (" + ms + "ms)");
 		}
 
 		delay(ms);
@@ -52,7 +52,7 @@ var Pd2Stack = {
 	},
 
 	vlog: function (msg) {
-		if (this._verbose) {
+		if (this._verbose || (typeof Config !== "undefined" && Config.RunewordDebug)) {
 			this.log(msg);
 		}
 	},
@@ -491,8 +491,31 @@ var Pd2Stack = {
 		return false;
 	},
 
+	// Loot-filter marker after Ctrl+Shift toggle: "UNSTACKED WILL SOCKET ** Ort Rune [9] **"
+	nameShowsUnstacked: function (unit) {
+		var n, re;
+
+		if (!unit) {
+			return false;
+		}
+
+		n = String((unit.name || "") + "\n" + (unit.fname || "")).replace(/ÿc[0-9a-z]/gi, "");
+
+		try {
+			if (typeof Config !== "undefined" && Config.Pd2UnstackedNameRegex) {
+				re = Config.Pd2UnstackedNameRegex;
+			}
+		} catch (e0) {}
+
+		if (!re) {
+			re = /UNSTACKED|WILL\s*SOCKET/i;
+		}
+
+		return re.test(n);
+	},
+
 	isStacked: function (unit) {
-		var code, qty, id, t;
+		var code, qty, id, t, name;
 
 		if (!unit || !this.isStackableItem(unit)) {
 			return false;
@@ -534,10 +557,16 @@ var Pd2Stack = {
 			return true;
 		}
 
-		// qty1 plain rXX: trust the name. After Ctrl+Shift peel the "+" drops even if
-		// classid/type still look like a stack container for a tick (or permanently on PD2).
+		// qty1 plain rXX: require loot-filter "UNSTACKED WILL SOCKET" (or Config regex).
+		// A bare "** Ort Rune (9) **" with no marker is still +form — do NOT treat as socketable.
 		if (/^r\d{2}$/i.test(code)) {
-			return this.nameShowsPlus(unit);
+			name = String((unit.name || "") + "\n" + (unit.fname || "")).replace(/ÿc[0-9a-z]/gi, "");
+
+			if (/\bQTY\s*\d+/i.test(name) || this.nameShowsPlus(unit)) {
+				return true;
+			}
+
+			return !this.nameShowsUnstacked(unit);
 		}
 
 		// Fallback: stack containers without plain code
@@ -587,39 +616,105 @@ var Pd2Stack = {
 	FORCE_CLICK: "data/pd2_forcekeys.click",
 	FORCE_CLICK_DONE: "data/pd2_forcekeys.click.done",
 	LAST_MOUSE: "data/pd2_last_mouse.txt",
+	F10_CELL: "data/pd2_f10_cell.txt",
+
+	// Default F10 peel cell (stash open). Override by F10 key or editing this file.
+	DEFAULT_F10_X: 562,
+	DEFAULT_F10_Y: 263,
+	// Classic 800x600 stash-open inv origin (letterboxed on wider clients via readInvLayout).
+	// F10 562,263 ≈ col 0 row 0 when client is 1068x600 (left≈538).
+	DEFAULT_INV_LEFT: 404,
+	DEFAULT_INV_TOP: 249,
+	DEFAULT_INV_CELL: 29,
+	DEFAULT_F10_COL: 0,
+	DEFAULT_F10_ROW: 0,
+
+	// Game client size from helper heartbeat "tick W H" (fallback 800x600 / Config)
+	readClientSize: function () {
+		var raw, parts, w, h, cw, ch;
+
+		cw = 800;
+		ch = 600;
+
+		try {
+			if (typeof Config !== "undefined") {
+				if (Config.Pd2ClientWidth > 0) {
+					cw = Config.Pd2ClientWidth;
+				}
+
+				if (Config.Pd2ClientHeight > 0) {
+					ch = Config.Pd2ClientHeight;
+				}
+			}
+		} catch (e0) {}
+
+		try {
+			if (FileTools.exists(this.FORCE_HELPER)) {
+				raw = String(FileTools.readText(this.FORCE_HELPER) || "").replace(/^\s+|\s+$/g, "");
+				parts = raw.split(/\s+/);
+
+				if (parts.length >= 3) {
+					w = parseInt(parts[1], 10);
+					h = parseInt(parts[2], 10);
+
+					if (!isNaN(w) && !isNaN(h) && w >= 640 && h >= 480) {
+						return {w: w, h: h};
+					}
+				}
+			}
+		} catch (e1) {}
+
+		return {w: cw, h: ch};
+	},
 
 	readLastMouse: function () {
 		var raw, parts, x, y;
 
 		try {
-			if (!FileTools.exists(this.LAST_MOUSE)) {
-				return null;
+			if (FileTools.exists(this.LAST_MOUSE)) {
+				raw = String(FileTools.readText(this.LAST_MOUSE)).replace(/^\s+|\s+$/g, "");
+				parts = raw.split(/\s+/);
+
+				if (parts.length >= 2) {
+					x = parseInt(parts[0], 10);
+					y = parseInt(parts[1], 10);
+
+					if (!isNaN(x) && !isNaN(y)) {
+						return {x: x, y: y};
+					}
+				}
 			}
+		} catch (e) {}
 
-			raw = String(FileTools.readText(this.LAST_MOUSE)).replace(/^\s+|\s+$/g, "");
-			parts = raw.split(/\s+/);
+		// Persist lab default so we don't need F10 every session
+		try {
+			FileTools.writeText(this.LAST_MOUSE, this.DEFAULT_F10_X + " " + this.DEFAULT_F10_Y);
+		} catch (e2) {}
 
-			if (parts.length < 2) {
-				return null;
-			}
-
-			x = parseInt(parts[0], 10);
-			y = parseInt(parts[1], 10);
-
-			if (isNaN(x) || isNaN(y)) {
-				return null;
-			}
-
-			return {x: x, y: y};
-		} catch (e) {
-			return null;
-		}
+		return {x: this.DEFAULT_F10_X, y: this.DEFAULT_F10_Y};
 	},
 
-	// Classic 800x600 inventory grid (stash open).
-	// Override via data/pd2_inv_layout.txt: "left top cell" (e.g. "404 311 29")
-	invCellClient: function (loc, col, row) {
-		var left = 404, top = 311, cell = 29, raw, parts;
+	ensureDefaultF10: function () {
+		var mouse = this.readLastMouse();
+
+		if (!mouse) {
+			try {
+				FileTools.writeText(this.LAST_MOUSE, this.DEFAULT_F10_X + " " + this.DEFAULT_F10_Y);
+			} catch (e) {}
+			return {x: this.DEFAULT_F10_X, y: this.DEFAULT_F10_Y};
+		}
+
+		return mouse;
+	},
+
+	readInvLayout: function () {
+		var left, top, cell = this.DEFAULT_INV_CELL, raw, parts, sz, ox, oy;
+
+		sz = this.readClientSize();
+		ox = sz.w > 800 ? Math.floor((sz.w - 800) / 2) : 0;
+		oy = sz.h > 600 ? Math.floor((sz.h - 600) / 2) : 0;
+		left = this.DEFAULT_INV_LEFT + ox;
+		top = this.DEFAULT_INV_TOP + oy;
 
 		try {
 			if (FileTools.exists("data/pd2_inv_layout.txt")) {
@@ -634,18 +729,113 @@ var Pd2Stack = {
 			}
 		} catch (e) {}
 
+		if (!cell || cell < 1) {
+			cell = this.DEFAULT_INV_CELL;
+		}
+
+		return {left: left, top: top, cell: cell, ox: ox, oy: oy, w: sz.w, h: sz.h};
+	},
+
+	// Classic/PD2 inventory grid (stash open).
+	// Override via data/pd2_inv_layout.txt: "left top cell" (e.g. "538 249 29" on 1068x600)
+	invCellClient: function (loc, col, row) {
+		var lay = this.readInvLayout(), left = lay.left, top = lay.top, cell = lay.cell,
+			ox = lay.ox || 0, oy = lay.oy || 0;
+
 		if (loc === 7) {
-			left = 15;
-			top = 143;
+			left = 15 + ox;
+			top = 143 + oy;
 		} else if (loc === 6) {
-			left = 200;
-			top = 200;
+			left = 200 + ox;
+			top = 200 + oy;
 		}
 
 		return {
 			x: left + col * cell + Math.floor(cell / 2),
 			y: top + row * cell + Math.floor(cell / 2)
 		};
+	},
+
+	// Saved F10 inv cell (col row) — preferred over raw pixels for peel/clear+
+	readF10Cell: function () {
+		var raw, parts, col, row, mouse, lay;
+
+		try {
+			if (FileTools.exists(this.F10_CELL)) {
+				raw = String(FileTools.readText(this.F10_CELL)).replace(/^\s+|\s+$/g, "");
+				parts = raw.split(/\s+/);
+
+				if (parts.length >= 2) {
+					col = parseInt(parts[0], 10);
+					row = parseInt(parts[1], 10);
+
+					if (!isNaN(col) && !isNaN(row) && col >= 0 && col <= 9 && row >= 0 && row <= 7) {
+						return {col: col, row: row};
+					}
+				}
+			}
+		} catch (e) {}
+
+		mouse = this.ensureDefaultF10();
+		lay = this.readInvLayout();
+		col = Math.floor((mouse.x - lay.left) / lay.cell);
+		row = Math.floor((mouse.y - lay.top) / lay.cell);
+
+		if (col >= 0 && col <= 9 && row >= 0 && row <= 7) {
+			return {col: col, row: row};
+		}
+
+		return {col: this.DEFAULT_F10_COL, row: this.DEFAULT_F10_ROW};
+	},
+
+	writeF10Cell: function (col, row) {
+		try {
+			FileTools.writeText(this.F10_CELL, col + " " + row);
+		} catch (e) {}
+	},
+
+	// Nearest unlocked empty inv cell to client pixel (used by F10 calibrate)
+	nearestEmptyInvCell: function (mx, my) {
+		var inv, row, col, locked, maxRow, maxCol, pt, best, bestD, d, dx, dy;
+
+		Storage.Reload();
+		inv = Storage.Inventory;
+		maxRow = (inv.height || 8) - 1;
+		maxCol = (inv.width || 10) - 1;
+		best = null;
+		bestD = 1e9;
+
+		for (row = 0; row <= maxRow; row += 1) {
+			for (col = 0; col <= maxCol; col += 1) {
+				if (!inv.buffer[row] || inv.buffer[row][col] > 0) {
+					continue;
+				}
+
+				locked = false;
+
+				try {
+					if (Config.Inventory && Config.Inventory[row] && Config.Inventory[row][col] === 0) {
+						locked = true;
+					}
+				} catch (eLock) {}
+
+				if (locked) {
+					continue;
+				}
+
+				pt = this.invCellClient(3, col, row);
+				dx = pt.x - mx;
+				dy = pt.y - my;
+				d = dx * dx + dy * dy;
+
+				if (d < bestD) {
+					bestD = d;
+					best = {col: col, row: row, x: pt.x, y: pt.y};
+				}
+			}
+		}
+
+		return best;
 	},
 
 	// Empty inv → screen clicks. Prefer last_mouse (Tal path), then unlocked spots.
@@ -754,7 +944,7 @@ var Pd2Stack = {
 			return {ok: false, err: "click_write"};
 		}
 
-		this.log("ÿc4Pd2Stackÿc0 :: client click " + x + "," + y + " mask=" + (mask & 3));
+		this.vlog("ÿc4Pd2Stackÿc0 :: client click " + x + "," + y + " mask=" + (mask & 3));
 
 		return this._waitClickDone(startTick);
 	},
@@ -770,7 +960,7 @@ var Pd2Stack = {
 		}
 
 		pt = this.invCellClient(loc, col, row);
-		this.log("ÿc4Pd2Stackÿc0 :: grid→screen loc=" + loc + " cell=" + col + "," + row +
+		this.vlog("ÿc4Pd2Stackÿc0 :: grid→screen loc=" + loc + " cell=" + col + "," + row +
 			" → " + pt.x + "," + pt.y + " mask=" + (mask & 3));
 
 		return this.requestScreenClick(pt.x, pt.y, mask);
@@ -832,13 +1022,75 @@ var Pd2Stack = {
 		return null;
 	},
 
+	// Map F10 → inv col/row (saved cell file, else pixel map, else default 5,0)
+	f10InvCell: function () {
+		return this.readF10Cell();
+	},
+
+	// After Ctrl@F10 peel: leftover stack on cursor → ANY other inv cell (grid clickItem).
+	// Never screen-clicks F10 — peel cell stays for the qty1 + clear+.
+	dropLeftoverStackToInv: function () {
+		var cursor, peel, cell, n, nDelay;
+
+		if (!me.itemoncursor) {
+			return true;
+		}
+
+		cursor = getUnit(100);
+
+		if (!cursor) {
+			return true;
+		}
+
+		// Ctrl must be UP or clickItem peels again into the dump cell
+		this.clearForceKeys();
+		delay(80 + me.ping);
+
+		peel = this.f10InvCell();
+		Storage.Reload();
+		cell = peel ?
+			this.findEmptyInvCell(peel.col, peel.row) :
+			this.findEmptyInvCell();
+
+		if (!cell) {
+			this.log("ÿc1peel failÿc0 :: no free inv cell for leftover stack");
+			return false;
+		}
+
+		for (n = 0; n < 5; n += 1) {
+			clickItem(0, cell.col, cell.row, 3);
+			nDelay = getTickCount();
+
+			while ((getTickCount() - nDelay) < Math.max(800, me.ping * 3 + 400)) {
+				if (!me.itemoncursor) {
+					delay(60 + me.ping);
+					return true;
+				}
+
+				delay(10);
+			}
+		}
+
+		// Fallback: Storage.FindSpot (also clickItem, still not F10 screen)
+		if (Storage.Inventory.CanFit(cursor) && Storage.Inventory.MoveTo(cursor)) {
+			delay(60 + me.ping);
+			return !me.itemoncursor;
+		}
+
+		this.log("ÿc1peel failÿc0 :: could not place leftover stack in inv");
+		return false;
+	},
+
 	// Ctrl-separate ONE from cursor pile onto empty inv under F10.
-	// clickItem never sees ForceKeys Ctrl — whole pile dumps. Same as clear+: helper screen click only.
-	// Retries on f10_dumped_all (Ctrl flaky even when GASK shows held).
-	clickEmptyInvSeparate: function (keepGid) {
-		var mouse, reply, attempt, maxAttempts = 3;
+	// MUST be ForceKeys + screen click — clickItem ignores Ctrl and dumps the whole stack.
+	// Success = cursor qty DROPPED (Ctrl peeled one). Leftover stack still on cursor.
+	clickEmptyInvSeparate: function (keepGid, codeHint) {
+		var mouse, cell, pt, reply, attempt, maxAttempts = 3, peeled, cur, beforeQty, beforeLabel, afterQty, base, clickX, clickY;
+
+		base = codeHint ? String(codeHint).replace(/[sg]$/i, "").toLowerCase() : "";
 
 		if (!getUIFlag(0x19) && typeof Town !== "undefined" && !Town.openStash()) {
+			this.log("ÿc1peel failÿc0 :: stash closed");
 			return {ok: false, err: "stash"};
 		}
 
@@ -846,68 +1098,116 @@ var Pd2Stack = {
 			this.stashAsideInvGear(keepGid ? [keepGid] : null);
 		}
 
-		mouse = this.readLastMouse();
-
-		if (!mouse) {
-			this.log("ÿc1Pd2Stackÿc0 :: separate needs F10 — stash open, hover EMPTY first inv slot, F10");
-			return {ok: false, err: "no_f10"};
-		}
-
 		if (!this.hasForceKeysProxy()) {
-			this.log("ÿc1Pd2Stackÿc0 :: separate needs ForceKeys helper (StartForceKeys.bat)");
+			this.log("ÿc1peel failÿc0 :: ForceKeys helper missing (StartForceKeys.bat)");
 			return {ok: false, err: "no_helper"};
 		}
 
 		for (attempt = 1; attempt <= maxAttempts; attempt += 1) {
 			if (!me.itemoncursor) {
+				this.log("ÿc1peel failÿc0 :: nothing on cursor");
 				return {ok: false, err: "no_cursor"};
 			}
 
-			this.log("ÿc4Pd2Stackÿc0 :: separate Ctrl @ F10 client " + mouse.x + "," + mouse.y +
-				" stashOpen=" + !!getUIFlag(0x19) +
-				" try=" + attempt + "/" + maxAttempts + " (no clickItem)");
+			cur = getUnit(100);
+			beforeQty = this.qty(cur) || 1;
+			beforeLabel = this.itemLabel(cur);
+
+			if (!base && cur && cur.code) {
+				base = String(cur.code).toLowerCase().replace(/[sg]$/, "");
+			}
+
+			mouse = this.ensureDefaultF10();
+			cell = this.readF10Cell();
+			pt = this.invCellClient(3, cell.col, cell.row);
+
+			// Attempt 1: exact F10 pixels. Attempt 2+: cell-center from layout.
+			if (attempt === 1 && mouse) {
+				clickX = mouse.x;
+				clickY = mouse.y;
+			} else {
+				clickX = pt.x;
+				clickY = pt.y;
+			}
+
+			this.vlog("ÿc4Pd2Stackÿc0 :: UNPEEL Ctrl screen " + clickX + "," + clickY +
+				" cell=" + cell.col + "," + cell.row + " " + beforeLabel + " qty=" + beforeQty);
 			this.watchPause("separate Ctrl F10 click");
 
 			me.blockMouse = false;
 			me.blockKeys = false;
 			this.setForceKeys(true, false);
-			delay(120 + me.ping); // longer hold — short 60ms was flaky vs dump-all
+			delay(180 + me.ping);
 			this.logForceKeys("pre-separate-f10");
-			reply = this.requestScreenClick(mouse.x, mouse.y, 1);
-			delay(250 + me.ping);
+
+			// Screen click with mask=1 → helper ApplyMask(Ctrl) + SendInput at pixel
+			reply = this.requestScreenClick(clickX, clickY, 1);
+			delay(300 + me.ping);
 
 			if (this.cursorIsGearMistake()) {
 				this.clearForceKeys();
+				this.log("ÿc1peel failÿc0 :: F10 hit gear not empty cell");
 				return {ok: false, err: "f10_hit_gear"};
 			}
 
 			if (!reply || !reply.ok) {
 				this.clearForceKeys();
+				this.log("ÿc1peel failÿc0 :: click " + ((reply && reply.err) || "no_reply"));
 				return reply || {ok: false, err: "separate_click"};
 			}
 
-			// Leftover pile on cursor = Ctrl separate worked
-			if (me.itemoncursor) {
+			if (!me.itemoncursor) {
+				// Whole stack dumped = Ctrl was NOT applied (plain place)
 				this.clearForceKeys();
-				return {ok: true, via: "f10", attempt: attempt};
-			}
 
-			this.log("ÿc1Pd2Stackÿc0 :: separate F10 left cursor empty (Ctrl not applied / wrong cell?) try=" +
-				attempt);
-			this.clearForceKeys();
+				if (attempt < maxAttempts) {
+					if (!this._recoverDumpedStackToCursor(keepGid)) {
+						this.log("ÿc1peel failÿc0 :: dumped all, could not re-pickup");
+						return {ok: false, err: "f10_dumped_all"};
+					}
 
-			// Recover dumped pile from inv and retry
-			if (attempt < maxAttempts) {
-				if (!this._recoverDumpedStackToCursor(keepGid)) {
-					this.log("ÿc1Pd2Stackÿc0 :: separate dump — could not re-pickup pile");
-					return {ok: false, err: "f10_dumped_all"};
+					delay(120 + me.ping);
+					continue;
 				}
 
-				this.log("ÿc8Pd2Stackÿc0 :: separate dump — re-picked pile, retrying Ctrl @ F10");
-				delay(100 + me.ping);
+				this.log("ÿc1peel failÿc0 :: dumped all (Ctrl not applied) @" +
+					clickX + "," + clickY);
+				return {ok: false, err: "f10_dumped_all"};
 			}
+
+			cur = getUnit(100);
+			afterQty = this.qty(cur) || 1;
+
+			// Ctrl peel MUST reduce stack on cursor (e.g. 2→1). Same qty = miss / no Ctrl.
+			if (beforeQty > 1 && afterQty >= beforeQty) {
+				this.clearForceKeys();
+				this.watchPause("unpeel miss");
+
+				if (attempt < maxAttempts) {
+					delay(120 + me.ping);
+					continue;
+				}
+
+				this.log("ÿc1peel failÿc0 :: Ctrl@F10 no peel (still qty=" + afterQty +
+					" @" + clickX + "," + clickY + ")");
+				return {ok: false, err: "ctrl_no_peel"};
+			}
+
+			this.clearForceKeys();
+			peeled = this._findPeeledQty1InInv(true, base);
+
+			// Self-calibrate: the cell the single landed in IS the F10 cell (layout math can be off a few px)
+			if (peeled && attempt === 1 && peeled.location === 3 &&
+					(peeled.x !== cell.col || peeled.y !== cell.row)) {
+				this.log("ÿc8Pd2Stackÿc0 :: F10 cell is " + peeled.x + "," + peeled.y +
+					" (layout said " + cell.col + "," + cell.row + ") — saved");
+				this.writeF10Cell(peeled.x, peeled.y);
+			}
+
+			return {ok: true, via: "screen", attempt: attempt, peeled: peeled || null, base: base};
 		}
 
+		this.log("ÿc1peel failÿc0 :: exhausted retries");
 		return {ok: false, err: "f10_dumped_all"};
 	},
 
@@ -953,9 +1253,7 @@ var Pd2Stack = {
 			return false;
 		}
 
-		code = best.code || "?";
-		this.log("ÿc4Pd2Stackÿc0 :: recover dump " + this.itemLabel(best) +
-			" @" + best.x + "," + best.y + " code=" + code);
+		this.vlog("ÿc4Pd2Stackÿc0 :: recover dump " + this.itemLabel(best));
 
 		return this.pickupUnit(best);
 	},
@@ -971,24 +1269,24 @@ var Pd2Stack = {
 		}
 
 		if (unit.location === 7 && typeof Town !== "undefined" && !getUIFlag(0x19) && !Town.openStash()) {
-			this.log("ÿc1Pd2Stackÿc0 :: pickup fail — stash closed");
+			this.vlog("ÿc1Pd2Stackÿc0 :: pickup fail — stash closed");
 			return false;
 		}
 
 		if (typeof Packet !== "undefined" && typeof Packet.itemToCursor === "function") {
 			if (!Packet.itemToCursor(unit)) {
-				this.log("ÿc1Pd2Stackÿc0 :: pickup fail — Packet " + this.itemLabel(unit));
+				this.vlog("ÿc1Pd2Stackÿc0 :: pickup fail — Packet " + this.itemLabel(unit));
 				return false;
 			}
 		} else if (!unit.toCursor()) {
-			this.log("ÿc1Pd2Stackÿc0 :: pickup fail — toCursor " + this.itemLabel(unit));
+			this.vlog("ÿc1Pd2Stackÿc0 :: pickup fail — toCursor " + this.itemLabel(unit));
 			return false;
 		}
 
 		delay(80 + me.ping);
 
 		if (!me.itemoncursor) {
-			this.log("ÿc1Pd2Stackÿc0 :: pickup fail — not on cursor " + this.itemLabel(unit));
+			this.vlog("ÿc1Pd2Stackÿc0 :: pickup fail — not on cursor " + this.itemLabel(unit));
 			return false;
 		}
 
@@ -997,12 +1295,13 @@ var Pd2Stack = {
 
 	// Drop cursor item onto empty F10 cell (no Ctrl/Shift) — used for qty1 +form before clear+
 	placeCursorAtF10: function () {
-		var mouse, reply;
+		var mouse, cell, n, nDelay;
 
-		mouse = this.readLastMouse();
+		mouse = this.ensureDefaultF10();
+		cell = this.readF10Cell();
 
-		if (!mouse) {
-			this.log("ÿc1Pd2Stackÿc0 :: placeAtF10 needs F10 coords");
+		if (!mouse && !cell) {
+			this.log("ÿc1place failÿc0 :: no F10 coords");
 			return {ok: false, err: "no_f10"};
 		}
 
@@ -1014,34 +1313,34 @@ var Pd2Stack = {
 			return {ok: false, err: "stash"};
 		}
 
-		if (!this.hasForceKeysProxy()) {
-			return {ok: false, err: "no_helper"};
-		}
-
-		this.log("ÿc4Pd2Stackÿc0 :: placeAtF10 plain click " + mouse.x + "," + mouse.y);
+		this.clearForceKeys();
+		delay(40);
+		this.vlog("ÿc4Pd2Stackÿc0 :: placeAtF10 cell " + cell.col + "," + cell.row);
 		this.watchPause("placeAtF10");
 
 		me.blockMouse = false;
 		me.blockKeys = false;
-		this.clearForceKeys();
-		delay(40);
-		reply = this.requestScreenClick(mouse.x, mouse.y, 0);
-		delay(200 + me.ping);
+
+		for (n = 0; n < 5; n += 1) {
+			clickItem(0, cell.col, cell.row, 3);
+			nDelay = getTickCount();
+
+			while ((getTickCount() - nDelay) < Math.max(800, me.ping * 3 + 400)) {
+				if (!me.itemoncursor) {
+					delay(60 + me.ping);
+					return {ok: true, via: "clickItem"};
+				}
+
+				delay(10);
+			}
+		}
 
 		if (this.cursorIsGearMistake()) {
 			return {ok: false, err: "f10_hit_gear"};
 		}
 
-		if (!reply || !reply.ok) {
-			return reply || {ok: false, err: "place_click"};
-		}
-
-		if (me.itemoncursor) {
-			this.log("ÿc1Pd2Stackÿc0 :: placeAtF10 — still on cursor (cell occupied / wrong F10?)");
-			return {ok: false, err: "still_on_cursor"};
-		}
-
-		return {ok: true, via: "f10"};
+		this.log("ÿc1place failÿc0 :: still on cursor (cell occupied?)");
+		return {ok: false, err: "still_on_cursor"};
 	},
 
 	// One-shot test: write "r07" (or r08) to data/pd2_force_unstack.txt — ToolsThread runs it in town
@@ -1376,30 +1675,24 @@ var Pd2Stack = {
 		code = unit.code ? String(unit.code).toLowerCase() : "";
 		base = code.replace(/[sg]$/, "");
 		wantRune = this.isRuneItem(unit);
-		mouse = this.readLastMouse();
+		mouse = this.ensureDefaultF10();
 		inPlace = !!inPlace;
 		forceClick = !!forceClick;
-
-		this.log("ÿc4Pd2Stackÿc0 :: clear+ " + this.itemLabel(unit) +
-			" gid=" + gid + " loc=" + unit.location +
-			(inPlace ? " inPlace" : " place@F10 then click") +
-			(forceClick ? " force" : "") +
-			(mouse ? (" → F10 client " + mouse.x + "," + mouse.y) : " ÿc1no F10"));
 
 		this.watchPause("clear+ start");
 
 		if (!mouse) {
-			this.log("ÿc1Pd2Stackÿc0 :: clear+ needs F10 — pause, OPEN STASH, hover first inv slot, F10");
+			this.log("ÿc1clear+ failÿc0 :: no F10 coords");
 			return false;
 		}
 
 		if (me.itemoncursor && !this.stashFromCursor()) {
-			this.log("ÿc1Pd2Stackÿc0 :: clear+ fail — cursor busy");
+			this.log("ÿc1clear+ failÿc0 :: cursor busy");
 			return false;
 		}
 
 		if (typeof Town === "undefined" || !Town.openStash()) {
-			this.log("ÿc1Pd2Stackÿc0 :: clear+ fail — stash");
+			this.log("ÿc1clear+ failÿc0 :: stash");
 			return false;
 		}
 
@@ -1410,7 +1703,6 @@ var Pd2Stack = {
 			unit = me.getItem(-1, -1, gid) || unit;
 
 			if (!unit || unit.location !== 3) {
-				this.log("ÿc8Pd2Stackÿc0 :: clear+ inPlace miss — will place @ F10");
 				inPlace = false;
 			}
 		}
@@ -1419,29 +1711,26 @@ var Pd2Stack = {
 			unit = me.getItem(-1, -1, gid) || unit;
 
 			if (!unit) {
-				this.log("ÿc1Pd2Stackÿc0 :: clear+ fail — lost unit");
+				this.log("ÿc1clear+ failÿc0 :: lost unit");
 				return false;
 			}
 
 			// Already socketable — never Ctrl+Shift again (re-stacks) unless force
 			if (!forceClick && wantRune && this.canSocket(unit)) {
-				this.log("ÿc2Pd2Stackÿc0 :: clear+ skip — already socketable");
 				return copyUnit(unit);
 			}
 
-			this.log("ÿc4Pd2Stackÿc0 :: clear+ place qty1 under F10");
 			this.watchPause("before placeAtF10 for clear+");
 
 			if (!this.pickupUnit(unit)) {
-				this.log("ÿc1Pd2Stackÿc0 :: clear+ fail — pickup");
+				this.log("ÿc1clear+ failÿc0 :: pickup");
 				return false;
 			}
 
 			place = this.placeCursorAtF10();
 
 			if (!place || !place.ok) {
-				this.log("ÿc1Pd2Stackÿc0 :: clear+ fail — placeAtF10 " +
-					((place && place.err) || "fail"));
+				this.log("ÿc1clear+ failÿc0 :: place @ F10");
 				this.parkCursor();
 				return false;
 			}
@@ -1451,14 +1740,7 @@ var Pd2Stack = {
 				me.getItem(-1, -1, gid);
 
 			if (!unit || unit.location !== 3) {
-				after = this._findUnstackedMatch(wantRune, base, 0);
-
-				if (!forceClick && after && (!wantRune || this.canSocket(after))) {
-					this.log("ÿc2Pd2Stackÿc0 :: clear+ ok after place (already socketable)");
-					return after;
-				}
-
-				this.log("ÿc1Pd2Stackÿc0 :: clear+ fail — no qty1 under F10 after place");
+				this.log("ÿc1clear+ failÿc0 :: no qty1 under F10 after place");
 				return false;
 			}
 
@@ -1470,75 +1752,202 @@ var Pd2Stack = {
 
 		if (!getUIFlag(0x19)) {
 			if (!Town.openStash()) {
-				this.log("ÿc1Pd2Stackÿc0 :: clear+ fail — stash closed");
+				this.log("ÿc1clear+ failÿc0 :: stash closed");
 				return false;
 			}
 		}
 
-		this.log("ÿc4Pd2Stackÿc0 :: clear+ " + this.itemLabel(unit) +
-			" inv @" + unit.x + "," + unit.y +
-			" classid=" + unit.classid + " type=" + unit.itemType +
-			" plusName=" + this.nameShowsPlus(unit) +
-			" stacked=" + this.isStacked(unit) +
-			" sock=" + this.canSocket(unit) +
-			" stashOpen=" + !!getUIFlag(0x19));
-
 		// Skip only when not forced — post-peel always Ctrl+Shift
 		if (!forceClick && this.canSocket(unit)) {
-			this.log("ÿc2Pd2Stackÿc0 :: clear+ skip — already socketable");
 			return copyUnit(unit);
 		}
 
-		this.log("ÿc4Pd2Stackÿc0 :: clear+ Ctrl+Shift @ F10");
 		this.watchPause("before clear+ Ctrl+Shift");
 
 		delay(100);
 
 		if (!getUIFlag(0x19) && !Town.openStash()) {
-			this.log("ÿc1Pd2Stackÿc0 :: clear+ fail — stash not open for F10 click");
+			this.log("ÿc1clear+ failÿc0 :: stash not open");
 			return false;
 		}
 
 		me.blockMouse = false;
 		me.blockKeys = false;
 		this.setForceKeys(true, true);
-		delay(120 + me.ping);
-		reply = this.requestScreenClick(mouse.x, mouse.y, 3);
-		delay(250 + me.ping);
+		delay(150 + me.ping);
+
+		// Screen click with Ctrl+Shift — clickItem ignores mods for PD2 +form.
+		// Prefer exact F10 pixels when the peeled rune sits in the F10 cell (same spot as peel).
+		{
+			var cell = this.readF10Cell(), pt, cx, cy, beforeName, afterName, useF10, clickCol, clickRow;
+
+			beforeName = String((unit.name || "") + "\n" + (unit.fname || ""))
+				.replace(/ÿc[0-9a-z]/gi, "").split("\n")[0].replace(/^\s+|\s+$/g, "");
+			this.log("clear+ before: " + beforeName +
+				" code=" + (unit.code || "?") +
+				" classid=" + unit.classid +
+				" type=" + unit.itemType +
+				" @" + unit.x + "," + unit.y);
+
+			useF10 = !!(mouse && unit && unit.location === 3 && cell &&
+				unit.x === cell.col && unit.y === cell.row);
+
+			if (useF10) {
+				cx = mouse.x;
+				cy = mouse.y;
+				clickCol = unit.x;
+				clickRow = unit.y;
+			} else if (unit && unit.location === 3 && unit.x !== undefined && unit.y !== undefined) {
+				pt = this.invCellClient(3, unit.x, unit.y);
+				cx = pt.x;
+				cy = pt.y;
+				clickCol = unit.x;
+				clickRow = unit.y;
+			} else if (mouse) {
+				cx = mouse.x;
+				cy = mouse.y;
+				clickCol = cell ? cell.col : undefined;
+				clickRow = cell ? cell.row : undefined;
+			} else {
+				pt = this.invCellClient(3, cell.col, cell.row);
+				cx = pt.x;
+				cy = pt.y;
+				clickCol = cell.col;
+				clickRow = cell.row;
+			}
+
+			this.log("clear+ click cell=" +
+				((unit && unit.x !== undefined) ? (unit.x + "," + unit.y) : (cell.col + "," + cell.row)) +
+				" @ " + cx + "," + cy + (useF10 ? " (F10 px)" : ""));
+
+			reply = this.requestScreenClick(cx, cy, 3);
+			delay(280 + me.ping);
+
+			// PD2 form flip REPLACES the item (new gid, classid 7xx→6xx). Old gid reads "(gone)".
+			// Look at the inventory cell we clicked, polling for the client to catch up.
+			after = this._waitToggledAtCell(gid, clickCol, clickRow, wantRune, base, 1500);
+
+			afterName = after ?
+				String((after.name || "") + "\n" + (after.fname || ""))
+					.replace(/ÿc[0-9a-z]/gi, "").split("\n")[0].replace(/^\s+|\s+$/g, "") :
+				"(no rune in cell " + clickCol + "," + clickRow + ")";
+			this.log("clear+ after: " + afterName +
+				(after ? (" code=" + (after.code || "?") +
+					" classid=" + after.classid +
+					" type=" + after.itemType +
+					" gid=" + after.gid + (after.gid !== gid ? " (new)" : "") +
+					" sock=" + this.canSocket(after)) : ""));
+		}
+
 		this.clearForceKeys();
 		this.watchPause("after clear+ click");
 
 		if (this.cursorIsGearMistake()) {
-			this.log("ÿc1Pd2Stackÿc0 :: clear+ fail — F10 hit gear not rune");
+			this.log("ÿc1clear+ failÿc0 :: F10 hit gear not rune");
 			return false;
 		}
 
 		if (!reply || !reply.ok) {
-			this.log("ÿc1Pd2Stackÿc0 :: clear+ F10 click " + ((reply && reply.err) || "fail"));
+			this.log("ÿc1clear+ failÿc0 :: Ctrl+Shift click");
 			return false;
 		}
 
-		after = me.getItem(-1, -1, gid);
-
-		if (after && this.canSocket(after)) {
-			this.log("ÿc2Pd2Stackÿc0 :: clear+ ok (same gid)");
+		if (after && (wantRune ? this.canSocket(after) : !this.isStacked(after))) {
 			return after;
 		}
 
-		if (after && !this.isStacked(after) && this.qty(after) <= 1) {
-			return after;
-		}
-
-		after = this._findUnstackedMatch(wantRune, base, 0);
-
-		if (after && (!wantRune || this.canSocket(after))) {
-			this.log("ÿc2Pd2Stackÿc0 :: clear+ ok (new gid=" + after.gid + ")");
-			return after;
-		}
-
-		this.log("ÿc1Pd2Stackÿc0 :: clear+ still + after F10 Ctrl+Shift @" +
-			mouse.x + "," + mouse.y + " (re-F10 with STASH OPEN on the slot the rune sits in)");
+		// Marker required — do not accept bare "** Ort Rune (9) **" without UNSTACKED WILL SOCKET
+		this.log("ÿc1clear+ failÿc0 :: still stacked after Ctrl+Shift");
 		return false;
+	},
+
+	// Inv item occupying (col,row) that matches this rune number / gem base
+	_findAtInvCell: function (col, row, wantRune, base) {
+		var item, wantNum, m, code, sx, sy;
+
+		wantNum = -1;
+		m = base ? String(base).match(/^r(\d{2})$/i) : null;
+
+		if (m) {
+			wantNum = parseInt(m[1], 10);
+		}
+
+		item = me.getItem(-1, -1);
+
+		if (!item) {
+			return null;
+		}
+
+		do {
+			if (item.location !== 3) {
+				continue;
+			}
+
+			sx = item.sizex || 1;
+			sy = item.sizey || 1;
+
+			if (!(col >= item.x && col < item.x + sx && row >= item.y && row < item.y + sy)) {
+				continue;
+			}
+
+			if (wantRune) {
+				if (!this.isRuneItem(item)) {
+					continue;
+				}
+
+				if (wantNum > 0 && this.runeNumber(item) !== wantNum) {
+					continue;
+				}
+			} else {
+				if (!this.isGemItem(item)) {
+					continue;
+				}
+
+				code = this.normalizeGemCode(item.code);
+
+				if (base && code !== this.normalizeGemCode(base)) {
+					continue;
+				}
+			}
+
+			return copyUnit(item);
+		} while (item.getNext());
+
+		return null;
+	},
+
+	// After Ctrl+Shift: wait for the unstacked (socketable) item at the clicked cell.
+	// Tries old gid first, then whatever now sits in that cell (gid changes on form flip).
+	_waitToggledAtCell: function (oldGid, col, row, wantRune, base, timeoutMs) {
+		var tick, item, best;
+
+		tick = getTickCount();
+		best = null;
+
+		while (getTickCount() - tick < timeoutMs) {
+			item = me.getItem(-1, -1, oldGid);
+
+			if (item && item.location === 3 && (wantRune ? this.canSocket(item) : !this.isStacked(item))) {
+				return copyUnit(item);
+			}
+
+			if (col !== undefined && row !== undefined) {
+				item = this._findAtInvCell(col, row, wantRune, base);
+
+				if (item) {
+					best = item;
+
+					if (wantRune ? this.canSocket(item) : !this.isStacked(item)) {
+						return item;
+					}
+				}
+			}
+
+			delay(100);
+		}
+
+		// Timed out — return whatever is in the cell (caller logs + fails on canSocket)
+		return best || me.getItem(-1, -1, oldGid) || null;
 	},
 
 	// Ctrl/Ctrl+Shift on inv item: MoveTo + F10 click, stash open both times
@@ -1576,7 +1985,7 @@ var Pd2Stack = {
 			return {ok: false, err: "stash"};
 		}
 
-		this.log("ÿc4Pd2Stackÿc0 :: modClick placed @" + unit.x + "," + unit.y +
+		this.vlog("ÿc4Pd2Stackÿc0 :: modClick placed @" + unit.x + "," + unit.y +
 			" stashOpen=" + !!getUIFlag(0x19) +
 			" → F10 client " + mouse.x + "," + mouse.y + " mask=" + mask);
 
@@ -1650,10 +2059,10 @@ var Pd2Stack = {
 			inject = "err";
 		}
 
-		this.log("ÿc4Pd2Stackÿc0 :: keys[" + tag + "] flag=" + flag +
+		this.vlog("ÿc4Pd2Stackÿc0 :: keys[" + tag + "] flag=" + flag +
 			" helper=" + helper + " debug=" + debug);
-		this.log("ÿc4Pd2Stackÿc0 :: keys[" + tag + "] ingame=" + ingame);
-		this.log("ÿc4Pd2Stackÿc0 :: keys[" + tag + "] inject=" + inject);
+		this.vlog("ÿc4Pd2Stackÿc0 :: keys[" + tag + "] ingame=" + ingame);
+		this.vlog("ÿc4Pd2Stackÿc0 :: keys[" + tag + "] inject=" + inject);
 	},
 
 	setForceKeys: function (ctrl, shift) {
@@ -1794,7 +2203,7 @@ var Pd2Stack = {
 				line += " | ÿc1no F10 (pause → stash → hover rune slot → F10)";
 			}
 
-			this.log(line);
+			this.vlog(line);
 		} else {
 			this.log("ÿc1Pd2Stackÿc0 :: helper DOWN (" + (this._forceKeysFailReason || "?") +
 				") - run StartForceKeys.bat");
@@ -1912,15 +2321,14 @@ var Pd2Stack = {
 			Town.openStash();
 		}
 
-		this.log("ÿc4Pd2Stackÿc0 :: stashFromCursor " + this.itemLabel(cursor) +
-			" qty=" + this.qty(cursor));
+		this.vlog("ÿc4Pd2Stackÿc0 :: stashFromCursor " + this.itemLabel(cursor));
 
 		if (Storage.Stash.CanFit(cursor) && Storage.Stash.MoveTo(cursor)) {
 			delay(80 + me.ping);
 			return !me.itemoncursor;
 		}
 
-		this.log("ÿc8Pd2Stackÿc0 :: stashFromCursor — stash full, parkCursor fallback");
+		this.vlog("ÿc8Pd2Stackÿc0 :: stashFromCursor — stash full, parkCursor fallback");
 		return this.parkCursor();
 	},
 
@@ -1942,7 +2350,7 @@ var Pd2Stack = {
 			return copyUnit(unit);
 		}
 
-		this.log("ÿc4Pd2Stackÿc0 :: moveToStash " + this.itemLabel(unit));
+		this.vlog("ÿc4Pd2Stackÿc0 :: moveToStash " + this.itemLabel(unit));
 
 		if (Storage.Stash.CanFit(unit) && Storage.Stash.MoveTo(unit)) {
 			delay(80 + me.ping);
@@ -2023,12 +2431,11 @@ var Pd2Stack = {
 			}
 
 			if (!Storage.Stash.CanFit(item)) {
-				this.log("ÿc8Pd2Stackÿc0 :: stashAside skip (no room) " + this.itemLabel(item));
+				this.vlog("ÿc8Pd2Stackÿc0 :: stashAside skip (no room) " + this.itemLabel(item));
 				continue;
 			}
 
-			this.log("ÿc4Pd2Stackÿc0 :: stashAside " + this.itemLabel(item) +
-				" (keep F10 clear for unstack)");
+			this.vlog("ÿc4Pd2Stackÿc0 :: stashAside " + this.itemLabel(item));
 
 			if (Storage.Stash.MoveTo(item)) {
 				n += 1;
@@ -2053,7 +2460,7 @@ var Pd2Stack = {
 			return false;
 		}
 
-		this.log("ÿc1Pd2Stackÿc0 :: F10 picked up " + this.itemLabel(cursor) +
+		this.vlog("ÿc1Pd2Stackÿc0 :: F10 picked up " + this.itemLabel(cursor) +
 			" (gear was under click) — parking to stash");
 		this.parkCursor();
 		return true;
@@ -2080,9 +2487,8 @@ var Pd2Stack = {
 		// Do not blockKeys while forcing mods — may interfere with GetAsyncKeyState path
 		me.blockKeys = !this.hasForceKeysProxy();
 
-		this.log("ÿc4Pd2Stackÿc0 :: executeModClick ctrl=" + ctrl + " shift=" + shift +
-			" gid=" + (req.gid || "-") + " force=" + this.hasForceKeysProxy() +
-			" blockKeys=" + me.blockKeys);
+		this.vlog("ÿc4Pd2Stackÿc0 :: executeModClick ctrl=" + ctrl + " shift=" + shift +
+			" gid=" + (req.gid || "-") + " force=" + this.hasForceKeysProxy());
 
 		try {
 			if (req.gid) {
@@ -2319,7 +2725,7 @@ var Pd2Stack = {
 		gid = unit.gid;
 		beforeStacked = this.isStacked(unit);
 
-		this.log("ÿc4Pd2Stackÿc0 :: toggle gid=" + gid + " stacked=" + beforeStacked +
+		this.vlog("ÿc4Pd2Stackÿc0 :: toggle gid=" + gid + " stacked=" + beforeStacked +
 			" classid=" + unit.classid + " code=" + (unit.code || "?") +
 			" type=" + unit.itemType + " qty=" + this.qty(unit));
 
@@ -2348,11 +2754,11 @@ var Pd2Stack = {
 
 		// gid may change on form flip — search by code/type near same location
 		if (!after) {
-			this.log("ÿc4Pd2Stackÿc0 :: toggle ok (gid changed — form flipped)");
+			this.vlog("ÿc4Pd2Stackÿc0 :: toggle ok (gid changed — form flipped)");
 			return true;
 		}
 
-		this.log("ÿc4Pd2Stackÿc0 :: toggle ok gid=" + gid + " stackedNow=" + this.isStacked(after));
+		this.vlog("ÿc4Pd2Stackÿc0 :: toggle ok gid=" + gid + " stackedNow=" + this.isStacked(after));
 		return true;
 	},
 
@@ -2440,8 +2846,67 @@ var Pd2Stack = {
 	//   qty == 1 +form: pickup → plain place @ F10 → Ctrl+Shift @ F10 → stash
 	// Stash stays open; base stays in stash (caller stashAsides gear first).
 	// (clickItem never applies Ctrl/Shift for PD2 stack ops)
+	// After a Ctrl-peel the leftover pile was parked in inv (dropLeftoverStackToInv).
+	// Put it back in the stash once the peeled single is socketable, so the inv /
+	// F10 cell is clear before the next recipe rune is peeled.
+	stashLeftoverPile: function (leftoverGid, keepGid, codeHint) {
+		var pile, item, code, base;
+
+		base = codeHint ? String(codeHint).replace(/[sg]$/i, "").toLowerCase() : "";
+		pile = leftoverGid ? me.getItem(-1, -1, leftoverGid) : null;
+
+		if (pile && (pile.location !== 3 || pile.gid === keepGid)) {
+			pile = null;
+		}
+
+		// gid can change on split — fall back to any +/qty>1 pile of this rune left in inv
+		if (!pile) {
+			item = me.getItem(-1, -1);
+
+			if (item) {
+				do {
+					if (item.location !== 3 || item.gid === keepGid || !this.isRuneItem(item)) {
+						continue;
+					}
+
+					code = item.code ? String(item.code).toLowerCase() : "";
+
+					if (base && code.replace(/[sg]$/, "") !== base && code.indexOf(base) !== 0) {
+						continue;
+					}
+
+					if (this.qty(item) > 1 || this.isStacked(item)) {
+						pile = copyUnit(item);
+						break;
+					}
+				} while (item.getNext());
+			}
+		}
+
+		if (!pile) {
+			return true;
+		}
+
+		this.log("putting the original stack back on the stash");
+		this.watchPause("leftover pile to stash");
+
+		if (me.itemoncursor && !this.stashFromCursor()) {
+			this.log("ÿc8Pd2Stackÿc0 :: leftover→stash skipped (cursor busy)");
+			return false;
+		}
+
+		pile = this.moveToStash(pile);
+
+		if (!pile || pile.location !== 7) {
+			this.log("ÿc8Pd2Stackÿc0 :: leftover pile stayed in inv (stash full?)");
+			return false;
+		}
+
+		return true;
+	},
+
 	unstackOne: function (unit) {
-		var gid, code, wantRune, reply, found, q, base, needSeparate, mouse, didSeparate;
+		var gid, code, wantRune, reply, found, q, base, needSeparate, mouse, didSeparate, leftoverGid, cursorPile;
 
 		if (!unit) {
 			return false;
@@ -2468,14 +2933,14 @@ var Pd2Stack = {
 		if (!this.canModClick()) {
 			this.noteModFail("no_keydown");
 			this.reportHelperStatus(true);
-			this.log("ÿc1Pd2Stackÿc0 :: unstack — helper needed (StartForceKeys.bat)");
+			this.log("ÿc1peel failÿc0 :: ForceKeys helper needed (StartForceKeys.bat)");
 			return false;
 		}
 
-		mouse = this.readLastMouse();
+		mouse = this.ensureDefaultF10();
 
 		if (!mouse) {
-			this.log("ÿc1Pd2Stackÿc0 :: unstack needs F10 — stash open, hover first inv slot, F10");
+			this.log("ÿc1peel failÿc0 :: no F10 coords");
 			this.reportHelperStatus(true);
 			return false;
 		}
@@ -2486,18 +2951,14 @@ var Pd2Stack = {
 		q = this.qty(unit);
 		needSeparate = (q > 1);
 		didSeparate = false;
+		leftoverGid = 0;
 
-		this.log("ÿc4Pd2Stackÿc0 :: unstack " + this.itemLabel(unit) +
-			" qty=" + (q > 0 ? q : 1) +
-			(needSeparate ? " (pickup→Ctrl F10→stash pile→Ctrl+Shift F10→stash)" :
-				" (pickup→place F10→Ctrl+Shift F10→stash)") +
-			" F10=" + mouse.x + "," + mouse.y);
-
+		this.log("start peeling");
 		this.watchPause("unstack start");
 		this.parkCursor();
 
 		if (typeof Town === "undefined" || !Town.openStash()) {
-			this.log("ÿc1Pd2Stackÿc0 :: unstack fail — stash");
+			this.log("ÿc1peel failÿc0 :: stash");
 			return false;
 		}
 
@@ -2508,7 +2969,7 @@ var Pd2Stack = {
 		unit = me.getItem(-1, -1, gid);
 
 		if (!unit) {
-			this.log("ÿc1Pd2Stackÿc0 :: unstack fail — lost item");
+			this.log("ÿc1peel failÿc0 :: lost item");
 			return false;
 		}
 
@@ -2520,29 +2981,27 @@ var Pd2Stack = {
 
 		// Already socketable — stop before separate/clear+
 		if (wantRune && this.canSocket(unit)) {
-			this.log("ÿc2Pd2Stackÿc0 :: unstack skip — already socketable " + this.itemLabel(unit) +
-				" classid=" + unit.classid + " type=" + unit.itemType);
 			return this.moveToStash(unit) || copyUnit(unit);
 		}
 
 		found = this._findUnstackedMatch(wantRune, base, 0);
 
 		if (found && (!wantRune || this.canSocket(found))) {
-			this.log("ÿc2Pd2Stackÿc0 :: unstack skip — found socketable " + this.itemLabel(found));
 			return this.moveToStash(found) || found;
 		}
 
 		// --- qty > 1: pickup → Ctrl @ F10 → stash leftover ---
 		if (needSeparate) {
 			if (!getUIFlag(0x19) && !Town.openStash()) {
-				this.log("ÿc1Pd2Stackÿc0 :: unstack fail — stash for separate");
+				this.log("ÿc1peel failÿc0 :: stash for separate");
 				return false;
 			}
 
-			this.log("ÿc4Pd2Stackÿc0 :: step1 pickup stack " + this.itemLabel(unit) + " qty=" + q);
+			this.log("picking up rune");
 			this.watchPause("before pickup for separate");
 
 			if (!this.pickupUnit(unit)) {
+				this.log("ÿc1peel failÿc0 :: pickup");
 				return false;
 			}
 
@@ -2550,64 +3009,50 @@ var Pd2Stack = {
 				var cur = getUnit(100);
 
 				if (cur && this.isInvGearBlocker(cur)) {
-					this.log("ÿc1Pd2Stackÿc0 :: unstack fail — picked gear not rune (" +
-						this.itemLabel(cur) + ")");
+					this.log("ÿc1peel failÿc0 :: picked gear not rune");
 					this.parkCursor();
 					return false;
 				}
 			}
 
-			this.log("ÿc4Pd2Stackÿc0 :: step1b Ctrl @ F10 separate");
+			this.log("peeling one");
 			this.watchPause("pile on cursor — about to Ctrl-separate");
-			reply = this.clickEmptyInvSeparate(gid);
+			reply = this.clickEmptyInvSeparate(gid, base);
 			this.watchPause("after separate click");
 
-			{
-				var curAfter = getUnit(100), qCur = 0;
-
-				if (curAfter && this.isRuneItem(curAfter)) {
-					qCur = this.qty(curAfter);
-					this.log("ÿc4Pd2Stackÿc0 :: after separate cursor=" +
-						this.itemLabel(curAfter) + " qty=" + qCur);
-				} else if (me.itemoncursor) {
-					this.log("ÿc8Pd2Stackÿc0 :: after separate cursor non-rune gid=" +
-						(curAfter ? curAfter.gid : "?"));
-				} else {
-					this.log("ÿc4Pd2Stackÿc0 :: after separate cursor empty");
-				}
-			}
-
 			if (this.cursorIsGearMistake()) {
-				this.log("ÿc1Pd2Stackÿc0 :: unstack fail — separate hit circlet/helm under F10");
+				this.log("ÿc1peel failÿc0 :: separate hit circlet/helm under F10");
 				return false;
 			}
 
 			if (!reply || !reply.ok) {
-				this.log("ÿc1Pd2Stackÿc0 :: unstack fail — separate " +
-					((reply && reply.err) || "no_reply"));
+				this.clearForceKeys();
+				this.log("ÿc1peel failÿc0 :: " + ((reply && reply.err) || "separate_click"));
 				this.parkCursor();
 				return false;
 			}
 
-			// Leftover pile → stash (qty1 stays under F10 for clear+)
+			// Leftover pile → any OTHER inv cell (grid). Peel stays under F10 for clear+.
 			if (me.itemoncursor) {
-				this.log("ÿc4Pd2Stackÿc0 :: step2 stash leftover pile");
-				this.watchPause("stash leftover pile");
+				cursorPile = getUnit(100);
+				leftoverGid = cursorPile ? cursorPile.gid : 0;
+				this.log("Putting the original stack in the inventory");
+				this.watchPause("leftover pile to inv");
 
-				if (!this.stashFromCursor()) {
-					this.log("ÿc1Pd2Stackÿc0 :: unstack fail — could not stash leftover pile");
+				if (!this.dropLeftoverStackToInv()) {
+					this.log("ÿc1peel failÿc0 :: could not place leftover pile in inv");
 					return false;
 				}
 
-				this.watchPause("after stash leftover");
+				this.watchPause("after leftover to inv");
 			}
 
 			delay(100);
 
-			// qty1 that just landed under F10 (inv). Prefer +form; also accept plain qty1
-			// that still needs Ctrl+Shift mode flip (PD2 often hides the "+" after peel).
-			unit = null;
-			{
+			// Prefer peel reported by UNPEEL click; else scan inv for qty1 of this rune
+			unit = (reply.peeled && reply.peeled.location === 3) ? reply.peeled : null;
+
+			if (!unit) {
 				var invOne = this._findStackedSingleInInv(wantRune, base);
 
 				if (invOne && invOne.location === 3) {
@@ -2623,9 +3068,8 @@ var Pd2Stack = {
 				unit = me.getItem(-1, -1, gid);
 
 				if (unit && this.qty(unit) > 1) {
-					this.log("ÿc1Pd2Stackÿc0 :: unstack fail — separate no-op (pile still qty=" +
-						this.qty(unit) + ")");
-					this._logRuneFamily("separate-noop", base);
+					this.log("ÿc1peel failÿc0 :: pile still qty=" + this.qty(unit) + " (Ctrl no-op)");
+					this.stashLeftoverPile(leftoverGid || unit.gid, 0, base);
 					return false;
 				}
 
@@ -2635,22 +3079,17 @@ var Pd2Stack = {
 			}
 
 			if (!unit) {
-				// Do NOT accept canSocket here — that skipped Ctrl+Shift and left +form runes
-				this.log("ÿc1Pd2Stackÿc0 :: unstack fail — no qty1 in inv after separate (need clear+)");
-				this._logRuneFamily("after-separate", base);
+				this.log("ÿc1peel failÿc0 :: no peeled rune in inv after Ctrl @ F10");
+				this.stashLeftoverPile(leftoverGid, 0, base);
 				return false;
 			}
 
 			gid = unit.gid;
 			didSeparate = true;
-			this.log("ÿc4Pd2Stackÿc0 :: separated → " + this.itemLabel(unit) +
-				" @" + unit.x + "," + unit.y +
-				" stacked=" + this.isStacked(unit) + " sock=" + this.canSocket(unit) +
-				" — MUST Ctrl+Shift @ F10 (mode flip)");
 			this.watchPause("separated — about to clear+");
 		} else {
 			// qty == 1: skip Ctrl peel — put straight on F10, then Ctrl+Shift to unstackable
-			this.log("ÿc4Pd2Stackÿc0 :: qty1 — skip peel, place @ F10 then Ctrl+Shift");
+			this.log("picking up rune");
 			this.watchPause("qty1 place@F10");
 
 			if (wantRune && this.canSocket(unit)) {
@@ -2658,65 +3097,47 @@ var Pd2Stack = {
 			}
 
 			if (!this.isStacked(unit) && wantRune && !this.canSocket(unit)) {
-				// qty1 but wrong form — still need clear+
-				this.log("ÿc8Pd2Stackÿc0 :: qty1 not stacked flag but not socketable — clear+ anyway");
+				// clear+ anyway
 			} else if (!this.isStacked(unit)) {
 				if (!wantRune) {
 					return this.moveToStash(unit) || copyUnit(unit);
 				}
 
-				this.log("ÿc1Pd2Stackÿc0 :: unstack fail — not stacked but not socketable (" + code + ")");
+				this.log("ÿc1peel failÿc0 :: not stacked (" + code + ")");
 				return false;
 			}
 
-			// pickup → plain click F10 → Ctrl+Shift F10 (same coords as peel)
+			this.log("ctrl shift click the peeled rune");
 			found = this._clearPlusOnUnit(unit, false);
 
 			if (found && (!wantRune || this.canSocket(found))) {
-				this.log("ÿc4Pd2Stackÿc0 :: qty1 stash socketable rune");
+				this.log("putting the socketable rune on the stash");
 				found = this.moveToStash(found) || found;
-				this.log("ÿc2Pd2Stackÿc0 :: unstack ok " + this.itemLabel(found) + " (qty1 clear+)");
 				return found;
 			}
 
-			found = this._findUnstackedMatch(wantRune, base, 0);
-
-			if (found && (!wantRune || this.canSocket(found))) {
-				return this.moveToStash(found) || found;
-			}
-
-			this.log("ÿc1Pd2Stackÿc0 :: unstack fail — qty1 still + (" + (code || base) + ")");
-			this._logRuneFamily("qty1-still-plus", base);
+			this.log("ÿc1peel failÿc0 :: qty1 still stacked after Ctrl+Shift");
 			return false;
 		}
 
-		// --- after separate: ALWAYS Ctrl+Shift @ F10 (never skip — peel leaves +/stack mode) ---
-		this.log("ÿc4Pd2Stackÿc0 :: step3 clear+ Ctrl+Shift @ F10 (in place after peel)");
+		// --- after separate: ALWAYS Ctrl+Shift @ F10 ---
+		this.log("ctrl shift click the peeled rune");
 		this.watchPause("before clear+");
 
-		// Even if canSocket looks true, still Ctrl+Shift — peel then mode flip
 		found = this._clearPlusOnUnit(unit, true, true);
 
 		if (found && (!wantRune || this.canSocket(found))) {
-			this.log("ÿc4Pd2Stackÿc0 :: step4 stash peeled rune");
+			this.log("putting the socketable rune on the stash");
 			this.watchPause("stash peeled rune");
 			found = this.moveToStash(found) || found;
-			this.log("ÿc2Pd2Stackÿc0 :: unstack ok " + this.itemLabel(found) + " (after clear+)");
 			this.watchPause("after stash peeled");
+			this.stashLeftoverPile(leftoverGid, found.gid, base);
 			return found;
 		}
 
-		// clear+ may have flipped form/gid — search again
-		found = this._findUnstackedMatch(wantRune, base, 0);
-
-		if (found && (!wantRune || this.canSocket(found))) {
-			found = this.moveToStash(found) || found;
-			this.log("ÿc2Pd2Stackÿc0 :: unstack ok " + this.itemLabel(found) + " (clear+ new gid)");
-			return found;
-		}
-
-		this.log("ÿc1Pd2Stackÿc0 :: unstack fail — still + after Ctrl+Shift (" + (code || base) + ")");
-		this._logRuneFamily("still-plus", base);
+		// Failed after peel — put the pile back so inv/F10 is clean; do NOT paper over with another rune
+		this.stashLeftoverPile(leftoverGid, 0, base);
+		this.log("ÿc1peel failÿc0 :: still stacked after Ctrl+Shift @ F10");
 		return false;
 	},
 
@@ -2734,7 +3155,7 @@ var Pd2Stack = {
 			return false;
 		}
 
-		this.log("ÿc4Pd2Stackÿc0 :: stackOne gid=" + unit.gid);
+		this.vlog("ÿc4Pd2Stackÿc0 :: stackOne gid=" + unit.gid);
 
 		if (!this.toggle(unit)) {
 			return false;
