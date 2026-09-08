@@ -8,14 +8,11 @@
 [Type] == rejuvpotion
 
 // ---------------------------------------------------------------------------
-// Jewelry — always keep rare/set/unique (early rares are cheap sell-bait AND
-// often fail AutoEquip floors). Unid magic = ID in town. Identified magic =
-// modest keeps; AutoEquip tiers still decide wear vs sell.
+// Jewelry — set/unique always. Rares/magic only with useful mods (no vacuum).
+// Unid magic = ID in town. AutoEquip tiers still decide wear vs sell.
 // ---------------------------------------------------------------------------
-[type] == amulet && [quality] == rare
 [type] == amulet && [quality] == set
 [type] == amulet && [quality] == unique
-[type] == ring && [quality] == rare
 [type] == ring && [quality] == set
 [type] == ring && [quality] == unique
 
@@ -26,11 +23,19 @@
 [type] == amulet && [quality] == magic # [maxhp] >= 20
 [type] == amulet && [quality] == magic # [maxmana] >= 20
 [type] == amulet && [quality] == magic # [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 15
+[type] == amulet && [quality] == rare # [fcr] >= 10
+[type] == amulet && [quality] == rare # [maxhp] >= 20
+[type] == amulet && [quality] == rare # [maxmana] >= 20
+[type] == amulet && [quality] == rare # [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 15
 
 [type] == ring && [quality] == magic # [fcr] >= 10
 [type] == ring && [quality] == magic # [maxhp] >= 20
 [type] == ring && [quality] == magic # [maxmana] >= 20
 [type] == ring && [quality] == magic # [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 15
+[type] == ring && [quality] == rare # [fcr] >= 10
+[type] == ring && [quality] == rare # [maxhp] >= 20
+[type] == ring && [quality] == rare # [maxmana] >= 20
+[type] == ring && [quality] == rare # [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 15
 
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
@@ -82,7 +87,7 @@
 [type] == belt && [quality] == set
 
 // ---------------------------------------------------------------------------
-// Gems — leveling cube recipes (chipped→flawless). Perfects also in pd2Misc.
+// Gems — flawless+ always. Chipped/flawed/normal kept by Pickit only while charlvl <= 18.
 // Prefer type + short codes (PD2 stacks / classid shifts break long names).
 // ---------------------------------------------------------------------------
 [type] == chippedgem

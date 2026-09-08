@@ -20,13 +20,19 @@
 //[Name] == isc
 
 // gloves
-// tier ~1.xxx = white/blue starter; defense differentiates (always < 2)
-[type] == gloves && [quality] <= magic && [Flag] != Ethereal # # [tier] == (1+([defense]/1000))
+// Flat starter tier — defense/1000 caused MiniShopBot +1 AC buy loops
+// Flat starter — white < blue (same bug as boots: <=magic left blues on ground)
+[type] == gloves && [quality] < magic && [Flag] != Ethereal # # [tier] == 1
+[type] == gloves && [quality] == magic && [Flag] != Ethereal # # [tier] == 2
 [type] == gloves && [Flag] != Ethereal # [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 5 # [tier] == 2
 [type] == gloves && [quality] == set && [Flag] != Ethereal # # [tier] == 3
 [name] == lgl && [quality] == unique && [Flag] != Ethereal # # [tier] == 4
 [name] == heavygloves && [quality] == unique && [Flag] != Ethereal # [fhr] == 30 # [tier] == 5
-[name] == lightgauntlets && [quality] == unique && [Flag] != Ethereal # [fcr] == 20 # [tier] == 6
+// PD2: gloves only roll Apprentice +10% FCR (not Magus). Magefist unique = 20 FCR.
+[type] == gloves && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 10 # [tier] == 18
+[type] == gloves && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 10 && [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 10 # [tier] == 22
+[type] == gloves && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 10 && [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 20 # [tier] == 26
+[name] == lightgauntlets && [quality] == unique && [Flag] != Ethereal # [fcr] == 20 # [tier] == 40 // Magefist — beat rare 10 FCR
 [type] == gloves && [quality] == rare && [Flag] != Ethereal # [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 10 # [tier] == 7
 [type] == gloves && [quality] == rare && [Flag] != Ethereal # [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 20 # [tier] == 8
 [type] == gloves && [quality] == rare && [Flag] != Ethereal # [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 30 # [tier] == 9
@@ -36,8 +42,9 @@
 [type] == gloves && [quality] == rare && [Flag] != Ethereal # [strength] + [dexterity] >= 15 && [hpregen] + [maxmana] >= 30 && ([coldresist] >= 10) + ([fireresist] >= 10) + ([lightresist] >= 10) >= 2 # [tier] == 34
 
 // belt
-// tier ~1.xxx = white/blue starter; defense differentiates (always < 2)
-[type] == belt && [quality] <= magic && [Flag] != Ethereal # # [tier] == (1+([defense]/1000))
+// Flat starter — white < blue
+[type] == belt && [quality] < magic && [Flag] != Ethereal # # [tier] == 1
+[type] == belt && [quality] == magic && [Flag] != Ethereal # # [tier] == 2
 [name] == lbl && [Flag] != Ethereal # # [tier] == 2
 [name] == lbl && [Flag] != Ethereal # [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 5 # [tier] == 3
 [name] == lbl && [quality] == unique && [Flag] != Ethereal # # [tier] == 4
@@ -54,13 +61,18 @@
 ([name] == Vampirefangbelt || [name] == SpiderwebSash || [name] == DemonhideSash || [name] == SharkskinBelt || [name] == MeshBelt) && [quality] == rare && [Flag] != Ethereal # [maxhp]+[maxmana] > 60 && [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 18 # [tier] == 15
 ([name] == Vampirefangbelt || [name] == SpiderwebSash || [name] == DemonhideSash || [name] == SharkskinBelt || [name] == MeshBelt) && [quality] == rare && [Flag] != Ethereal # [maxhp]+[maxmana] > 70 && [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 21 # [tier] == 16
 ([name] == Vampirefangbelt || [name] == SpiderwebSash || [name] == DemonhideSash || [name] == SharkskinBelt || [name] == MeshBelt) && [quality] == rare && [Flag] != Ethereal # [maxhp]+[maxmana] > 75 && [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 28 # [tier] == 17
+// PD2: belts only roll Apprentice +10% FCR (magic+rare)
+[type] == belt && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 10 # [tier] == 25
+[type] == belt && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 10 && [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 10 # [tier] == 30
+[type] == belt && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 10 && [maxhp]+[maxmana] >= 30 # [tier] == 35
 ([name] == Vampirefangbelt || [name] == SpiderwebSash || [name] == DemonhideSash || [name] == SharkskinBelt || [name] == MeshBelt) && [quality] == rare && [Flag] != Ethereal # [strength] > 10 && [maxhp] >= 20 && ([coldresist] >= 10) + ([fireresist] >= 10) + ([lightresist] >= 10) >= 2  # [tier] == 103
 ([name] == Vampirefangbelt || [name] == SpiderwebSash || [name] == DemonhideSash || [name] == SharkskinBelt || [name] == MeshBelt) && [quality] == rare && [Flag] != Ethereal # [strength] > 15 && [maxhp] >= 20 && ([coldresist] >= 10) + ([fireresist] >= 10) + ([lightresist] >= 10) >= 2  # [tier] == 104
 [name] == meshbelt && [quality] == set && [Flag] != Ethereal # [ItemMagicBonus] >= 10 # [tier] == 107  //Tal's 
 
 // boots
-// tier ~1.xxx = white/blue starter; defense differentiates (always < 2)
-[type] == boots && [quality] <= magic && [Flag] != Ethereal # # [tier] == (1+([defense]/1000))
+// Flat starter tiers — white < blue (was <=magic tier1 → left blue Chain Boots on ground)
+[type] == boots && [quality] < magic && [Flag] != Ethereal # # [tier] == 1
+[type] == boots && [quality] == magic && [Flag] != Ethereal # # [tier] == 2
 // Rare/set base — works unid (no stat gate) so we pick yellows over white starters
 [type] == boots && [quality] == rare && [Flag] != Ethereal # # [tier] == 5
 [type] == boots && [quality] == set && [Flag] != Ethereal # # [tier] == 5
@@ -77,8 +89,9 @@
 [name] == battleboots && [quality] == unique && [Flag] != Ethereal # # [maxquantity] == 1 && [tier] == 102
 
 // helm
-// tier ~1.xxx = white/blue starter; defense differentiates (always < 2)
-[type] == helm && [quality] <= magic && [Flag] != Ethereal # # [tier] == (1+([defense]/1000))
+// Flat starter — white < blue (defense/1000 caused MiniShopBot +1 AC buy loops)
+[type] == helm && [quality] < magic && [Flag] != Ethereal # # [tier] == 1
+[type] == helm && [quality] == magic && [Flag] != Ethereal # # [tier] == 2
 [type] == helm && [Flag] != Ethereal # [maxhp] > 0 # [tier] == 2
 [type] == helm && [Flag] != Ethereal # [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 5 # [tier] == 3
 [type] == helm && [Flag] != Ethereal # [maxhp] > 5 # [tier] == 4
@@ -101,9 +114,26 @@
 [name] == shako && [quality] == unique && [Flag] != Ethereal # [itemallskills] == 2 # [tier] == 106
 [Name] == DeathMask && [Quality] == Set && [Flag] != Ethereal # [Defense] >= 99  # [maxquantity] == 1 && [tier] == 107
 
+// circlet / coronet / tiara / diadem — player #tier only (not merc MaxQuantity)
+// No naked floor: junk circlets were hoarded via leveling_merc.nip
+[type] == circlet && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 10 # [tier] == 14
+[type] == circlet && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 20 # [tier] == 28
+[type] == circlet && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 10 && [fireresist]+[lightresist]+[coldresist] >= 20 # [tier] == 22
+[type] == circlet && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 20 && [fireresist]+[lightresist]+[coldresist] >= 20 # [tier] == 36
+[type] == circlet && [quality] <= rare && [Flag] != Ethereal # [sorceressskills] >= 1 # [tier] == 40
+[type] == circlet && [quality] <= rare && [Flag] != Ethereal # [sorceressskills] >= 2 # [tier] == 55
+[type] == circlet && [quality] <= rare && [Flag] != Ethereal # ([coldskilltab]+[fireskilltab]+[lightningskilltab]) >= 1 # [tier] == 42
+[type] == circlet && [quality] <= rare && [Flag] != Ethereal # ([coldskilltab]+[fireskilltab]+[lightningskilltab]) >= 2 # [tier] == 58
+[type] == circlet && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 10 && [sorceressskills] >= 1 # [tier] == 50
+[type] == circlet && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 20 && [sorceressskills] >= 1 # [tier] == 65
+[type] == circlet && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 20 && [maxhp]+[maxmana] >= 40 # [tier] == 45
+[name] == circlet && [quality] == unique && [Flag] != Ethereal # # [tier] == 20
+[name] == coronet && [quality] == unique && [Flag] != Ethereal # # [tier] == 30
+[name] == tiara && [quality] == unique && [Flag] != Ethereal # [fireresist] >= 50 # [tier] == 90 // Kira's
+[name] == diadem && [quality] == unique && [Flag] != Ethereal # # [tier] == 100
+
 // amulet
-// tier 1 = naked starter (any magic amulet)
-[type] == amulet && [quality] == magic # # [tier] == 1
+// No naked tier-1 magic — that vacuumed trash amulets
 [type] == amulet # [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 5 # [tier] == 2
 [type] == amulet # [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 5 && ([hpregen] > 0 || [maxhp] > 0) # [tier] == 3
 [type] == amulet # [maxhp] > 15 # [tier] == 3
@@ -136,13 +166,17 @@
 [Type] == Amulet && [Quality] == Set # [SorceressSkills] == 2 # [maxquantity] == 1 && [tier] == 101
 
 // ring
-// tier 1 = naked starter (any magic); tier 2 = any rare (was missing → junk rares never picked)
-[type] == ring && [quality] == magic # # [tier] == 1
-[type] == ring && [quality] == rare # # [tier] == 2
+// No naked tier-1/2 — vacuumed every magic/rare ring (manager "Kept Ring …")
 [type] == ring # [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 5 # [tier] == 2
 [type] == ring # [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 5 && ([hpregen] > 0 || [maxhp] > 0) # [tier] == 3
 [type] == ring # [maxhp] > 15 # [tier] == 3
 [type] == ring # [maxhp] > 15 && [maxmana] > 15 # [tier] == 4
+// Caster FCR — must beat early single-resist junk (tiers 2–4). Magic Apprentice alone was tier 0 / sold.
+[type] == ring # [fcr] >= 10 # [tier] == 14
+[type] == ring # [fcr] >= 10 && ([maxhp] > 0 || [maxmana] > 0) # [tier] == 15
+[type] == ring # [fcr] >= 10 && [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 5 # [tier] == 16
+[type] == ring # [fcr] >= 10 && [maxhp]+[maxmana] >= 20 # [tier] == 17
+[type] == ring && [quality] == rare # [fcr] >= 10 # [tier] == 18
 [type] == ring && [quality] == rare # [maxhp] > 0 && [maxmana] > 0 && [fcr] > 0 || [strength] > 0 # [tier] == 5
 [type] == ring && [quality] == rare # [maxhp] > 0 && [maxmana] > 0 && [fcr] > 0 && [strength] > 0 # [tier] == 6
 [type] == ring && [quality] == unique # [itemallskills] == 1 # [tier] == 7
@@ -156,54 +190,76 @@
 [type] == ring && [quality] == unique # [itemallskills] == 1 # [tier] == 101 // soj
 
 // armor
-// tier ~1.xxx = white/blue starter; defense differentiates (always < 2)
-[type] == armor && [quality] <= magic && [Flag] != Ethereal # # [tier] == (1+([defense]/1000))
+// Flat starter tier — defense/1000 caused MiniShopBot +1 AC buy loops
+// Flat starter — white < blue
+[type] == armor && [quality] < magic && [Flag] != Ethereal # # [tier] == 1
+[type] == armor && [quality] == magic && [Flag] != Ethereal # # [tier] == 2
 [type] == armor && [Flag] != Ethereal # [maxhp] > 0 || [strength] > 0 # [tier] == 2
 [type] == armor && [Flag] != Ethereal # [maxhp] > 0 && [strength] > 0 # [tier] == 2
 [name] == quiltedarmor && [quality] == set && [Flag] != Ethereal # # [tier] == 3
+// Rare floor — same idea as boots (was missing → yellows with FHR/ED/res lost to white quilted / sold as leftovers)
+[type] == armor && [quality] == rare && [Flag] != Ethereal # # [tier] == 5
+[type] == armor && [quality] <= rare && [Flag] != Ethereal # [fireresist]+[lightresist]+[coldresist] >= 10 # [tier] == 6
+[type] == armor && [quality] <= rare && [Flag] != Ethereal # [enhanceddefense] >= 20 # [tier] == 7
+[type] == armor && [quality] <= rare && [Flag] != Ethereal # [fhr] >= 10 # [tier] == 8
+[type] == armor && [quality] <= rare && [Flag] != Ethereal # [fhr] >= 20 # [tier] == 12
+[type] == armor && [quality] == rare && [Flag] != Ethereal # [enhanceddefense] >= 20 && ([fhr] >= 10 || [fireresist]+[lightresist]+[coldresist] >= 10) # [tier] == 14
+[type] == armor && [quality] == rare && [Flag] != Ethereal # [fhr] >= 20 && [enhanceddefense] >= 20 # [tier] == 16
+[type] == armor && [quality] == rare && [Flag] != Ethereal # [fhr] >= 20 && [fireresist]+[lightresist]+[coldresist] >= 15 # [tier] == 18
+// PD2: Apprentice +10% / Magus +20% FCR on chest (magic + rare/crafted; alvl 17 / 25) — not on helms
+[type] == armor && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 10 # [tier] == 20
+[type] == armor && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 10 && [enhanceddefense] >= 20 # [tier] == 22
+[type] == armor && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 10 && ([fhr] >= 10 || [fireresist]+[lightresist]+[coldresist] >= 15) # [tier] == 24
+[type] == armor && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 20 # [tier] == 28
+[type] == armor && [quality] == rare && [Flag] != Ethereal # [fcr] >= 20 && ([fhr] >= 10 || [maxhp]+[maxmana] >= 40 || [fireresist]+[lightresist]+[coldresist] >= 20) # [tier] == 35
+// PD2 +% Enhanced Damage on chest (Supporting→Rampaging, 10–200%) — useless for caster; mercScore already values it for Act2
 // Cathan's Mesh — weak for sorc, strong early merc AC vs white trash (~88 def, low str)
 [name] == chainmail && [quality] == set # # [MaxQuantity] == 1
-[type] == armor && [Flag] != Ethereal # [maxhp] >= 20 && [fireresist]+[lightresist]+[coldresist] >= 20 # [tier] == 4
+[type] == armor && [Flag] != Ethereal # [maxhp] >= 20 && [fireresist]+[lightresist]+[coldresist] >= 20 # [tier] == 9
 [type] == armor && [quality] <= superior && [Flag] != Ethereal # [poisonresist] == 30 # [tier] == 5
-[type] == armor && [quality] == rare && [Flag] != Ethereal # [maxhp]+[maxmana] >= 40 && [fireresist]+[lightresist]+[coldresist] >= 20 && [strength] > 0 # [tier] == 6
-[type] == armor && [quality] == rare && [Flag] != Ethereal # [maxhp]+[maxmana] >= 50 && [fireresist]+[lightresist]+[coldresist] >= 20 && [strength] >= 3 # [tier] == 7
-[type] == armor && [quality] == rare && [Flag] != Ethereal # [maxhp]+[maxmana] >= 60 && [fireresist]+[lightresist]+[coldresist] >= 20 && [strength] >= 6 # [tier] == 8
-[type] == armor && [quality] == rare && [Flag] != Ethereal # [maxhp]+[maxmana] >= 70 && [fireresist]+[lightresist]+[coldresist] >= 20 && [strength] >= 6 # [tier] == 9
-[type] == armor && [quality] == rare && [Flag] != Ethereal # [maxhp]+[maxmana] >= 80 && [fireresist]+[lightresist]+[coldresist] >= 20 && [strength] >= 6 # [tier] == 10
-[name] == lightplate && [quality] == unique && [Flag] != Ethereal # # [tier] == 11
-[name] == cuirass && [quality] == unique && [Flag] != Ethereal # # [tier] == 12
-[name] == mageplate && [quality] == unique && [Flag] != Ethereal # # [tier] == 13
-[name] == serpentskinarmor && [quality] == unique && [Flag] != Ethereal # # [tier] == 14
-[name] == russetarmor && [quality] == unique && [Flag] != Ethereal # # [tier] == 15
-[name] == mesharmor && [quality] == unique && [Flag] != Ethereal # # [tier] == 16
-[name] == russetarmor && [quality] == unique && [flag] == ethereal # # [tier] == 17
+[type] == armor && [quality] == rare && [Flag] != Ethereal # [maxhp]+[maxmana] >= 40 && [fireresist]+[lightresist]+[coldresist] >= 20 && [strength] > 0 # [tier] == 10
+[type] == armor && [quality] == rare && [Flag] != Ethereal # [maxhp]+[maxmana] >= 50 && [fireresist]+[lightresist]+[coldresist] >= 20 && [strength] >= 3 # [tier] == 11
+[type] == armor && [quality] == rare && [Flag] != Ethereal # [maxhp]+[maxmana] >= 60 && [fireresist]+[lightresist]+[coldresist] >= 20 && [strength] >= 6 # [tier] == 12
+[type] == armor && [quality] == rare && [Flag] != Ethereal # [maxhp]+[maxmana] >= 70 && [fireresist]+[lightresist]+[coldresist] >= 20 && [strength] >= 6 # [tier] == 13
+[type] == armor && [quality] == rare && [Flag] != Ethereal # [maxhp]+[maxmana] >= 80 && [fireresist]+[lightresist]+[coldresist] >= 20 && [strength] >= 6 # [tier] == 14
+[name] == lightplate && [quality] == unique && [Flag] != Ethereal # # [tier] == 15
+[name] == cuirass && [quality] == unique && [Flag] != Ethereal # # [tier] == 16
+[name] == mageplate && [quality] == unique && [Flag] != Ethereal # # [tier] == 17
+[name] == serpentskinarmor && [quality] == unique && [Flag] != Ethereal # # [tier] == 19
+[name] == russetarmor && [quality] == unique && [Flag] != Ethereal # # [tier] == 20
+[name] == mesharmor && [quality] == unique && [Flag] != Ethereal # # [tier] == 21
+[name] == russetarmor && [quality] == unique && [flag] == ethereal # # [tier] == 22
 [name] == studdedleather && [quality] == unique && [Flag] != Ethereal # [dexterity] > 0 # [maxquantity] == 1 && [tier] == 100
 [name] == lacqueredplate && [quality] == unique && [Flag] != Ethereal # [FireResist] >= 12 && [LightResist] >= 12 # [maxquantity] == 1 && [tier] ==  101
 [name] == serpentskinarmor && [quality] == unique && [Flag] != Ethereal # [itemallskills] == 1 &&  [fireresist] >=20  && [lightresist] >= 20 # [maxquantity] == 1 && [tier] == 102
-[type] == armor && [flag] == runeword # [fcr] == 10 && [fhr] == 30 # [tier] == 85 // Stealth — priority as soon as cubed
+[type] == armor && [flag] == runeword # [fcr] == 20 && [fhr] == 20 # [tier] == 85 // Stealth (PD2)
 [type] == armor && [flag] == runeword # [lightresist] >= 60 # [tier] == 104
 [type] == armor && [flag] == runeword # [fireresist] == 50 && [lightresist] == 50 # [tier] == 105
 [Name] == LacqueredPlate && [Quality] == Set # [Defense] >= 833 # [maxquantity] == 1 && tier =106
 
-// weapon — prefer 2H staff with +skills; orb only when it beats staff (lower base tiers)
-[type] == staff && [Flag] != Ethereal # # [tier] == 5
-[type] == wand && [Flag] != Ethereal # # [tier] == 3
-[type] == orb && [Flag] != Ethereal # # [tier] == 2
-[type] == staff && [flag] == runeword # [fireskilltab] >= 3 # [tier] == 45 // Leaf
+// weapon — same-stat orb > staff (1H + shield). Build overlays keep orb +2 over staff.
+// Leaf (Tir+Ral) is fire-only exception — see AutoGear + autoequip_sor_fire.nip
+// No naked orb floors — bare white/magic orbs were banked as "pending" with zero mods.
+// Staff quality floors OK for early leveling; orbs need skills/FCR (lines below).
+[type] == staff && [quality] < magic && [Flag] != Ethereal # # [tier] == 3
+[type] == staff && [quality] == magic && [Flag] != Ethereal # # [tier] == 4
+[type] == staff && [quality] == rare && [Flag] != Ethereal # # [tier] == 5
 
-// Generic orb skill lines (below build overlay staff tiers)
-[Type] == orb && [quality] <= magic && [Flag] != Ethereal # [ColdSkillTab]>1 # [tier] == 8
-[Type] == orb && [quality] <= rare && [Flag] != Ethereal # [ColdSkillTab]>1 # [tier] == 9
-[type] == orb && [quality] <= rare && [Flag] != Ethereal # ([FireSkillTab] + [ColdSkillTab] + [LightningSkillTab]) >= 2 # [tier] == 10
-[type] == orb && [quality] <= rare && [Flag] != Ethereal # ([FireSkillTab] + [ColdSkillTab] + [LightningSkillTab]) >= 3 # [tier] == 11
-[type] == orb && [quality] <= rare && [Flag] != Ethereal # ([FireSkillTab] + [ColdSkillTab] + [LightningSkillTab]) >= 5 # [tier] == 12
-[type] == orb && [quality] <= rare && [Flag] != Ethereal # [SorceressSkills] >=1 # [tier] == 13
-[type] == orb && [quality] <= rare && [Flag] != Ethereal # [SorceressSkills] >=1 && ([FireSkillTab] + [ColdSkillTab] + [LightningSkillTab]) >= 1 # [tier] == 14
-[type] == orb && [quality] <= rare && [Flag] != Ethereal # [SorceressSkills] >=1 && ([FireSkillTab] + [ColdSkillTab] + [LightningSkillTab]) >= 3 # [tier] == 15
-[type] == orb && [quality] <= rare && [Flag] != Ethereal # [SorceressSkills] >=1 && ([FireSkillTab] + [ColdSkillTab] + [LightningSkillTab]) >= 5 # [tier] == 16
-[type] == orb && [quality] <= rare && [Flag] != Ethereal # [SorceressSkills] >=2 && ([FireSkillTab] + [ColdSkillTab] + [LightningSkillTab]) >= 1 # [tier] == 17
-[type] == orb && [quality] <= rare && [Flag] != Ethereal # [SorceressSkills] >=2 && ([FireSkillTab] + [ColdSkillTab] + [LightningSkillTab]) >= 3 # [tier] == 18
-[type] == orb && [quality] <= rare && [Flag] != Ethereal # [SorceressSkills] >=2 && ([FireSkillTab] + [ColdSkillTab] + [LightningSkillTab]) >= 5 # [tier] == 19
+// Generic orb skill lines (beat white staff; build overlay raises further)
+[Type] == orb && [quality] <= magic && [Flag] != Ethereal # [ColdSkillTab]>1 # [tier] == 12
+[Type] == orb && [quality] <= rare && [Flag] != Ethereal # [ColdSkillTab]>1 # [tier] == 14
+[type] == orb && [quality] <= rare && [Flag] != Ethereal # ([FireSkillTab] + [ColdSkillTab] + [LightningSkillTab]) >= 2 # [tier] == 16
+[type] == orb && [quality] <= rare && [Flag] != Ethereal # ([FireSkillTab] + [ColdSkillTab] + [LightningSkillTab]) >= 3 # [tier] == 18
+[type] == orb && [quality] <= rare && [Flag] != Ethereal # ([FireSkillTab] + [ColdSkillTab] + [LightningSkillTab]) >= 5 # [tier] == 20
+[type] == orb && [quality] <= rare && [Flag] != Ethereal # [SorceressSkills] >=1 # [tier] == 22
+[type] == orb && [quality] <= rare && [Flag] != Ethereal # [SorceressSkills] >=1 && ([FireSkillTab] + [ColdSkillTab] + [LightningSkillTab]) >= 1 # [tier] == 24
+[type] == orb && [quality] <= rare && [Flag] != Ethereal # [SorceressSkills] >=1 && ([FireSkillTab] + [ColdSkillTab] + [LightningSkillTab]) >= 3 # [tier] == 26
+[type] == orb && [quality] <= rare && [Flag] != Ethereal # [SorceressSkills] >=1 && ([FireSkillTab] + [ColdSkillTab] + [LightningSkillTab]) >= 5 # [tier] == 28
+[type] == orb && [quality] <= rare && [Flag] != Ethereal # [SorceressSkills] >=2 && ([FireSkillTab] + [ColdSkillTab] + [LightningSkillTab]) >= 1 # [tier] == 30
+[type] == orb && [quality] <= rare && [Flag] != Ethereal # [SorceressSkills] >=2 && ([FireSkillTab] + [ColdSkillTab] + [LightningSkillTab]) >= 3 # [tier] == 32
+[type] == orb && [quality] <= rare && [Flag] != Ethereal # [SorceressSkills] >=2 && ([FireSkillTab] + [ColdSkillTab] + [LightningSkillTab]) >= 5 # [tier] == 34
+// Classid backup — only with FCR (no naked white orb keep)
+([name] == eagleorb || [name] == sacredglobe || [name] == smokedsphere || [name] == claspedorb || [name] == dragonstone) && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 10 # [tier] == 14
 [type] == sword  && [Flag] == Runeword # [itemallskills] == 2 && [fcr] >= 25 && [fhr] >= 55  # [tier] == 100 //Spirit
 [name] == swirlingcrystal && [quality] == unique && [Flag] != Ethereal # [fcr] > 0 # [maxquantity] == 1 && [tier] ==  101
 [name] == swirlingcrystal && [quality] == set && [Flag] != Ethereal #  [skillcoldmastery] >=1 # [maxquantity] == 1 && [tier] == 102 
@@ -219,8 +275,15 @@
 [type] == shield && [quality] == rare && [Flag] != Ethereal # [fireresist]+[lightresist]+[coldresist] >= 10 && [maxhp] > 29 && ([fbr] > 0 && [strength] >= 3) # [tier] == 9
 [type] == shield && [quality] == rare && [Flag] != Ethereal # [fireresist]+[lightresist]+[coldresist] >= 10 && [maxhp] > 29 && ([fbr] == 30 && [strength] >= 6) # [tier] == 10
 [type] == shield && [quality] <= superior && [Flag] != Ethereal # ([poisonresist]+[fireresist]+[coldresist]+[lightresist] == 100) && [fbr] == 40 # [tier] == 11
-[name] == grimshield && [quality] == unique && [Flag] != Ethereal # # [tier] == 12
 [type] == shield && [flag] == Runeword # [itemgoldbonus] == 50 # [tier] ==  13 //rhyme
-[name] == roundshield && [quality] == unique && [Flag] != Ethereal # [FireResist] >= 25 # [maxquantity] == 1 && [tier] == 14
+// PD2: Apprentice +10% / Magus +20% FCR on shield (magic+rare) — below Splendor/Lidless
+[type] == shield && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 10 # [tier] == 20
+[type] == shield && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 10 && ([fireresist]+[lightresist]+[coldresist] >= 20 || [maxhp] >= 20) # [tier] == 30
+[type] == shield && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 20 # [tier] == 40
+[type] == shield && [quality] == rare && [Flag] != Ethereal # [fcr] >= 20 && ([fireresist]+[lightresist]+[coldresist] >= 20 || [maxhp] >= 30) # [tier] == 55
+// PD2 mid shields (prefer these over Spirit Monarch)
+[type] == shield && [flag] == Runeword # [itemallskills] == 1 && [fcr] == 10 # [tier] == 94 // Splendor
+[name] == grimshield && [quality] == unique && [Flag] != Ethereal # # [tier] == 96 // Lidless
+[name] == roundshield && [quality] == unique && [Flag] != Ethereal # [FireResist] >= 25 # [maxquantity] == 1 && [tier] == 98 // Moser's
 [type] == shield && [flag] == Runeword # [FireResist] >= 40 && [LightResist] >= 40 # [tier] ==  101 //Ancient's Pledge
-[type] == shield && [flag] == Runeword # [ColdResist] >= 35 && [LightResist] >= 35 && [fcr] >= 25 # [tier] ==  102 //Spirit
+//[type] == shield && [flag] == Runeword # [ColdResist] >= 35 && [LightResist] >= 35 && [fcr] >= 25 # [tier] ==  102 //Spirit shield — skip on PD2 mid

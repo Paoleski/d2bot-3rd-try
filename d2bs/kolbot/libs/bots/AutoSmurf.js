@@ -18,8 +18,9 @@ function AutoSmurf() {
  // -------- Normal Difficulty -------------
 	var stonyLvl = 7, // farm Stony Field until this level, then Cain
 		bloodLvl = 12, // Blood Raven after lvl 12
-		tristLvl = 15,
+		tristLvl = 14, // Tristram quit-farm until this, then straight to Catacombs toward Andy
 		andyLvl = 17, // Normal Andy once party hits this (Teleport still unlocks at 18)
+		jailFarmUntil = 16, // unused for Normal XP path (kept for reference; post-Trist → Cata only)
 		tombsLvl = 22, // stop tomb clears / start Duriel at this level
 		mephLvl = 28,
 		baalLvl = 48,
@@ -1237,6 +1238,12 @@ function AutoSmurf() {
 		return Pather.teleport;
 	};
 
+	// Clear packs while pathing to WPs / quest objectives (0 = all spectypes).
+	// Never pass false just because Teleport is on — TeleDelay still walks nodes.
+	this.pathClear = function () {
+		return 0;
+	};
+
 	this.travel = function (goal) { // 0->9, a custom waypoint getter function
 		var i, homeTown, nextAreaIndex, oldClearType, target, destination, unit,
 			wpAreas = [],
@@ -1329,8 +1336,11 @@ function AutoSmurf() {
 			}
 			for (nextAreaIndex ; nextAreaIndex < areaIDs.length; nextAreaIndex += 1) {
 				this.status("nextAreaIndex = " + nextAreaIndex);
-				if (Pather.teleport === true && me.charlvl >= 18) { // If allowed to teleport (determined by the switch above), skip killing monsters.
+				// Always clear toward WPs on Normal. NM/Hell tele chars may skip for speed.
+				if (Pather.teleport === true && me.charlvl >= 18 && me.diff !== 0) {
 					Config.ClearType = false;
+				} else {
+					Config.ClearType = 0;
 				}
 				switch (areaIDs[nextAreaIndex]) { // Special actions for traveling to some areas
 				case 100: // Durance of Hate Level 1
@@ -2852,9 +2862,265 @@ function AutoSmurf() {
 		return true;
 	};
 
-	// Leveling farm: Stony Field (no Cave)
+	// Early outdoor XP: reveal along a few central exits, then hunt dense packs only
+	// (no clearLevel / empty room corners). leg: exit area id | "rakanishu"
+	this.linearOutdoorFarm = function (legs) {
+		var i, leg, pack, hunts,
+			minPack = 3,
+			maxHunts = 4,
+			clusterRange = 18,
+			clearRange = 28;
+
+		if (!legs || !legs.length) {
+			return false;
+		}
+
+		for (i = 0; i < legs.length; i += 1) {
+			leg = legs[i];
+
+			// Reveal spine so packs load — clear only what's on the path
+			if (leg === "rakanishu") {
+				this.status("Reveal → Rakanishu");
+
+				try {
+					Pather.moveToRakanishu(true);
+					Attack.clear(25, 0);
+				} catch (eRak) {
+					print("ÿc8AutoSmurfÿc0 :: Rakanishu path fail — " + eRak);
+				}
+			} else {
+				this.status("Reveal → " + Pather.getAreaName(leg) + " exit");
+
+				if (!Pather.moveToExit(leg, false, true)) {
+					this.status("Reveal failed toward " + Pather.getAreaName(leg) + " — local clear only");
+				}
+
+				Attack.clear(20, 0);
+			}
+
+			// After reveal: keep pulling densest visible packs (skip lone / empty corners)
+			for (hunts = 0; hunts < maxHunts; hunts += 1) {
+				pack = Attack.findDensePack(minPack, clusterRange);
+
+				if (!pack) {
+					break;
+				}
+
+				this.status("Pack hunt ×" + pack.count + " (" + (hunts + 1) + "/" + maxHunts + ")");
+
+				if (getDistance(me, pack.unit) > 10) {
+					Pather.moveTo(pack.unit.x, pack.unit.y, 3, true);
+				}
+
+				Attack.clear(clearRange, 0);
+			}
+		}
+
+		return true;
+	};
+
+	// Walk nearest unexplored room center (Cathedral/Jail/Cata — exit may not be listed until rooms load)
+	this.nudgeUnexploredRoom = function () {
+		var room, best, dist, cx, cy, myDist;
+
+		try {
+			room = getRoom();
+		} catch (eRoom) {
+			return false;
+		}
+
+		if (!room) {
+			return false;
+		}
+
+		best = null;
+		myDist = 0;
+
+		do {
+			if (room.correcttomb) {
+				continue;
+			}
+
+			// Skip rooms already marked explored when API exposes it
+			if (typeof room.discovered !== "undefined" && room.discovered) {
+				continue;
+			}
+
+			cx = room.x * 5 + room.xsize / 2;
+			cy = room.y * 5 + room.ysize / 2;
+			dist = getDistance(me, cx, cy);
+
+			if (dist < 8) {
+				continue;
+			}
+
+			if (!best || dist < myDist) {
+				best = [cx, cy];
+				myDist = dist;
+			}
+		} while (room.getNext());
+
+		if (!best) {
+			return false;
+		}
+
+		return Pather.moveTo(best[0], best[1], 3, true);
+	};
+
+	// Nearest walkable tile for exit into nextArea (or null if exits not loaded)
+	this.getExitDest = function (nextArea) {
+		var area, exits, j, dest;
+
+		try {
+			area = getArea();
+		} catch (eArea) {
+			return null;
+		}
+
+		if (!area || !area.exits || !area.exits.length) {
+			return null;
+		}
+
+		for (j = 0; j < area.exits.length; j += 1) {
+			if (area.exits[j].target !== nextArea) {
+				continue;
+			}
+
+			dest = Pather.getNearestWalkable(area.exits[j].x, area.exits[j].y, 5, 1);
+
+			if (dest) {
+				return {x: dest[0], y: dest[1]};
+			}
+
+			return {x: area.exits[j].x, y: area.exits[j].y};
+		}
+
+		return null;
+	};
+
+	// Indoor Jail / Cathedral / Catacombs — pack hunt ALONG the way to next exit (not only at stairs)
+	this.dungeonPackFarm = function (nextArea) {
+		var tryN, exitDest, path, n, nodeBudget,
+			minPack = 3,
+			clusterRange = 15,
+			clearRange = 25,
+			totalHunts = 0,
+			maxTotalHunts = 10,
+			atStairs = false;
+
+		if (!nextArea) {
+			return false;
+		}
+
+		function huntNearby(budget) {
+			var h, p;
+
+			for (h = 0; h < budget; h += 1) {
+				if (totalHunts >= maxTotalHunts) {
+					return;
+				}
+
+				p = Attack.findDensePack(minPack, clusterRange);
+
+				if (!p) {
+					return;
+				}
+
+				this.status("Pack hunt ×" + p.count + " (" + (totalHunts + 1) + "/" + maxTotalHunts +
+					") → " + Pather.getAreaName(nextArea));
+
+				if (getDistance(me, p.unit) > 8) {
+					Pather.moveTo(p.unit.x, p.unit.y, 3, true);
+				}
+
+				Attack.clear(clearRange, 0);
+				totalHunts += 1;
+			}
+		}
+
+		this.status("Dungeon pack farm → " + Pather.getAreaName(nextArea) + " (hunt while pathing)");
+
+		// Packs near entry / WP first
+		huntNearby.call(this, 2);
+		Attack.clear(15, 0);
+
+		for (tryN = 0; tryN < 12; tryN += 1) {
+			exitDest = this.getExitDest(nextArea);
+
+			if (exitDest && getDistance(me, exitDest.x, exitDest.y) <= 10) {
+				atStairs = true;
+				break;
+			}
+
+			if (exitDest) {
+				// Walk a short path chunk toward stairs, hunting between chunks
+				path = getPath(me.area, exitDest.x, exitDest.y, me.x, me.y, 0, Pather.walkDistance || 5);
+
+				if (path && path.length) {
+					path.reverse();
+					nodeBudget = Math.min(8, path.length);
+
+					for (n = 0; n < nodeBudget; n += 1) {
+						Pather.moveTo(path[n].x, path[n].y, 3, true);
+
+						// Hunt every couple of nodes so we clear packs mid-level
+						if (n > 0 && (n % 2) === 0) {
+							huntNearby.call(this, 1);
+						}
+					}
+
+					huntNearby.call(this, 2);
+				} else {
+					// Fallback: short move toward exit (not full moveToExit)
+					Pather.moveTo(
+						Math.round(me.x + (exitDest.x - me.x) * 0.35),
+						Math.round(me.y + (exitDest.y - me.y) * 0.35),
+						3,
+						true
+					);
+					huntNearby.call(this, 2);
+				}
+			} else {
+				this.status("Exit not listed yet — explore + hunt (" + (tryN + 1) + "/12)");
+				huntNearby.call(this, 2);
+				Attack.clear(20, 0);
+
+				if (!this.nudgeUnexploredRoom()) {
+					Pather.moveTo(me.x + rand(-20, 20), me.y + rand(-20, 20), 3, true);
+				}
+			}
+
+			if (totalHunts >= maxTotalHunts) {
+				break;
+			}
+		}
+
+		// Finish at stairs (do not take exit) — leftover packs near exit
+		exitDest = this.getExitDest(nextArea);
+
+		if (exitDest) {
+			if (getDistance(me, exitDest.x, exitDest.y) > 8) {
+				Pather.moveTo(exitDest.x, exitDest.y, 3, true);
+			}
+
+			atStairs = true;
+		} else if (Pather.moveToExit(nextArea, false, true)) {
+			atStairs = true;
+		}
+
+		huntNearby.call(this, 2);
+		Attack.clear(18, 0);
+
+		if (!atStairs) {
+			this.status("Still no path to " + Pather.getAreaName(nextArea) + " — caller takes exit");
+		}
+
+		return atStairs;
+	};
+
+	// Leveling farm: Stony Field (no Cave) — spine WP → Rakanishu → Dark Wood / UG Passage
 	this.stonyField = function () {
-		this.status("Clearing Stony Field");
+		this.status("Farming Stony Field (linear)");
 		Town.doChores();
 		this.teamInGame();
 
@@ -2883,14 +3149,15 @@ function AutoSmurf() {
 		}
 
 		Precast.doPrecast(true);
-		Attack.clearLevel(0); // all monsters for early leveling XP
-		this.status("Stony Field clear done");
+		// No clearLevel — don't sweep every room / corner
+		this.linearOutdoorFarm(["rakanishu", 5, 10]);
+		this.status("Stony Field linear farm done");
 		return true; // may end in Stony (quit/rejoin for more XP until stonyLvl)
 	};
 
-	// After Den: clear Cold Plains before Stony Field
+	// After Den: Cold Plains spine WP → Stony exit → Burial exit (no Cave, no full clear)
 	this.coldPlains = function () {
-		this.status("Clearing Cold Plains (before Stony Field)");
+		this.status("Farming Cold Plains (linear)");
 		Town.doChores();
 		this.teamInGame();
 
@@ -2910,9 +3177,9 @@ function AutoSmurf() {
 		Pather.useWaypoint(3);
 		this.waitForPartyMembers();
 		Precast.doPrecast(true);
-		Attack.clearLevel(0); // all monsters (Config.ClearType 0xF skips normals)
+		this.linearOutdoorFarm([4, 17]); // Stony Field + Burial approaches only
 		Town.goToTown();
-		this.status("Cold Plains clear done");
+		this.status("Cold Plains linear farm done");
 		return true;
 	};
 
@@ -2932,8 +3199,7 @@ function AutoSmurf() {
 		}
 
 		this.status("Quest: Blood Raven");
-		Town.doChores();
-		Town.buyPotions();
+		Town.doChores(); // already buys pots — don't Town.buyPotions() after (reopens Akara)
 		this.teamInGame();
 
 		if (!me.inTown) {
@@ -3566,39 +3832,174 @@ function AutoSmurf() {
 
 	this.trist = function () {
 		var i;
-		this.status("Leveling: Tristram");
+		this.status("Leveling: Tristram (until lvl " + tristLvl + ", now " + me.charlvl + ")");
 		Town.doChores();
-		Pather.useWaypoint(4);
+		this.teamInGame();
+
+		if (!me.inTown) {
+			Town.goToTown(1);
+		}
+
+		if (!Pather.useWaypoint(4)) {
+			this.status("Tristram farm — Stony Field WP failed");
+
+			return false;
+		}
+
 		Pather.teleport = false;
 		Precast.doPrecast(true);
 		this.Bo();
 		Pather.moveToRakanishu(true, true);
+
 		try {
 			Attack.clear(20, 0, getLocaleString(2872)); // Rakanishu
 		} catch (e) {
 			Attack.clear(25);
 		}
+
 		Pather.moveToRakanishu(false, false);
-		for (i = 0; i < 5; i += 1) {
+
+		for (i = 0; i < 8; i += 1) {
 			if (Pather.usePortal(38)) {
 				break;
 			}
-			delay(1000);
+
+			delay(500);
 		}
-		if (me.area === 38) {
-			this.clearTristram();
+
+		if (me.area !== 38) {
+			this.status("Tristram portal missing — re-run Cain next game");
+
+			return false;
 		}
+
+		this.clearTristram();
 		this.status("Tristram done — town");
+
 		if (!Pather.usePortal(null, null)) {
 			Town.goToTown();
 		}
+
 		Pather.teleport = true;
+
 		return true;
 	};
 	
-	// Catacombs XP while under andyLvl (do NOT call this once ready to kill Andy)
+	// After Tristram (14+): Jail → Inner Cloister → Catacombs pack farm, then try Andy.
+	// If too hard, chicken / die and rerun — don't gate Andy on lvl.
+	this.jailLevelFarm = function () {
+		var path, idx, i;
+
+		this.status("Jail→Andy push — lvl " + me.charlvl + " (Tristram done, under " + jailFarmUntil + ")");
+
+		// Already on monastery / catacombs path — continue; else WP Jail L1
+		if (me.inTown || me.area < 29 || me.area > 37) {
+			if (!me.inTown) {
+				Town.goToTown(1);
+			}
+
+			Town.doChores();
+			this.teamInGame();
+
+			if (getWaypoint(6)) { // Jail Level 1
+				Pather.useWaypoint(29);
+			} else if (getWaypoint(8)) { // Catacombs L2 — already pushed once
+				Pather.useWaypoint(35);
+			} else if (getWaypoint(5)) { // Outer Cloister → Barracks → Jail
+				Pather.useWaypoint(27);
+				this.waitForPartyMembers();
+				Pather.moveToExit(28, true, true);
+				Pather.moveToExit(29, true, true);
+				this.clickWP();
+			} else {
+				this.status("No Jail/Outer Cloister WP — travel monastery first");
+				this.travel(1);
+
+				if (!me.inTown) {
+					Town.goToTown(1);
+				}
+
+				if (getWaypoint(6)) {
+					Pather.useWaypoint(29);
+				} else if (getWaypoint(5)) {
+					Pather.useWaypoint(27);
+					Pather.moveToExit([28, 29], true, true);
+					this.clickWP();
+				} else {
+					this.status("Still no Jail WP — abort jail farm");
+
+					return false;
+				}
+			}
+		}
+
+		this.teamInGame();
+		this.waitForPartyMembers();
+		Pather.teleport = !!(me.getSkill(54, 1) && me.charlvl >= 18);
+		Precast.doPrecast(true);
+		this.Bo();
+
+		// Forward spine: Jail → Inner Cloister → Cathedral → Cata L1–L3 (pack farms)
+		path = [29, 30, 31, 32, 33, 34, 35, 36];
+		idx = path.indexOf(me.area);
+
+		if (idx < 0) {
+			idx = 0;
+		}
+
+		for (i = idx; i < path.length; i += 1) {
+			if (me.area !== path[i]) {
+				if (!Pather.moveToExit(path[i], true, true)) {
+					this.status("Exit failed " + me.area + " → " + path[i] + " — explore retry");
+
+					Attack.clear(25, 0);
+					this.nudgeUnexploredRoom();
+
+					if (!Pather.moveToExit(path[i], true, true)) {
+						this.status("Exit still failed " + me.area + " → " + path[i] + " — try Andy from here");
+
+						break;
+					}
+				}
+
+				this.waitForPartyMembers();
+				Precast.doPrecast(true);
+				this.Bo();
+			}
+
+			if (me.area !== path[i]) {
+				continue;
+			}
+
+			this.status(Pather.getAreaName(path[i]) + " pack farm");
+
+			if (i + 1 < path.length) {
+				this.dungeonPackFarm(path[i + 1]);
+			} else {
+				this.dungeonPackFarm(37); // toward Andy chamber
+			}
+
+			if ([29, 32, 35].indexOf(me.area) > -1) {
+				this.clickWP();
+			}
+		}
+
+		Pather.teleport = true;
+		this.status("Path pushed — attempting Andy (chicken/rerun OK)");
+
+		return this.andy();
+	};
+
+	// Catacombs XP while under andyLvl (Tristram handles < tristLvl via quit/rejoin — no Jail farm)
 	this.normalPreAndy = function () {
 		var path, idx, i;
+
+		// Below Tristram gate — caller should have quit-farmed Tristram instead
+		if (!this.partyLevel(tristLvl)) {
+			this.status("Under " + tristLvl + " — use Tristram XP farm, not Catacombs");
+
+			return false;
+		}
 
 		this.status("Catacombs XP for Andy — need lvl " + andyLvl + " (now " + me.charlvl + ")");
 
@@ -3615,6 +4016,11 @@ function AutoSmurf() {
 			}
 
 			for (i = idx + 1; i < path.length; i += 1) {
+				// Catacombs: hunt packs while pathing to the next stairs (not only after arriving)
+				if (me.area >= 34 && me.area <= 36) {
+					this.dungeonPackFarm(path[i]);
+				}
+
 				if (!Pather.moveToExit(path[i], true, true)) {
 					this.status("Exit failed " + me.area + " → " + path[i] + " — abort catacombs XP");
 
@@ -3630,11 +4036,11 @@ function AutoSmurf() {
 				}
 			}
 
-			Attack.clearLevel();
+			this.dungeonPackFarm(36);
 			Pather.moveToExit(36, true, true);
 			Precast.doPrecast(true);
 			this.Bo();
-			Attack.clearLevel();
+			this.dungeonPackFarm(35);
 			Pather.teleport = true;
 
 			return true;
@@ -3646,16 +4052,36 @@ function AutoSmurf() {
 
 		Town.doChores();
 		this.teamInGame();
-		Pather.useWaypoint(35);
+
+		// Prefer Cata L2 WP; else travel monastery spine once to grab it
+		if (!getWaypoint(8)) {
+			this.status("No Catacombs L2 WP — travel monastery once");
+			this.travel(1);
+
+			if (!me.inTown) {
+				Town.goToTown(1);
+			}
+
+			Town.doChores();
+		}
+
+		if (!Pather.useWaypoint(35)) {
+			this.status("Catacombs L2 WP failed — abort");
+
+			return false;
+		}
+
 		Pather.teleport = false;
 		this.waitForPartyMembers();
 		this.Bo();
-		Attack.clearLevel();
+		this.dungeonPackFarm(36);
+		this.dungeonPackFarm(34);
 		Pather.moveToExit(36, true, true);
 		Precast.doPrecast(true);
 		this.Bo();
-		Attack.clearLevel();
+		this.dungeonPackFarm(35);
 		Pather.teleport = true;
+
 		return true;
 	};
 
@@ -3815,7 +4241,97 @@ function AutoSmurf() {
 
 			return drunk > 0 || fed > 0;
 		};
-		// andy start. (kill path = original AutoSmurf: 22550,9548 + Attack.kill)
+		// Clear Catacombs L4 rooms except Andariel's chamber (so we don't open her early)
+		this.clearCats4BeforeAndyDoor = function () {
+			var room, result, rooms, myRoom, currentArea, previousArea, cx, cy,
+				andyX = 22549, andyY = 9520, skipDist = 48;
+
+			function RoomSort(a, b) {
+				return getDistance(myRoom[0], myRoom[1], a[0], a[1]) - getDistance(myRoom[0], myRoom[1], b[0], b[1]);
+			}
+
+			this.status("Andy — clear Catacombs L4 (before door)");
+			room = getRoom();
+
+			if (!room) {
+				return false;
+			}
+
+			rooms = [];
+			currentArea = getArea().id;
+
+			do {
+				cx = room.x * 5 + room.xsize / 2;
+				cy = room.y * 5 + room.ysize / 2;
+
+				// Skip Andy chamber / north-of-door rooms
+				if (getDistance(cx, cy, andyX, andyY) < skipDist) {
+					continue;
+				}
+
+				rooms.push([cx, cy]);
+			} while (room.getNext());
+
+			while (rooms.length > 0) {
+				if (!myRoom) {
+					room = getRoom(me.x, me.y);
+				}
+
+				if (room) {
+					if (room instanceof Array) {
+						myRoom = [room[0], room[1]];
+					} else {
+						myRoom = [room.x * 5 + room.xsize / 2, room.y * 5 + room.ysize / 2];
+					}
+				}
+
+				rooms.sort(RoomSort);
+				room = rooms.shift();
+				result = Pather.getNearestWalkable(room[0], room[1], 18, 3);
+
+				if (result) {
+					Pather.moveTo(result[0], result[1], 3, 0);
+					previousArea = result;
+					Attack.clear(40, 0);
+				} else if (currentArea !== getArea().id && previousArea) {
+					Pather.moveTo(previousArea[0], previousArea[1], 3, 0);
+				}
+			}
+
+			return true;
+		};
+
+		// After door: peel shamans in the side alcoves, then caller focuses Andy
+		this.clearAndyLaterals = function () {
+			var i, list, spot,
+				shamanIds = (typeof ClassAttack !== "undefined" && ClassAttack.shamanIds) ?
+					ClassAttack.shamanIds :
+					[58, 59, 60, 61, 62, 101, 102, 103, 104, 105, 278, 279, 280, 281, 282, 298, 299, 300, 645, 646, 647, 662, 663, 664, 667, 668, 669, 670, 675, 676],
+				spots = [
+					[22525, 9550], // west lateral
+					[22575, 9550], // east lateral
+					[22525, 9535],
+					[22575, 9535]
+				];
+
+			this.status("Andy — clear lateral shamans");
+
+			for (i = 0; i < spots.length; i += 1) {
+				spot = spots[i];
+				Pather.moveTo(spot[0], spot[1], 3, true);
+				list = Attack.getMob(shamanIds, 0, 35);
+
+				if (list) {
+					Attack.clearList(list);
+				}
+
+				Attack.clear(20, 0);
+			}
+
+			return true;
+		};
+
+		// andy start. (clear L4 → open door → laterals → focus Andy)
 		var questTry, quest = true;
 
 		for (questTry = 0; questTry < 10; questTry += 1) {
@@ -3876,13 +4392,18 @@ function AutoSmurf() {
 				this.drinkPoisonResistance();
 			}
 
-			// Original AutoSmurf approach (not the broken "safe ledge" ranged script)
-			Pather.moveTo(22550, 9548, 3, false);
+			this.clearCats4BeforeAndyDoor();
+
+			// Open chamber door — do not rush Andy yet
+			this.status("Andy — open chamber door");
+			Pather.moveTo(22550, 9548, 3, true);
 			Pather.makePortal();
 
 			if (me.diff === 0) {
 				Pather.teleport = false;
 			}
+
+			this.clearAndyLaterals();
 		} else {
 			Town.move("portalspot");
 			if (quest) {
@@ -3902,9 +4423,12 @@ function AutoSmurf() {
 					return false;
 				}
 			}
+
+			this.clearAndyLaterals();
 		}
 
 		try {
+			this.status("Andy — focus Andariel");
 			Attack.kill(156); // Andariel
 		} catch (e) {
 			print(e);
@@ -4026,12 +4550,12 @@ function AutoSmurf() {
 		this.teamInGame();
 		// Teleport whenever owned — Pather TeleDelay walks/fights between casts (Normal included)
 		this.enableTeleport();
-		clearWalk = !Pather.teleport;
+		clearWalk = this.pathClear();
 
 		if (Pather.teleport) {
-			this.status("To Lost City — Teleport on (TeleDelay)");
+			this.status("To Lost City — Teleport on (clear packs on path)");
 		} else {
-			this.status("To Lost City — walking (no Teleport skill yet)");
+			this.status("To Lost City — walking (clear packs on path)");
 		}
 
 		// Dry Hills (wp index 11) — hop WP if owned, else Rocky Waste → Dry Hills
@@ -4392,6 +4916,15 @@ function AutoSmurf() {
 		Pather.teleport = canTP;
 		Pickit.pickItems();
 
+		// Make sure Summoner is dead before journal (portal only opens after kill)
+		boss = getUnit(1, 250);
+
+		if (boss && Attack.checkMonster(boss)) {
+			this.status("Summoner still alive — finishing");
+			Attack.kill(250);
+			Pickit.pickItems();
+		}
+
 		if (!quest) {
 			if (!Pather.usePortal(null, null)) {
 				if (teleportingSorc) {
@@ -4408,22 +4941,64 @@ function AutoSmurf() {
 			return true;
 		}
 
-		Pather.moveToPreset(74, 2, 357, -3, -3, false);
-		journal = getUnit(2, 357);
+		// Open Horazon's journal → red portal to Canyon of the Magi
+		if (!Pather.moveToPreset(74, 2, 357, -3, -3, false)) {
+			this.status("Summoner — move to journal failed, retrying");
+			Pather.moveToPreset(me.area, 2, 357, -3, -3);
+		}
 
-		for (i = 0; i < 5; i += 1) {
-			if (journal) {
-				clickMap(0, 0, journal);
-				delay(1000);
+		for (i = 0; i < 12; i += 1) {
+			journal = getUnit(2, 357);
+
+			if (!journal) {
+				Packet.flash(me.gid);
+				delay(300);
+				continue;
+			}
+
+			if (getDistance(me, journal) > 5) {
+				Pather.moveToUnit(journal);
+			}
+
+			// Misc.click = mouse down+up (bare clickMap often fails on PD2 / walk builds)
+			Misc.click(0, 0, journal);
+			delay(800 + me.ping);
+
+			if (getUIFlag(0x08) || getUIFlag(0x0C)) {
 				me.cancel();
 			}
+
+			delay(400 + me.ping);
+			me.cancel();
+
+			if (Pather.getPortal(46)) {
+				break;
+			}
+
+			// Packet interact fallback
+			sendPacket(1, 0x13, 4, journal.type, 4, journal.gid);
+			delay(500 + me.ping);
+			me.cancel();
 
 			if (Pather.getPortal(46)) {
 				break;
 			}
 		}
 
-		if (i === 5) {
+		if (!Pather.getPortal(46)) {
+			// Already have Canyon WP from a prior attempt — bail to town instead of hard fail
+			if (getWaypoint(17) || me.getQuest(13, 0)) {
+				this.status("Summoner — journal portal missing, using town/WP");
+				Town.goToTown(2);
+
+				if (getWaypoint(17)) {
+					Pather.useWaypoint(46);
+					this.clickWP();
+				}
+
+				return true;
+			}
+
 			throw new Error("summoner failed");
 		}
 
@@ -4705,7 +5280,7 @@ function AutoSmurf() {
 	};
 
 	this.radament = function () {
-		var i, radament, book, atma,
+		var i, radament, book, atma, clearPath,
 			pathX = [5106, 5205, 5205, 5214, 5222],
             pathY = [5125, 5125, 5152, 5153, 5181];
 
@@ -4719,7 +5294,9 @@ function AutoSmurf() {
 		Town.goToTown(2);
 		this.teamInGame();
 		Town.doChores();
-		Pather.teleport = true;					
+		this.enableTeleport();
+		clearPath = this.pathClear(); // kill on the way to Sewers WP (was false — necro ignored packs)
+
 		if (teleportingSorc) {
 			if (getWaypoint(10)) {
 				Pather.useWaypoint(48, true);
@@ -4728,19 +5305,19 @@ function AutoSmurf() {
 				while (me.area !== 48) {
 					if (me.area === 47) {
 						try {
-							Pather.moveToExit(48, true, false);
+							Pather.moveToExit(48, true, clearPath);
 						} catch (e2) {
 							print(e2);
 							Town.goToTown(2);
 						}
 					} else if (me.area === 40) {
 						for (i = 0; i < pathX.length; i += 1) {
-							Pather.moveTo(pathX[i], pathY[i], 10, false, false);
+							Pather.moveTo(pathX[i], pathY[i], 10, clearPath, false);
 							Packet.flash(me.gid);
 							delay(me.ping * 2 + 100);
 						}
 						try {
-							Pather.moveToExit(47, true, false);
+							Pather.moveToExit(47, true, clearPath);
 						} catch (e3) {
 							print(e3);
 							Town.goToTown(2);
@@ -4751,7 +5328,7 @@ function AutoSmurf() {
 				}
 				this.clickWP();
 			}		
-			Pather.moveToExit(49, true, false);
+			Pather.moveToExit(49, true, clearPath);
 			for (i = 0 ; i < 5 ; i += 1) {
 				radament = getPresetUnit(49, 2, 355); // Chest by Radament.
 				if (radament) {
@@ -4762,7 +5339,7 @@ function AutoSmurf() {
 			// Stay near chest but not on top of Radament
 			while (radament && getDistance(me.x, me.y, radament.roomx * 5 + radament.x, radament.roomy * 5 + radament.y) > 12) {
 				try {
-					Pather.moveToPreset(49, 2, 355, 5, 0, false, false);
+					Pather.moveToPreset(49, 2, 355, 5, 0, clearPath, false);
 				} catch (e) {
 					this.status("Caught Error.");
 					print(e);
@@ -4874,7 +5451,12 @@ function AutoSmurf() {
 			if (unit) {
 				for (i = 0; i < 3; i += 1) {
 					if (me.area === unit.area) {
-						Skill.cast(43, 0, unit);
+						// Duriel orifice — only allowed non-pickit TK use
+						if (typeof Skill.castTelekinesis === "function") {
+							Skill.castTelekinesis(unit);
+						} else if (me.classid === 1) {
+							Skill.cast(43, 0, unit);
+						}
 					}
 					if (me.area === 73) {
 						break;
@@ -5448,7 +6030,7 @@ function AutoSmurf() {
 		}
 
 		if (clearPath === undefined) {
-			clearPath = !Pather.teleport;
+			clearPath = this.pathClear();
 		}
 
 		if (!this.waitLevelReady()) {
@@ -5472,21 +6054,48 @@ function AutoSmurf() {
 	};
 
 	this.safeMoveToExit = function (targetArea, clearPath) {
-		var i;
+		var i, fromArea;
+
+		if (clearPath === undefined) {
+			clearPath = this.pathClear();
+		}
 
 		if (!this.waitLevelReady()) {
 			this.status("safeMoveToExit: level not ready (area=" + me.area + ")");
 			return false;
 		}
 
+		fromArea = me.area;
+
 		for (i = 0; i < 3; i += 1) {
 			try {
+				// After a wrong-cave town-out, re-enter the jungle before retrying
+				if (me.inTown && (targetArea === 86 || targetArea === 88)) {
+					if (!Pather.useWaypoint(78, true) || me.area !== 78) {
+						this.status("safeMoveToExit: Flayer Jungle WP retry failed");
+						return false;
+					}
+					this.waitLevelReady();
+					fromArea = 78;
+				}
+
 				if (Pather.moveToExit(targetArea, true, clearPath) && me.area === targetArea) {
 					this.waitLevelReady(3000);
 					return true;
 				}
 			} catch (eExit) {
 				this.status("safeMoveToExit(" + targetArea + "): " + eExit);
+			}
+
+			if (me.inTown) {
+				delay(300);
+				continue;
+			}
+
+			// Wrong dungeon (Swampy vs Flayer) — town and retry from WP
+			if (me.area !== fromArea && me.area !== targetArea && (targetArea === 86 || targetArea === 88)) {
+				this.status("safeMoveToExit: wrong cave area=" + me.area + " want " + targetArea);
+				Town.goToTown();
 			}
 
 			delay(500 + me.ping);
@@ -5503,7 +6112,7 @@ function AutoSmurf() {
 			Town.goToTown();
 		}
 		this.enableTeleport();
-		clearPath = !Pather.teleport;
+		clearPath = this.pathClear();
 
 		try {
 			if (!Pather.useWaypoint(76, true) || me.area !== 76) {
@@ -5555,7 +6164,7 @@ function AutoSmurf() {
 			Town.goToTown();
 		}
 		this.enableTeleport();
-		clearPath = !Pather.teleport;
+		clearPath = this.pathClear();
 
 		try {
 			if (!Pather.useWaypoint(80, true) || me.area !== 80) {
@@ -5607,7 +6216,7 @@ function AutoSmurf() {
 			Town.goToTown();
 		}
 		this.enableTeleport();
-		clearPath = !Pather.teleport;
+		clearPath = this.pathClear();
 
 		try {
 			// Flayer Jungle WP — wait for level before any getArea/exit work
@@ -5744,12 +6353,38 @@ function AutoSmurf() {
 			Config.PacketCasting = 1;
 			this.teamInGame();
 			this.placeFlail();
+
+			// Stairs open on smash — go there immediately (don't linger at orb / town first)
+			sendPacket(1, 0x40);
+			this.status("travincal: orb smashed — Durance stairs");
+
+			if (!Pather.moveToExit(100, true) || me.area !== 100) {
+				Pather.moveToExit(100, false);
+				delay(500 + me.ping);
+
+				if (me.area === 83) {
+					Pather.moveToExit(100, true);
+				}
+			}
+
+			if (me.area === 100) {
+				this.status("travincal: entered Durance of Hate L1");
+				Pather.makePortal();
+			} else {
+				this.status("travincal: at Durance stairs (area=" + me.area + ")");
+			}
 		} else { // I am not the Teleporting Sorc or Khalim's Will has been completed. If it the latter is true the while loop on the next line will be skipped.
 			while (!me.getQuest(18, 0)) { // I am not the Teleporting Sorc and have not completed Khalim's Will yet.
 				sendPacket(1, 0x40); // This is required to refresh the status of me.getQuest(18, 0). Without it, me.getQuest(18, 0) will not == 1 until the Quest Tab is opened on the character.
 				Pather.moveToExit(100, false); // Stairs to Durance of Hate Level 1.
 				Attack.clear(15);
 				delay(1000);
+			}
+
+			// Quest done — take the stairs with the smasher
+			if (me.area === 83) {
+				this.status("travincal: following into Durance");
+				Pather.moveToExit(100, true);
 			}
 		}
 		var unit = getUnit(4, 546);
@@ -5776,57 +6411,202 @@ function AutoSmurf() {
 		return true;
 	};
 	
+	// Re-enter Durance of Hate Lvl 3 for Meph red portal (never call getPresetUnit(102) from town)
+	this.ensureMephDurance = function () {
+		var n;
+
+		if (me.area === 102) {
+			return this.waitLevelReady(3000);
+		}
+
+		this.status("Mephisto: not in Durance 3 (area=" + me.area + ") — recovering");
+
+		if (!me.inTown) {
+			Town.goToTown();
+		}
+
+		if (me.act !== 3) {
+			if (!Town.goToTown(3) || me.act !== 3) {
+				print("ÿc1AutoSmurfÿc0 :: need Act 3 for Mephisto (still act " + me.act + ")");
+				return false;
+			}
+		}
+
+		if (Pather.useWaypoint(101)) {
+			this.waitLevelReady(3000);
+			Pather.moveToExit(102, true, false);
+		} else {
+			Town.move("portalspot");
+
+			for (n = 0; n < 40 && me.area !== 102; n += 1) {
+				if (Pather.usePortal(102, null)) {
+					break;
+				}
+
+				delay(250);
+			}
+		}
+
+		if (me.area !== 102) {
+			print("ÿc1AutoSmurfÿc0 :: failed to reach Durance 3 (area=" + me.area + ")");
+			return false;
+		}
+
+		return this.waitLevelReady(3000);
+	};
+
+	this.takeMephRedPortal = function () {
+		var i, redPortal, preset;
+
+		if (!this.ensureMephDurance()) {
+			return false;
+		}
+
+		this.status("Mephisto → Act 4 red portal");
+
+		// Prefer live unit / fixed coords — getPresetUnit(102) crashes if level isn't loaded
+		redPortal = getUnit(2, 342);
+
+		if (!redPortal) {
+			try {
+				Pather.moveTo(17590, 8068);
+				Pather.moveTo(17601, 8070);
+			} catch (eCoord) {}
+
+			for (i = 0; i < 20 && me.area === 102; i += 1) {
+				redPortal = getUnit(2, 342);
+
+				if (redPortal) {
+					break;
+				}
+
+				delay(me.ping * 2 + 250);
+			}
+		}
+
+		if (!redPortal && me.area === 102) {
+			try {
+				preset = getPresetUnit(me.area, 2, 342);
+
+				if (preset) {
+					Pather.moveTo(preset.roomx * 5 + preset.x, preset.roomy * 5 + preset.y, 3);
+					redPortal = getUnit(2, 342);
+				}
+			} catch (ePreset) {
+				print("ÿc8AutoSmurfÿc0 :: Meph red portal preset skipped (" + ePreset + ")");
+			}
+		}
+
+		if (!redPortal) {
+			try {
+				Pather.moveTo(17590, 8068);
+				delay(300);
+				Pather.moveTo(17601, 8070);
+			} catch (eFallback) {}
+		}
+
+		for (i = 0; i < 15 && me.area === 102; i += 1) {
+			redPortal = getUnit(2, 342);
+
+			if (redPortal) {
+				Pather.usePortal(null, null, redPortal);
+			} else {
+				Pather.usePortal(103); // Pandemonium Fortress
+			}
+
+			delay(me.ping * 2 + 500);
+		}
+
+		if (me.area === 102) {
+			print("ÿc1AutoSmurfÿc0 :: failed to enter Act 4 red portal");
+			return false;
+		}
+
+		return true;
+	};
+
 	this.mephisto = function () {
-		var cain;
+		var cain, j;
 		var questTry, quest = true;
-		for(questTry = 0 ; questTry < 10 ; questTry +=1 ){
-			if(me.getQuest(23,0)){
+
+		for (questTry = 0; questTry < 10; questTry += 1) {
+			if (me.getQuest(23, 0)) {
 				quest = false;
 				break;
 			}
+
 			delay(100);
 		}
+
 		this.status("mephisto");
-		Town.goToTown(3);
+
+		if (!Town.goToTown(3) || me.act !== 3) {
+			print("ÿc1AutoSmurfÿc0 :: Mephisto aborted — not in Act 3 (act=" + me.act + " area=" + me.area + ")");
+			return false;
+		}
+
 		this.teamInGame();
 		Town.doChores();
 		Pather.teleport = true;
-		if(quest){
+
+		if (quest) {
 			while (!cain || !cain.openMenu()) { // Try more than once to interact with Deckard Cain.
 				Packet.flash(me.gid);
 				Town.move("cain");
 				cain = getUnit(1, "deckard cain");
 				delay(1000);
 			}
+
 			me.cancel();
 		}
+
 		if (teleportingSorc) { // I am the Teleporting Sorc.
-			Pather.useWaypoint(101);
+			if (!Pather.useWaypoint(101)) {
+				print("ÿc1AutoSmurfÿc0 :: Mephisto — Durance 2 WP failed");
+				return false;
+			}
+
 			Precast.doPrecast(true);
 			Pather.moveToExit(102, true, false);
-			//Pather.moveTo(17566, 8069); //Dark-f
 			Pather.moveTo(17542, 8066);
 			Pather.makePortal();
 		} else {
 			Town.move("portalspot");
-			var j = 0;
+			j = 0;
+
 			while (!Pather.usePortal(102, null)) {
 				delay(250);
-				if (j % 20 == 0) { // Check for Team Members every 5 seconds.
+
+				if (j % 20 === 0) { // Check for Team Members every 5 seconds.
 					this.teamInGame();
 				}
+
 				j += 1;
+
+				if (j > 120) {
+					print("ÿc1AutoSmurfÿc0 :: Mephisto — timed out waiting for Durance 3 portal");
+					return false;
+				}
 			}
 		}
+
+		if (me.area !== 102) {
+			print("ÿc1AutoSmurfÿc0 :: Mephisto — not in Durance 3 after path (area=" + me.area + ")");
+			return false;
+		}
+
 		this.teamInGame();
-		try{
+
+		try {
 			Attack.kill(242);
-		}catch(e){
+		} catch (e) {
 			print(e);
 			Attack.clear(20);
-		}	
-		Pickit.pickItems();
-		if(!quest) {
+		}
+
+		if (me.area === 102) {
+			Pickit.pickItems();
+
 			if (teleportingSorc) {
 				Pather.moveTo(17572, 8011);
 				Attack.openChests(5);
@@ -5834,44 +6614,17 @@ function AutoSmurf() {
 				Attack.openChests(5);
 				Pather.moveTo(17515, 8061);
 				Attack.openChests(5);
+				Pickit.pickItems();
 			}
-			if(!Pather.usePortal(null, null)){
-				if(teleportingSorc) {
-					Town.goToTown();
-				} else {
-					delay(1000);
-					if(!Pather.usePortal(null, null))
-						Town.goToTown();
-				}
-			}			
-			return true;
 		}
-		if ((me.getQuest(22, 0) || me.getQuest(22, 12)) && ((me.diff === 0 && this.partyLevel(mephLvl)) || (me.diff === 1 && this.partyLevel(mephLvlnm)) || (me.diff === 2 && this.partyLevel(mephLvlhell)))) { // Completed Meph Quest and the party has reached the difficulty specific mephLvl requirement.
-			var i, redPortal;
-			for (i = 0 ; i < 5 ; i += 1) {
-				redPortal = getPresetUnit(102, 2, 342);
-				if (redPortal) {
-					break;
-				}
-				delay(me.ping * 2 + 250);
-			}
-			while (getDistance(me.x, me.y, redPortal.roomx * 5 + redPortal.x, redPortal.roomy * 5 + redPortal.y) > 10) {
-				try {
-					Pather.moveToPreset(102, 2, 342, 0, 0, false, false);
-				} catch (e) {
-					this.status("Caught Error.");
-					print(e);
-				}
-			}
-			while (me.area === 102) {
-				redPortal = getUnit(2, 342);
-				Pather.usePortal(null, null, redPortal); // Go to Act 4.
-			}
-		} else {
-			Town.goToTown();
-			Town.doChores();
+
+		// Always take Mephisto's red portal to Act 4 — never TP / town to Act 3
+		if (!this.takeMephRedPortal()) {
+			return false;
 		}
+
 		this.waitForPartyMembers();
+
 		return true;
 	};
 
@@ -6016,25 +6769,52 @@ function AutoSmurf() {
 					seal.interact();
 				}
 				delay(classid === 394 ? 1000 : 500); 
-				if (!seal.mode) {
-					if (classid === 394 && Attack.validSpot(seal.x + 15, seal.y)) { // De Seis optimization
-						Pather.moveTo(seal.x + 15, seal.y);
-					} else {
-						Pather.moveTo(seal.x - 5, seal.y - 5);
-					}
-					delay(500);
+			if (!seal.mode) {
+				// De Seis: never walk north into nest — reclick only; caller force-TPs to pull
+				if (classid === 394) {
+					delay(300);
 				} else {
-					return true;
+					Pather.moveTo(seal.x - 5, seal.y - 5);
+					delay(500);
 				}
+			} else {
+				return true;
+			}
 			}
 			return false;
+		};
+		this.isChaosPullBossName = function (name, unit) {
+			var n = String(name || "").toLowerCase();
+
+			if (n.indexOf("infector") > -1 || n.indexOf("seis") > -1) {
+				return true;
+			}
+
+			return !!(unit && (unit.classid === 704 || unit.classid === 705));
 		};
 		this.chaosPreattack = function (name, amount) {
 			var i, n, target, positions;
 			switch (me.classid) {
 			case 0:
 				break;
-			case 1:
+			case 1: // Sorceress — Infector / De Seis: stay on pull node, FN when in range (never walk onto them)
+				target = getUnit(1, name);
+				if (!target) {
+					return;
+				}
+				if (!this.isChaosPullBossName(name, target)) {
+					break;
+				}
+				this.status("Seal pull — hold, merc tanks, Frost Nova");
+				if (me.getSkill(44, 1) && getDistance(me, target) <= 12 && !checkCollision(me, target, 0x4)) {
+					for (n = 0; n < Math.min(amount, 4); n += 1) {
+						if (!Attack.checkMonster(target)) {
+							break;
+						}
+						Skill.cast(44, 0);
+						delay(300 + me.ping);
+					}
+				}
 				break;
 			case 2:
 				break;
@@ -6063,17 +6843,325 @@ function AutoSmurf() {
 				break;
 			}
 		};
-		this.getBoss = function (name) {
-			var i, boss,
-				glow = getUnit(2, 131);
-			for (i = 0; i < 16; i += 1) {
+		// pullFight: TP to hold, cast in place — never Attack.clear / walk toward pack
+		// baitX/baitY: brief re-aggro TP closer to spawn if nothing comes, then snapHold
+		// If boss is visible but won't come — TP onto him and re-anchor hold there (no bait loop)
+		this.getBoss = function (name, pullFight, holdX, holdY, baitX, baitY) {
+			var i, boss, dist, waitTicks, engageDist, glow, mon, best, bestD, d,
+				idle, farIdle, engaged, sawBoss, baitPulses, self = this;
+
+			glow = getUnit(2, 131);
+			waitTicks = pullFight ? 72 : 16;
+			engageDist = pullFight ? 34 : 40;
+			idle = 0;
+			farIdle = 0;
+			engaged = false;
+			sawBoss = false;
+			baitPulses = 0;
+
+			function snapHold() {
+				if (holdX === undefined || holdY === undefined) {
+					return;
+				}
+
+				if (getDistance(me, holdX, holdY) > 5) {
+					if (typeof Pather.forceTeleportTo === "function" && Pather.canTeleport()) {
+						Pather.forceTeleportTo(holdX, holdY, 4);
+					} else {
+						Pather.teleport = true;
+						Pather._lastTeleTick = 0;
+						Pather.moveTo(holdX, holdY, 3);
+					}
+				}
+			}
+
+			function packNear(range) {
+				mon = getUnit(1);
+
+				if (mon) {
+					do {
+						if (Attack.checkMonster(mon) && getDistance(me, mon) <= range) {
+							return true;
+						}
+					} while (mon.getNext());
+				}
+
+				return false;
+			}
+
+			// Cast at whatever is already in range — do not path onto them
+			function holdCast(range) {
+				snapHold();
+				best = null;
+				bestD = 999;
+				mon = getUnit(1);
+
+				if (mon) {
+					do {
+						if (Attack.checkMonster(mon)) {
+							d = getDistance(me, mon);
+
+							if (d <= range && d < bestD) {
+								best = copyUnit(mon);
+								bestD = d;
+							}
+						}
+					} while (mon.getNext());
+				}
+
+				if (best) {
+					engaged = true;
+					ClassAttack.doAttack(best, false);
+				}
+
+				snapHold();
+			}
+
+			// Brief TP toward spawn for LOS/aggro, then immediately back to hold
+			function pulseAggro() {
+				var bx, by;
+
+				bx = (baitX !== undefined) ? baitX : holdX;
+				by = (baitY !== undefined) ? baitY : (holdY - 8);
+
+				if (bx === undefined || by === undefined) {
+					return;
+				}
+
+				baitPulses += 1;
+
+				if (typeof self.status === "function") {
+					self.status("Seal pull — re-aggro pulse @ " + bx + "," + by);
+				} else {
+					print("Seal pull — re-aggro pulse @ " + bx + "," + by);
+				}
+
+				if (typeof Pather.forceTeleportTo === "function" && Pather.canTeleport()) {
+					Pather.forceTeleportTo(bx, by, 4);
+				} else {
+					Pather.teleport = true;
+					Pather._lastTeleTick = 0;
+					Pather.moveTo(bx, by, 3);
+				}
+
+				delay(180 + me.ping);
+
+				if (me.getSkill(44, 1)) {
+					Skill.cast(44, 0);
+					delay(80);
+				}
+
+				if (Config.AttackSkill[1] > 0) {
+					Skill.cast(Config.AttackSkill[1], Skill.getHand(Config.AttackSkill[1]), bx, by - 4);
+				}
+
+				delay(120 + me.ping);
+				snapHold();
+			}
+
+			// Aggro failed — TP to boss, re-anchor hold nearby (stops bait↔hold loop)
+			function tpToBoss(unit) {
+				var tx, ty;
+
+				if (!unit || !Attack.checkMonster(unit)) {
+					return false;
+				}
+
+				if (typeof ClassAttack !== "undefined") {
+					ClassAttack._sealHoldX = undefined;
+					ClassAttack._sealHoldY = undefined;
+				}
+
+				tx = Math.round(unit.x);
+				ty = Math.round(unit.y + 6);
+
+				if (!Attack.validSpot(tx, ty)) {
+					tx = Math.round(unit.x);
+					ty = Math.round(unit.y);
+				}
+
+				if (typeof self.status === "function") {
+					self.status("Seal pull — TP to boss @ " + tx + "," + ty);
+				} else {
+					print("Seal pull — TP to boss @ " + tx + "," + ty);
+				}
+
+				if (typeof Pather.forceTeleportTo === "function" && Pather.canTeleport()) {
+					Pather.forceTeleportTo(tx, ty, 4);
+				} else {
+					Pather.teleport = true;
+					Pather._lastTeleTick = 0;
+					Pather.moveTo(tx, ty, 3);
+				}
+
+				delay(200 + me.ping);
+				holdX = me.x;
+				holdY = me.y;
+
+				if (typeof ClassAttack !== "undefined") {
+					ClassAttack._sealHoldX = holdX;
+					ClassAttack._sealHoldY = holdY;
+				}
+
+				if (me.getSkill(44, 1)) {
+					Skill.cast(44, 0);
+				}
+
+				engaged = true;
+				sawBoss = true;
+				idle = 0;
+				farIdle = 0;
+				baitPulses = 0;
+
+				return true;
+			}
+
+			if (pullFight) {
+				if (typeof ClassAttack !== "undefined") {
+					ClassAttack._sealHoldX = holdX;
+					ClassAttack._sealHoldY = holdY;
+				}
+
+				snapHold();
+				// First peek closer so we don't wait forever with no LOS
+				pulseAggro();
+
+				for (i = 0; i < waitTicks; i += 1) {
+					snapHold();
+					boss = getUnit(1, name);
+
+					if (boss && Attack.checkMonster(boss)) {
+						sawBoss = true;
+						dist = getDistance(me, boss);
+
+						if (dist <= engageDist || packNear(20)) {
+							engaged = true;
+							break;
+						}
+
+						holdCast(18);
+						idle += 1;
+
+						// Visible but not coming: 1–2 bait pulses, then TP onto him
+						if (idle >= 6) {
+							if (baitPulses < 2) {
+								pulseAggro();
+							} else {
+								tpToBoss(boss);
+								break;
+							}
+
+							idle = 0;
+						}
+
+						delay(120);
+						continue;
+					}
+
+					if (packNear(18)) {
+						engaged = true;
+						holdCast(18);
+						idle = 0;
+					} else {
+						idle += 1;
+
+						if (idle >= 8) {
+							pulseAggro();
+							idle = 0;
+						}
+					}
+
+					delay(120);
+				}
+
+				this.chaosPreattack(name, 4);
+
+				for (i = 0; i < 240; i += 1) {
+					snapHold();
+					boss = getUnit(1, name);
+
+					if (boss && Attack.checkMonster(boss)) {
+						sawBoss = true;
+						dist = getDistance(me, boss);
+
+						if (dist <= 36) {
+							engaged = true;
+							farIdle = 0;
+
+							if (!ClassAttack.doAttack(boss, i % 15 === 0)) {
+								holdCast(16);
+							}
+
+							snapHold();
+							continue;
+						}
+
+						// Boss visible but far — don't bait-loop; TP to him
+						holdCast(16);
+						farIdle += 1;
+
+						if (farIdle >= 6) {
+							tpToBoss(boss);
+							farIdle = 0;
+						}
+
+						delay(80);
+						continue;
+					}
+
+					// Boss not found — pack leftover vs never pulled
+					if (packNear(22)) {
+						engaged = true;
+						holdCast(20);
+						farIdle = 0;
+						continue;
+					}
+
+					if (engaged || sawBoss) {
+						snapHold();
+
+						if (typeof ClassAttack !== "undefined") {
+							ClassAttack._sealHoldX = undefined;
+							ClassAttack._sealHoldY = undefined;
+						}
+
+						return true;
+					}
+
+					farIdle += 1;
+
+					if (farIdle >= 8) {
+						pulseAggro();
+						farIdle = 0;
+					}
+
+					delay(100);
+				}
+
+				snapHold();
+				holdCast(18);
 				boss = getUnit(1, name);
+
+				if (typeof ClassAttack !== "undefined") {
+					ClassAttack._sealHoldX = undefined;
+					ClassAttack._sealHoldY = undefined;
+				}
+
+				return !(boss && Attack.checkMonster(boss));
+			}
+
+			for (i = 0; i < waitTicks; i += 1) {
+				boss = getUnit(1, name);
+
 				if (boss) {
 					this.chaosPreattack(name, 8);
+
 					return Attack.clear(40, 0, name, this.sort);
 				}
+
 				delay(250);
 			}
+
 			return !!glow;
 		};
 		this.vizierSeal = function () {
@@ -6094,55 +7182,143 @@ function AutoSmurf() {
 			return true;
 		};
 		this.seisSeal = function () {
+			var seal, pullX, pullY, baitX, baitY, i, savedTele, savedDelay, opened;
+
 			this.status("Seis layout " + this.seisLayout);
 			this.followPath(this.seisLayout === 1 ? this.starToSeisA : this.starToSeisB);
-			if (!this.openSeal(394)) {
-				throw new Error("Failed to open de Seis seal.");
+
+			savedTele = Pather.teleport;
+			savedDelay = (typeof Config !== "undefined") ? Config.TeleDelay : undefined;
+			Pather.teleport = true;
+
+			if (typeof Config !== "undefined") {
+				Config.TeleDelay = 0;
 			}
-			if (this.seisLayout === 1) {
-				if(me.classid === 1) {
-					delay(3000);
-					Pather.moveTo(7771, 5196); //(7771, 5196);
-				} else {
-					Pather.moveTo(7771, 5196, 3, true, true); //(7771, 5196, 3, true, true);
+
+			Pather._lastTeleTick = 0;
+			opened = false;
+
+			// Click seal, then FORCE TP to pull — never walk into nest (no seal.x+15)
+			for (i = 0; i < 5; i += 1) {
+				Pather._lastTeleTick = 0;
+				Pather.moveToPreset(108, 2, 394, 4, 4);
+				seal = getUnit(2, 394);
+
+				if (!seal) {
+					delay(200);
+					continue;
 				}
+
+				if (seal.mode) {
+					opened = true;
+					break;
+				}
+
+				Misc.click(0, 0, seal);
+				delay(400 + me.ping);
+				seal = getUnit(2, 394);
+
+				if (seal && seal.mode) {
+					opened = true;
+					break;
+				}
+			}
+
+			seal = getUnit(2, 394);
+
+			// Hold ~12 south of seal (was 22 — too far, no aggro); bait ~4 south
+			if (seal) {
+				pullX = Math.round(seal.x);
+				pullY = Math.round(seal.y + 12);
+				baitX = Math.round(seal.x);
+				baitY = Math.round(seal.y + 4);
+
+				if (!Attack.validSpot(pullX, pullY)) {
+					pullX = Math.round(seal.x - 8);
+					pullY = Math.round(seal.y + 12);
+					baitX = Math.round(seal.x - 8);
+					baitY = Math.round(seal.y + 4);
+				}
+
+				if (!Attack.validSpot(pullX, pullY)) {
+					pullX = Math.round(seal.x + 8);
+					pullY = Math.round(seal.y + 14);
+					baitX = Math.round(seal.x + 8);
+					baitY = Math.round(seal.y + 6);
+				}
+			} else if (this.seisLayout === 1) {
+				pullX = 7780;
+				pullY = 5238;
+				baitX = 7780;
+				baitY = 5228;
 			} else {
-				if(me.classid === 1) {
-					delay(3000);
-					Pather.moveTo(7807, 5186); //(7798, 5186);
-				} else {
-					Pather.moveTo(7792, 5150, 3, true, true); //(7798, 5186, 3, true, true); 
-				}
+				pullX = 7800;
+				pullY = 5228;
+				baitX = 7800;
+				baitY = 5218;
 			}
-			if (!this.getBoss(getLocaleString(2852))) {
-				Attack.clear(30);
+
+			Pather._lastTeleTick = 0;
+
+			if (!Pather.forceTeleportTo(pullX, pullY, 4)) {
+				Pather.moveTo(pullX, pullY, 3);
+			}
+
+			if (typeof Config !== "undefined" && savedDelay !== undefined) {
+				Config.TeleDelay = savedDelay;
+			}
+
+			Pather.teleport = savedTele;
+
+			if (!opened && seal && !seal.mode) {
+				this.status("Lord De Seis — seal may be closed, fighting from pull anyway");
+			}
+
+			this.status("Lord De Seis — TP pull @ " + pullX + "," + pullY + " (hold + re-aggro)");
+
+			if (!this.getBoss(getLocaleString(2852), true, pullX, pullY, baitX, baitY)) {
+				// stay on hold — no clear chase
 				//throw new Error("Failed to kill de Seis");
 			}
+
 			return true;
 		};
 		this.infectorSeal = function () {
+			var savedTele, pullX, pullY, infName = getLocaleString(2853);
+
 			this.status("Inf layout " + this.infLayout);
 			this.followPath(this.infLayout === 1 ? this.starToInfA : this.starToInfB);
+
 			if (!this.openSeal(392)) {
 				//throw new Error("Failed to open Infector seals.");
 			}
+
+			// TP west toward star — Infector / pit lords walk to us
 			if (this.infLayout === 1) {
-				delay(1);
+				pullX = 7868;
+				pullY = 5295;
 			} else {
-				if(me.classid === 1) { // Dark-f
-					Pather.moveTo(7921, 5280); // (7928, 5295);
-				} else {
-					Pather.moveTo(7921, 5280, 3, true); // (7928, 5295, 3, true);
-				}
+				pullX = 7870;
+				pullY = 5286;
 			}
-			if (!this.getBoss(getLocaleString(2853))) {
-				Attack.clear(30);
+
+			savedTele = Pather.teleport;
+			Pather.teleport = true;
+			Pather.moveTo(pullX, pullY, 3);
+			Pather.teleport = savedTele;
+
+			this.status("Infector of Souls — TP pull (hold, he comes to us)");
+
+			if (!this.getBoss(infName, true, pullX, pullY)) {
+				Attack.clear(25, 0, false, this.sort);
 				//throw new Error("Failed to kill Infector");
 			}
+
 			if (!this.openSeal(393)) {
 				Attack.clear(30);
 				//throw new Error("Failed to open Infector seals.");
 			}
+
 			return true;
 		};
 		this.diabloPrep = function () {
@@ -6243,10 +7419,12 @@ function AutoSmurf() {
 		this.entranceToStar = [7794, 5517, 7791, 5491, 7768, 5459, 7775, 5424, 7817, 5458, 7777, 5408, 7769, 5379, 7777, 5357, 7809, 5359, 7805, 5330, 7780, 5317, 7791, 5293];
 		this.starToVizA = [7759, 5295, 7734, 5295, 7716, 5295, 7718, 5276, 7697, 5292, 7678, 5293, 7665, 5276, 7662, 5314];
 		this.starToVizB = [7759, 5295, 7734, 5295, 7716, 5295, 7701, 5315, 7666, 5313, 7653, 5284];
-		this.starToSeisA = [7781, 5259, 7805, 5258, 7802, 5237, 7776, 5228, 7775, 5205, 7804, 5193, 7814, 5169, 7788, 5153];
-		this.starToSeisB = [7781, 5259, 7805, 5258, 7802, 5237, 7776, 5228, 7811, 5218, 7807, 5194, 7779, 5193, 7774, 5160, 7803, 5154];
-		this.starToInfA = [7809, 5268, 7834, 5306, 7852, 5280, 7852, 5310, 7869, 5294, 7895, 5295, 7919, 5290];
-		this.starToInfB = [7809, 5268, 7834, 5306, 7852, 5280, 7852, 5310, 7869, 5294, 7895, 5274, 7927, 5275, 7932, 5297, 7923, 5313];
+		// Seis: stop at corridor mouth — never walk nest (5228/5218). openSeal TPs to seal, then pull holds south.
+		this.starToSeisA = [7781, 5259, 7805, 5258];
+		this.starToSeisB = [7781, 5259, 7805, 5258];
+		// Infector: stop west of pit — openSeal + pull node handle the rest
+		this.starToInfA = [7809, 5268, 7834, 5306, 7852, 5280, 7868, 5295];
+		this.starToInfB = [7809, 5268, 7834, 5306, 7852, 5280, 7870, 5286];
 		
 		// start
 		this.status("diablo");
@@ -6343,6 +7521,10 @@ function AutoSmurf() {
 			Pather.usePortal(108, null);
 		}
 		try {
+			if (me.classid === 1) {
+				this.status("Diablo — melee Static×4 / walk stand-off AttackSkill");
+			}
+
 			Attack.kill(243); // Diablo
 		} catch(e) {
 			print(e);
@@ -7169,27 +8351,10 @@ function AutoSmurf() {
 		this.status("Quest: Tools of the Trade (Smith)");
 		Town.goToTown(1);
 		this.teamInGame();
-		Town.doChores();
-		Town.buyPotions();
+		Town.doChores(); // already buys pots — don't Town.buyPotions() after (reopens Akara)
 
-		if (!QuestItems.has(QuestItems.malus, "hdm")) {
-			Town.move("charsi");
-			charsi = getUnit(1, "charsi");
-
-			if (charsi && charsi.openMenu()) {
-				me.cancel();
-			}
-
-			delay(500);
-			sendPacket(1, 0x40);
-			delay(300);
-
-			if (this.isSmithQuestDone()) {
-				this.status("Smith done — Charsi imbue ready, skipping Barracks");
-
-				return true;
-			}
-		}
+		// No pre-quest Charsi visit — quest bits + packet refresh above are enough.
+		// Talk to Charsi only after Malus for turn-in.
 
 		Pather.teleport = !!(me.getSkill(54, 1));
 
@@ -7804,7 +8969,7 @@ function AutoSmurf() {
             this.den();
         } 
         if (me.diff === 0) { // Normal difficulty.
-            // After Den: Cold Plains clear (only if under lvl 6) → Stony Field until stonyLvl (no Cave)
+            // After Den: Cold Plains linear farm (under lvl 6) → Stony Field until stonyLvl (no Cave / no clearLevel)
             if (!me.getQuest(2, 0) && me.getQuest(1, 0) && !this.partyLevel(stonyLvl)) {
 				if (me.charlvl < 6) {
 					this.coldPlains();
@@ -7830,7 +8995,7 @@ function AutoSmurf() {
             if (!me.getQuest(4, 0) && this.partyLevel(stonyLvl)) {
 				this.cain();
             }
-            // After Cain: Countess → Smith → (level) → Andy (no Tristram leveling farm)
+            // After Cain: Countess → Smith → Tristram XP (to tristLvl) → Catacombs → Andy
             if (me.getQuest(4, 0)) {
 				if (!me.getQuest(5, 0)) {
 					this.status("Post-Cain: Countess");
@@ -7866,12 +9031,17 @@ function AutoSmurf() {
 			} else if (me.diff === 0 && this.isSmithQuestDone() && !this.partyLevel(andyLvl)) {
 				this.status("Smith done — leveling for Andy (need lvl " + andyLvl + ", now " + me.charlvl + ")");
 
-				// After Smith TP return we're already in Jail path — don't town→travel reset
-				if (me.inTown || me.area < 28 || me.area > 36) {
-					this.travel(1);
+				// Fresh Tristram each game until tristLvl — quit so D2BS opens a new game
+				if (!this.partyLevel(tristLvl)) {
+					this.status("Tristram XP until lvl " + tristLvl + " (now " + me.charlvl + ") — then next game");
+					this.trist();
+					delay(1000);
+					quit();
+				} else {
+					// 14+: straight Catacombs pack XP (no Jail farm)
+					this.status("Tristram done — Catacombs pack hunt toward Andy");
+					this.normalPreAndy();
 				}
-
-				this.normalPreAndy();
 			}
 		}
 	}
@@ -8034,7 +9204,7 @@ function AutoSmurf() {
 			if (!me.getQuest(23, 0) && me.getQuest(18, 0) && me.getQuest(21, 0) && me.getQuest(20, 0) ) { //no matter Golden bird ) { // Haven't been "Able to go to Act IV" yet and have completed Khalim's Will (AKA the stairs to Durance of Hate Level 1 are open), The Blackened Temple (AKA everyone can enter a Durance Of Hate Level 3 Town Portal), and Golden Bird.
 				Messaging.sendToList(Config.AutoSmurf.AllTeamProfiles, "mephisto");				
 				this.travel(7); // Travel to Durance Of Hate Level 2 Waypoint if I don't have it.				
-				this.mephisto(); // Won't take the portal to Act 4 until the team has met the mephLvl requirement.
+				this.mephisto(); // Kill Mephisto, then red portal straight to Act 4 (no Act 3 town TP)
 			}
 		} else {
 			var j = 0;			

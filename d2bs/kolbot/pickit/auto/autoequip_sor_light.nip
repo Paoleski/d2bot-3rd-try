@@ -1,9 +1,10 @@
-// Sorceress LIGHT — prefer 2H staff; orb/wand only if higher skill tiers.
+// Sorceress LIGHT — same-stat orb > staff (1H + shield). No wands.
 
+// FCR filler — orb +2 over same FCR staff
 [type] == staff && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 10 # [tier] == 16
 [type] == staff && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 20 # [tier] == 19
-([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 10 # [tier] == 14
-([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 20 # [tier] == 17
+[type] == orb && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 10 # [tier] == 18
+[type] == orb && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 20 # [tier] == 21
 
 [type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillchargedbolt] >= 1 # [tier] == 32
 [type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillchargedbolt] >= 2 # [tier] == 34
@@ -11,12 +12,12 @@
 [type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillchargedbolt] >= 1 && [fcr] >= 10 # [tier] == 38
 [type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillchargedbolt] >= 2 && [fcr] >= 10 # [tier] == 40
 [type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillchargedbolt] >= 3 && [fcr] >= 10 # [tier] == 42
-([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [skillchargedbolt] >= 1 # [tier] == 30
-([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [skillchargedbolt] >= 2 # [tier] == 32
-([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [skillchargedbolt] >= 3 # [tier] == 34
-([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [skillchargedbolt] >= 1 && [fcr] >= 10 # [tier] == 36
-([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [skillchargedbolt] >= 2 && [fcr] >= 10 # [tier] == 38
-([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [skillchargedbolt] >= 3 && [fcr] >= 10 # [tier] == 40
+[type] == orb && [quality] <= rare && [Flag] != Ethereal # [skillchargedbolt] >= 1 # [tier] == 34
+[type] == orb && [quality] <= rare && [Flag] != Ethereal # [skillchargedbolt] >= 2 # [tier] == 36
+[type] == orb && [quality] <= rare && [Flag] != Ethereal # [skillchargedbolt] >= 3 # [tier] == 38
+[type] == orb && [quality] <= rare && [Flag] != Ethereal # [skillchargedbolt] >= 1 && [fcr] >= 10 # [tier] == 40
+[type] == orb && [quality] <= rare && [Flag] != Ethereal # [skillchargedbolt] >= 2 && [fcr] >= 10 # [tier] == 42
+[type] == orb && [quality] <= rare && [Flag] != Ethereal # [skillchargedbolt] >= 3 && [fcr] >= 10 # [tier] == 44
 
 [type] == staff && [quality] <= rare && [Flag] != Ethereal # [skilllightning] >= 1 # [tier] == 43
 [type] == staff && [quality] <= rare && [Flag] != Ethereal # [lightningskilltab] >= 1 # [tier] == 44
@@ -24,11 +25,20 @@
 [type] == staff && [quality] <= rare && [Flag] != Ethereal # [lightningskilltab] >= 3 # [tier] == 48
 [type] == staff && [quality] <= rare && [Flag] != Ethereal # [sorceressskills] >= 1 && [fcr] >= 10 # [tier] == 50
 [type] == staff && [quality] <= rare && [Flag] != Ethereal # [sorceressskills] >= 2 # [tier] == 52
-([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [skilllightning] >= 1 # [tier] == 41
-([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [lightningskilltab] >= 1 # [tier] == 42
-([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [lightningskilltab] >= 2 # [tier] == 44
-([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [lightningskilltab] >= 3 # [tier] == 46
-([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [sorceressskills] >= 1 && [fcr] >= 10 # [tier] == 48
-([type] == wand || [type] == orb) && [quality] <= rare && [Flag] != Ethereal # [sorceressskills] >= 2 # [tier] == 50
+[type] == orb && [quality] <= rare && [Flag] != Ethereal # [skilllightning] >= 1 # [tier] == 45
+[type] == orb && [quality] <= rare && [Flag] != Ethereal # [lightningskilltab] >= 1 # [tier] == 46
+[type] == orb && [quality] <= rare && [Flag] != Ethereal # [lightningskilltab] >= 2 # [tier] == 48
+[type] == orb && [quality] <= rare && [Flag] != Ethereal # [lightningskilltab] >= 3 # [tier] == 50
+[type] == orb && [quality] <= rare && [Flag] != Ethereal # [sorceressskills] >= 1 && [fcr] >= 10 # [tier] == 52
+[type] == orb && [quality] <= rare && [Flag] != Ethereal # [sorceressskills] >= 2 # [tier] == 54
 
 [type] == sword && [flag] == runeword # [itemallskills] == 2 && [fcr] >= 25 # [tier] == 100
+
+// Amulets/rings — beat base autoequip_sor.nip coldskilltab ladders (tiers 16-26)
+[type] == amulet && [quality] == rare # [lightningskilltab] >= 1 && [maxhp]+[maxmana] >= 50 # [tier] == 27
+[type] == amulet && [quality] == rare # [lightningskilltab] >= 1 && [maxhp]+[maxmana] >= 90 # [tier] == 28
+[type] == amulet && [quality] == rare # [lightningskilltab] >= 2 # [tier] == 29
+[type] == amulet && [quality] == rare # [lightningskilltab] >= 1 && [sorceressskills] >= 1 # [tier] == 30
+[type] == amulet && [quality] == rare # [lightningskilltab] >= 2 && [maxhp]+[maxmana] >= 70 # [tier] == 31
+[type] == ring && [quality] == rare # [lightningskilltab] >= 1 # [tier] == 20
+[type] == ring && [quality] == rare # [fcr] >= 10 && [fireresist]+[lightresist]+[coldresist] >= 20 # [tier] == 19

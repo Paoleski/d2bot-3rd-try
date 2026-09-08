@@ -11,6 +11,13 @@ var Precast = new function () {
 	this.bestSlot = {};
 	this.coldEnchantTick = 0; // PD2 Cold Enchant ~300s
 	this.shiverArmorTick = 0; // PD2 Shiver Armor ~180s+ at low level
+	// Golem anti-spam (PD2 mastery = multi-golem; false "dead" reads cause stack spam)
+	this.golemCastTick = 0;
+	this.golemSeenTick = 0;
+	this.golemAliveUntil = 0; // sticky: treat as alive until this tick
+	this.golemMissStreak = 0;
+	this.GOLEM_CAST_COOLDOWN = 15000; // hard floor between casts
+	this.GOLEM_TRUST_MS = 45000; // after see/cast, trust alive this long even if APIs flap to 0
 
 	this.weaponSwitch = function (slot) {
 		if (me.gametype === 0 || me.weaponswitch === slot) {
@@ -208,8 +215,9 @@ var Precast = new function () {
 
 			break;
 		case 2: // Necromancer
-			if (me.getSkill(68, 0) && (!me.getState(14) || force)) {
-				this.precastSkill(68); // Bone Armor
+			// Bone Armor: only when missing — ignore force (AutoSmurf doPrecast(true) spam)
+			if (me.getSkill(68, 1) && !me.getState(14)) {
+				this.precastSkill(68);
 			}
 
 			switch (Config.Golem) {
@@ -218,15 +226,16 @@ var Precast = new function () {
 				break;
 			case 1:
 			case "Clay":
-				this.summon(75);
+				this.ensureNecroGolem(75);
 				break;
 			case 2:
 			case "Blood":
-				this.summon(85);
+				// Prefer Blood; Clay until 85 is learned
+				this.ensureNecroGolem(85, 75);
 				break;
 			case 3:
 			case "Fire":
-				this.summon(94);
+				this.ensureNecroGolem(94, 85, 75);
 				break;
 			}
 
@@ -406,13 +415,233 @@ var Precast = new function () {
 		return false;
 	};
 
+	// Optional: Config.MaxGolems > 1 to keep multiple (PD2 Golem Mastery slots).
+	// Default 1 = one golem; only resummon when detection says dead (not mastery refill).
+	this.desiredGolemCount = function () {
+		if (typeof Config !== "undefined" && Config.MaxGolems > 0) {
+			return Config.MaxGolems;
+		}
+
+		return 1;
+	};
+
+	// LoD/PD2 monstats: Clay=289 Blood=290 Iron=291 Fire=292 (NOT 290-293)
+	this.golemClassIds = function () {
+		return [289, 290, 291, 292];
+	};
+
+	this.isOwnMinion = function (unit) {
+		var owner;
+
+		if (!unit) {
+			return false;
+		}
+
+		try {
+			owner = unit.getParent();
+		} catch (eOwn) {
+			return false;
+		}
+
+		if (!owner) {
+			return false;
+		}
+
+		if (owner.gid && owner.gid === me.gid) {
+			return true;
+		}
+
+		if (owner.name && me.name && String(owner.name).toLowerCase() === String(me.name).toLowerCase()) {
+			return true;
+		}
+
+		return false;
+	};
+
+	// Own golem units — correct classids + name fallback (getMinionCount flaps on PD2)
+	this.findGolems = function () {
+		var list = [], i, ids, unit, name;
+
+		ids = this.golemClassIds();
+
+		for (i = 0; i < ids.length; i += 1) {
+			unit = getUnit(1, ids[i]);
+
+			if (!unit) {
+				continue;
+			}
+
+			do {
+				try {
+					if (typeof unit.x !== "number" || unit.mode === 0 || unit.mode === 12) {
+						continue;
+					}
+
+					if (this.isOwnMinion(unit)) {
+						list.push(copyUnit(unit));
+					}
+				} catch (eFind) {}
+			} while (unit.getNext());
+		}
+
+		// Name fallback if classids shifted on this PD2 build
+		if (list.length === 0) {
+			try {
+				unit = getUnit(1);
+
+				if (unit) {
+					do {
+						try {
+							if (typeof unit.x !== "number" || unit.mode === 0 || unit.mode === 12) {
+								continue;
+							}
+
+							name = unit.name ? String(unit.name).toLowerCase().replace(/ÿc[0-9a-z]/gi, "") : "";
+
+							if (name.indexOf("golem") === -1) {
+								continue;
+							}
+
+							if (this.isOwnMinion(unit)) {
+								list.push(copyUnit(unit));
+							}
+						} catch (eName) {}
+					} while (unit.getNext());
+				}
+			} catch (eScan) {}
+		}
+
+		return list;
+	};
+
+	this.minionGolemCount = function () {
+		var n = 0, t, types = [3]; // classic golem minion type
+
+		// Some builds expose golems under neighboring types — take the max, don't double-count
+		for (t = 0; t < types.length; t += 1) {
+			try {
+				n = Math.max(n, me.getMinionCount(types[t]) || 0);
+			} catch (eMin) {}
+		}
+
+		return n;
+	};
+
+	this.countGolems = function () {
+		var n, found, now = getTickCount();
+
+		n = this.minionGolemCount();
+		found = this.findGolems().length;
+		n = Math.max(n, found);
+
+		if (n > 0) {
+			this.golemSeenTick = now;
+			this.golemAliveUntil = now + this.GOLEM_TRUST_MS;
+			this.golemMissStreak = 0;
+
+			return n;
+		}
+
+		return 0;
+	};
+
+	// True if we should NOT cast — sticky latch beats flapping APIs
+	this.hasGolem = function () {
+		var now = getTickCount(), count, desired;
+
+		desired = this.desiredGolemCount();
+		count = this.countGolems();
+
+		if (count >= desired) {
+			return true;
+		}
+
+		// Below MaxGolems but already have ≥1 — allow another cast (no sticky)
+		if (count > 0) {
+			return false;
+		}
+
+		// Zero reads: trust sticky window (prevents PD2 mastery stack spam)
+		if (this.golemAliveUntil && now < this.golemAliveUntil) {
+			this.golemMissStreak += 1;
+
+			// Many consecutive misses after cast trust → likely really dead
+			if (this.golemMissStreak >= 12 && this.golemCastTick &&
+					(now - this.golemCastTick) > this.GOLEM_TRUST_MS) {
+				this.golemAliveUntil = 0;
+				this.golemMissStreak = 0;
+
+				return false;
+			}
+
+			return true;
+		}
+
+		if (this.golemCastTick && (now - this.golemCastTick) < this.GOLEM_CAST_COOLDOWN) {
+			return true; // post-cast cooldown = treat as present
+		}
+
+		return false;
+	};
+
+	this.hasEnoughGolems = function () {
+		return this.hasGolem();
+	};
+
+	// Summon only when no golem (or below MaxGolems); hard cooldown; at most one cast per call
+	this.ensureNecroGolem = function () {
+		var i, j, skillId, skills = [], now, before;
+
+		for (i = 0; i < arguments.length; i += 1) {
+			skills.push(arguments[i]);
+		}
+
+		if (this.hasGolem()) {
+			return true;
+		}
+
+		now = getTickCount();
+
+		if (this.golemCastTick && (now - this.golemCastTick) < this.GOLEM_CAST_COOLDOWN) {
+			return false;
+		}
+
+		for (i = 0; i < skills.length; i += 1) {
+			skillId = skills[i];
+
+			if (!me.getSkill(skillId, 1)) {
+				continue;
+			}
+
+			before = this.countGolems();
+			print("ÿc8Golemÿc0 :: summon skill " + skillId + " (seen=" + before + ")");
+			Skill.cast(skillId, 0);
+			this.golemCastTick = getTickCount();
+			this.golemAliveUntil = this.golemCastTick + this.GOLEM_TRUST_MS;
+			this.golemMissStreak = 0;
+			delay(450 + me.ping);
+
+			for (j = 0; j < 8; j += 1) {
+				if (this.countGolems() > before) {
+					return true;
+				}
+
+				delay(120);
+			}
+
+			// Even if APIs still say 0, sticky latch blocks re-entry
+			return true;
+		}
+
+		return false;
+	};
+
 	this.summon = function (skillId) {
 		if (!me.getSkill(skillId, 1)) {
 			return false;
 		}
 
-		var minion, rv,
-			count = 1;
+		var minion, rv, count = 1, attempts;
 
 		switch (skillId) {
 		case 32: // Valkyrie
@@ -422,9 +651,8 @@ var Precast = new function () {
 		case 75: // Clay Golem
 		case 85: // Blood Golem
 		case 94: // Fire Golem
-			minion = 3;
-
-			break;
+			// PD2: one cast via ensureNecroGolem — never mastery spam here
+			return this.ensureNecroGolem(skillId);
 		case 221: // Raven
 			minion = 10;
 			count = Math.min(me.getSkill(221, 1), 5);
@@ -463,14 +691,15 @@ var Precast = new function () {
 			break;
 		}
 
-		while (me.getMinionCount(minion) < count) {
+		// Cap attempts — if minion count never rises (PD2 flap), don't spin forever
+		for (attempts = 0; attempts < 3 && me.getMinionCount(minion) < count; attempts += 1) {
 			rv = true;
 
 			Skill.cast(skillId, 0);
-			delay(200);
+			delay(250 + me.ping);
 		}
 
-		return !!rv;
+		return !!rv || me.getMinionCount(minion) >= count;
 	};
 
 	// PD2 Shiver Armor (~180s at lvl 1). Ignore doPrecast(force) spam from AutoSmurf.

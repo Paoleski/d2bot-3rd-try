@@ -45,7 +45,7 @@ if (typeof QuestItems === "undefined") {
 }
 
 var Town = {
-	telekinesis: true,
+	telekinesis: false, // legacy — TK is pickit + Duriel orifice only (never chests/town objects)
 	sellTimer: getTickCount(), // shop speedup test
 	_walkStuckCount: 0, // consecutive walkToTown "stuck in area" — quit at 3
 
@@ -78,7 +78,7 @@ var Town = {
 
 	// Full vendor+stash pass only when something still needs doing
 	needFullChores: function (repair) {
-		var age, unids, items, i;
+		var age, unids, items, i, repairNeed;
 
 		if (this.forceNextChores || repair) {
 			return true;
@@ -90,9 +90,35 @@ var Town = {
 
 		age = getTickCount() - this.lastFullChores;
 
-		// Just finished chores (WP → next objective) — only interrupt for heal
+		// Just finished chores (start → next objective) — do NOT re-vendor for buffer top-ups.
+		// TownChicken sets forceNextChores when it TPs for a real pot need.
 		if (age < 2 * 60 * 1000) {
-			return this.needHealing();
+			if (this.needHealing()) {
+				return true;
+			}
+
+			// Completely out of hp/mp while low — not potionNeedCount (belt/buffer fill)
+			if (typeof Misc !== "undefined" && typeof Misc.needPotionTown === "function" && Misc.needPotionTown()) {
+				return true;
+			}
+
+			if (typeof this.needKeys === "function" && this.needKeys()) {
+				return true;
+			}
+
+			if (typeof this.needRepair === "function") {
+				repairNeed = this.needRepair();
+
+				if (repairNeed && repairNeed.length > 0) {
+					return true;
+				}
+			}
+
+			if (typeof this.hasBrokenEtherealEquipped === "function" && this.hasBrokenEtherealEquipped()) {
+				return true;
+			}
+
+			return false;
 		}
 
 		// Field time — refresh even if checks look fine
@@ -113,6 +139,20 @@ var Town = {
 		}
 
 		if (typeof this.needKeys === "function" && this.needKeys()) {
+			return true;
+		}
+
+		// Broken / about-to-break gear (Config.RepairPercent) — not RW-base hunting
+		if (typeof this.needRepair === "function") {
+			repairNeed = this.needRepair();
+
+			if (repairNeed && repairNeed.length > 0) {
+				return true;
+			}
+		}
+
+		// Ethereal broken gear is skipped by needRepair (NPC can't fix) — still force chores to unequip/replace
+		if (typeof this.hasBrokenEtherealEquipped === "function" && this.hasBrokenEtherealEquipped()) {
 			return true;
 		}
 
@@ -148,17 +188,28 @@ var Town = {
 			print("ÿc2Townÿc0 :: chores skip (already done / nothing needed)");
 			this.forceNextChores = false;
 
+			// Skip vendor, but still park inv mana (picked pots / shop leftovers)
+			if (this.needsManaOrganize()) {
+				this.organizeManaIfNeeded();
+			}
+
 			return true;
 		}
 
 		this.forceNextChores = false;
-		this._manaOrgDone = false;
+		// Do NOT reset mana-org flags here — only park when needsManaOrganize() at end
+		this._manaOrgRunning = false;
 
-		var i, tasks,
+		var i, tasks, repairPreview,
 			cancelFlags = [0x01, 0x02, 0x04, 0x08, 0x14, 0x16, 0x0c, 0x0f, 0x19, 0x1a];
 
 		Attack.weaponSwitch(Attack.getPrimarySlot());
 		tasks = this.tasks[me.act - 1];
+
+		// Snapshot before heal/repair clear needs — Fara merc shop only when Act2 chores already visit Fara
+		repairPreview = this.needRepair();
+		this._act2FaraMercShop = (me.act === 2) &&
+			(this.needHealing() || (repairPreview && repairPreview.indexOf("repair") > -1));
 
 		// --- Local only (no NPC / stash walk) ---
 		this.spendSkillStatPoints();
@@ -166,54 +217,67 @@ var Town = {
 		me.cancel();
 		delay(100 + me.ping);
 
-		// --- 1) ID only (Cain + charms) — no vendor / stash ---
+		// --- 1) Cain ID + local charm ID (inv scrolls only — no vendor) ---
 		print("ÿc2Townÿc0 :: chores step 1/4 — ID");
-		this.cainID();
-		this.identifyAllCharms();
+		this._choresUsedCain = this.cainID();
+		this.identifyAllCharms(false); // false = do not open Shop to buy isc
 		me.cancel();
 		delay(150 + me.ping);
 
 		this.charmKeepList = null;
+		this.trimCharmInventory([]);
 		this.applyCharmInventoryLock();
 		this.organizeCharms(); // inv-only; never opens stash
 		this.applyCharmInventoryLock();
 		me.cancel();
 		delay(100 + me.ping);
 
-		// --- 2) ONE Shop trade ---
+		// --- 2) ONE Shop trade: heal(same NPC) → ID/sell → sell junk → pots → TP → extras ---
 		print("ÿc2Townÿc0 :: chores step 2/4 — vendor (single trade)");
 
-		// Belt refill only when empty slots exist (or wrong-column pots after config change)
+		// Belt must be fixed while shop is closed (cursor moves)
 		this.clearBeltStamina();
 		this.refillBeltIfNeeded();
 
+		// Heal at a different NPC first (e.g. Act2 Fara vs Drognan)
 		if (tasks.Heal !== tasks.Shop && this.needHealing()) {
 			this.heal();
 			me.cancel();
 			delay(150 + me.ping);
 		}
 
-		if (tasks.Heal === tasks.Shop && this.needHealing()) {
-			this.heal();
+		// Same NPC as Shop (Akara/Jamella/Malah): ONE openMenu+trade heals — never init Heal then Shop
+		if (!this.initNPC("Shop", "choresVendor")) {
+			print("ÿc8Townÿc0 :: chores vendor unavailable — skip shop pass");
+		} else {
+			// 1) Shop-ID if no Cain + sell ID junk
+			this.identify(true); // true = shop already open; don't fillTome at end
+
+			// 2) Sell remaining junk (keep trade open — never cancel/reopen)
+			this.clearInventory(true);
+
+			// 3) Buy pots (mana/hp) — belt already prepped; keep trade open
+			this.buyPotions(true);
+
+			// 4) TP (and FieldID tome) after pots — reuse open trade (no ensureShop reopen)
+			this.fillTome("tbk", true);
+
+			if (Config.FieldID) {
+				this.fillTome("ibk", true);
+			}
+
+			// 5) Keys if this vendor sells them (Akara)
+			if (tasks.Key === tasks.Shop) {
+				this.buyKeys(true);
+			}
+
+			// 6) MiniShop / extras
+			this.shopItems();
+			this.clearScrolls();
+
+			me.cancel(); // single close
+			delay(150 + me.ping);
 		}
-
-		this.fillTome("tbk");
-
-		if (Config.FieldID) {
-			this.fillTome("ibk");
-		}
-
-		this.identify();
-		this.shopItems();
-		this.buyPotions();
-
-		if (tasks.Key === tasks.Shop) {
-			this.buyKeys(true);
-		}
-
-		this.fillTome("tbk");
-		me.cancel(); // close Shop once
-		delay(150 + me.ping);
 
 		this.refillBeltIfNeeded();
 
@@ -227,8 +291,21 @@ var Town = {
 		Item.autoEquipMerc(true);
 		this.buyMercWeapon();
 		this.applyCharmInventoryLock();
-		this.clearInventory(); // leftover sell only
 		this.buyPoisonStrikeDagger();
+		// Spirit / Stealth RW bases on Repair: only scanned inside Town.repair() when durability
+		// actually needed a Repair visit — never open Charsi/Fara just to hunt bases.
+		Item.autoEquip(); // equip MiniShop / dagger buys
+
+		// MiniShop runs AFTER clearInventory — replaced staff/armor sits in inv until we sell again.
+		// Second Shop open is intentional (post-equip leftovers), not mid-vendor reopen.
+		// Pull magic/rare 2os fake RW bases from stash first so this sell can dump them.
+		if (this.hasFakeRwBasesInStash() && this.openStash()) {
+			this.unstashFakeRwBases();
+			me.cancel();
+			delay(80 + me.ping);
+		}
+
+		this.clearInventory();
 		me.cancel();
 		delay(150 + me.ping);
 
@@ -237,7 +314,30 @@ var Town = {
 		this.doStashVisit(true);
 
 		Cubing.doCubing();
+
+		// Insight / Lore: keep one best empty base — sell/drop worse before socketing
+		if (typeof Runewords !== "undefined") {
+			if (Runewords.cullWorseInsightBases) {
+				Runewords.cullWorseInsightBases();
+			}
+
+			if (Runewords.cullWorseLoreBases) {
+				Runewords.cullWorseLoreBases();
+			}
+		}
+
 		Runewords.makeRunewords();
+
+		// PD2: merge leftover loose runes/gems AFTER make (never fold socketables mid-RW)
+		if (typeof Pd2Stack !== "undefined" && typeof Pd2Stack.stackLooseAtStash === "function") {
+			if (Pd2Stack.needsStacking && Pd2Stack.needsStacking()) {
+				if (this.openStash()) {
+					Pd2Stack.stackLooseAtStash();
+					me.cancel();
+				}
+			}
+		}
+
 		Item.autoEquip();
 		Item.autoEquipMerc(true);
 
@@ -247,13 +347,15 @@ var Town = {
 		me.cancel();
 		delay(100 + me.ping);
 
+		// After NPC/cube repair: drop still-broken eth (CubeRepair path left them equipped) and swap
+		Item.autoEquip();
+
 		this.gamble();
 		me.cancel();
 
 		this.reviveMerc();
 		Item.autoEquipMerc(true);
-		// No second clearInventory — that was reopening the vendor after stash
-		this.clearScrolls();
+		// No second clearInventory / clearScrolls — vendor pass already sold
 		this.dismissShopError();
 
 		for (i = 0; i < cancelFlags.length; i += 1) {
@@ -268,10 +370,14 @@ var Town = {
 		me.cancel();
 		this.dismissShopError();
 
-		// Mana park once after buys/stash — not every mid-chore step
-		this.organizeManaIfNeeded();
+		// Only if inv mana sits outside top-right — silent no-op when already parked
+		if (this.needsManaOrganize()) {
+			print("ÿc2Townÿc0 :: mana organizer — park inv mana top-right");
+			this.organizeManaIfNeeded();
+		}
 
 		this.lastFullChores = getTickCount();
+		this._act2FaraMercShop = false;
 
 		return true;
 	},
@@ -279,6 +385,7 @@ var Town = {
 	// PD2 charm itemTypes: 83 small / 84 large (cm2) / 85 grand (cm3). LoD was 82–84.
 	// Never use type 82 — that is thawing potion on PD2.
 	charmKeepList: null,
+	charmSellGids: null, // overflow after CharmCaps trim — not parked, sold
 
 	isCharmItem: function (item) {
 		var code;
@@ -362,8 +469,49 @@ var Town = {
 	},
 
 	// Shop/Cain ID every inventory charm so sell can decide
-	identifyAllCharms: function () {
+	// PD2: prefer item codes; classids from NTItemAlias (isc=547, ibk=536 after MPQ regen)
+	findIdTome: function () {
+		var tome, cid;
+
+		tome = me.findItem("ibk", 0, 3);
+
+		if (!tome && typeof NTIPAliasClassID !== "undefined" && NTIPAliasClassID.ibk) {
+			tome = me.findItem(NTIPAliasClassID.ibk, 0, 3);
+		}
+
+		if (!tome) {
+			tome = me.findItem(536, 0, 3);
+		}
+
+		if (tome && tome.getStat(70) > 0) {
+			return tome;
+		}
+
+		return false;
+	},
+
+	findIdScroll: function () {
+		var scroll;
+
+		scroll = me.findItem("isc", 0, 3);
+
+		if (!scroll && typeof NTIPAliasClassID !== "undefined" && NTIPAliasClassID.isc) {
+			scroll = me.findItem(NTIPAliasClassID.isc, 0, 3);
+		}
+
+		if (!scroll) {
+			scroll = me.findItem(547, 0, 3);
+		}
+
+		return scroll || false;
+	},
+
+	identifyAllCharms: function (allowShopBuy) {
 		var item, tome, scroll, npc, gids = [], i, gid, unit, n = 0;
+
+		if (allowShopBuy === undefined) {
+			allowShopBuy = true;
+		}
 
 		item = me.getItem(-1, 0);
 
@@ -381,13 +529,7 @@ var Town = {
 
 		print("ÿc2Townÿc0 :: ID " + gids.length + " unid charm(s) before sell");
 
-		if (Config.CainID && Config.CainID.Enable && this.cainID) {
-			try {
-				this.cainID();
-			} catch (eCain) {}
-		}
-
-		tome = me.findItem("ibk", 0, 3) || me.findItem(536, 0, 3);
+		// Cain already handled in doChores step 1 — calling again cancels any open shop
 
 		for (i = 0; i < gids.length; i += 1) {
 			gid = gids[i];
@@ -397,10 +539,28 @@ var Town = {
 				continue;
 			}
 
-			if (tome && tome.getStat(70) > 0) {
+			// 1) ID tome in inventory
+			tome = this.findIdTome();
+
+			if (tome) {
 				this.identifyItem(unit, tome);
 				n += 1;
 				delay(me.ping + 50);
+				continue;
+			}
+
+			// 2) Loose ID scroll already in bags (early game — before Cain / gold)
+			scroll = this.findIdScroll();
+
+			if (scroll) {
+				this.identifyItem(unit, scroll);
+				n += 1;
+				delay(me.ping + 50);
+				continue;
+			}
+
+			// 3) Buy scroll only when allowed (doChores vendor pass / standalone)
+			if (!allowShopBuy) {
 				continue;
 			}
 
@@ -412,22 +572,26 @@ var Town = {
 				break;
 			}
 
-			scroll = this.getShopItem(npc, "isc", [547]);
+			scroll = this.getShopItem(npc, "isc",
+				(typeof NTIPAliasClassID !== "undefined" && NTIPAliasClassID.isc) ? [NTIPAliasClassID.isc] : [547]);
 
-			if (scroll && me.gold >= (scroll.getItemCost(0) || 100)) {
+			if (scroll && me.getStat(14) + me.getStat(15) >= (scroll.getItemCost(0) || 100)) {
 				try {
 					scroll.buy();
 				} catch (eBuy) {
 					break;
 				}
 
-				scroll = me.findItem("isc", 0, 3);
+				scroll = this.findIdScroll();
 
 				if (scroll) {
 					this.identifyItem(unit, scroll);
 					n += 1;
 					delay(me.ping + 50);
 				}
+			} else {
+				print("ÿc8Townÿc0 :: unid charm — no ID scroll/tome and can't buy yet");
+				break;
 			}
 		}
 
@@ -473,6 +637,10 @@ var Town = {
 			return true; // unidentified — ID first, then decide
 		}
 
+		if (this.charmSellGids && this.charmSellGids[item.gid]) {
+			return false;
+		}
+
 		return this.shouldParkCharm(item);
 	},
 
@@ -482,10 +650,234 @@ var Town = {
 			return false;
 		}
 
+		if (this.charmSellGids && this.charmSellGids[item.gid]) {
+			return false;
+		}
+
 		return this.matchesLevelingCharmKeep(item);
 	},
 
+	// SoloPlay CharmEquip qty idea → PD2: cap buckets after leveling_charms.nip keep filter
+	preferredCharmSkillTab: function () {
+		var build = Config.AutoGearBuild;
+
+		if (!build || typeof build !== "string") {
+			return -1;
+		}
+
+		build = build.toLowerCase();
+
+		// NTIPAliasStat skill tabs (stat 188)
+		if (build === "fire") {
+			return 8;
+		}
+
+		if (build === "light" || build === "lightning") {
+			return 9;
+		}
+
+		if (build === "cold") {
+			return 10;
+		}
+
+		if (build === "poisonstrike" || build === "poison") {
+			return 17; // poisonandboneskilltab
+		}
+
+		return -1;
+	},
+
+	charmBucketScore: function (item) {
+		var life, mana, res, mf, skills, i, tab, pref;
+
+		if (!item) {
+			return 0;
+		}
+
+		life = item.getStat(7) || 0;
+		mana = item.getStat(9) || 0;
+		res = (item.getStat(39) || 0) + (item.getStat(41) || 0) + (item.getStat(43) || 0) + (item.getStat(45) || 0);
+		mf = item.getStat(80) || 0;
+		skills = 0;
+		pref = this.preferredCharmSkillTab();
+
+		// Class skills + all skill tabs we care about
+		skills += item.getStat(83, 1) || 0; // sorc
+		skills += item.getStat(83, 2) || 0; // necro
+
+		for (i = 0; i < 50; i += 1) {
+			tab = item.getStat(188, i) || 0;
+
+			if (tab > 0) {
+				skills += tab * (i === pref ? 3 : 1);
+			}
+		}
+
+		return life + mana + res * 2 + mf + skills * 100;
+	},
+
+	charmBucketKey: function (item) {
+		var size, life, res, mf, pref, hasPref, hasOther, i, t;
+
+		if (!item) {
+			return "misc";
+		}
+
+		// Unique/set — never trim
+		if (item.quality === 5 || item.quality === 7) {
+			return "unique";
+		}
+
+		// PD2: 83 SC, 84 LC, 85 GC (also classid 621-623)
+		if (item.itemType === 83 || item.classid === 621 || (item.code && String(item.code).toLowerCase() === "cm1")) {
+			size = "S";
+		} else if (item.itemType === 84 || item.classid === 622 || (item.code && String(item.code).toLowerCase() === "cm2")) {
+			size = "L";
+		} else {
+			size = "G";
+		}
+
+		life = item.getStat(7) || 0;
+		res = (item.getStat(39) || 0) + (item.getStat(41) || 0) + (item.getStat(43) || 0) + (item.getStat(45) || 0);
+		mf = item.getStat(80) || 0;
+		pref = this.preferredCharmSkillTab();
+		hasPref = false;
+		hasOther = false;
+
+		if (size === "G") {
+			for (i = 0; i < 50; i += 1) {
+				t = item.getStat(188, i) || 0;
+
+				if (t > 0) {
+					if (pref >= 0 && i === pref) {
+						hasPref = true;
+					} else {
+						hasOther = true;
+					}
+				}
+			}
+
+			if (hasPref) {
+				return "G_pref";
+			}
+
+			if (hasOther) {
+				return "G_other";
+			}
+		}
+
+		if (life >= 10) {
+			return size + "_life";
+		}
+
+		if (res >= 7) {
+			return size + "_res";
+		}
+
+		if (size === "S" && mf >= 5) {
+			return "S_mf";
+		}
+
+		return size + "_misc";
+	},
+
+	trimCharmInventory: function (junk) {
+		var caps, item, buckets, key, list, limit, map, i, entry, overflow;
+
+		this.charmSellGids = {};
+
+		if (!Config.AutoGear || !Config.AutoGear.CharmCaps || !Config.AutoGear.CharmCaps.Enabled) {
+			return 0;
+		}
+
+		caps = Config.AutoGear.CharmCaps;
+		map = {
+			S_life: caps.SmallLife,
+			S_res: caps.SmallRes,
+			S_mf: caps.SmallMf,
+			S_misc: caps.SmallMisc,
+			L_life: caps.LargeLife,
+			L_res: caps.LargeRes,
+			L_misc: caps.LargeMisc,
+			G_pref: caps.GrandPreferredSkiller,
+			G_other: caps.GrandOtherSkiller,
+			G_life: caps.GrandLife,
+			G_res: caps.GrandRes,
+			G_misc: caps.GrandMisc
+		};
+		buckets = {};
+		overflow = 0;
+
+		if (!junk) {
+			junk = [];
+		}
+
+		item = me.getItem(-1, 0);
+
+		if (item) {
+			do {
+				if (item.location !== 3 || !this.isCharmItem(item) || !item.getFlag(0x10)) {
+					continue;
+				}
+
+				if (!this.matchesLevelingCharmKeep(item)) {
+					continue;
+				}
+
+				key = this.charmBucketKey(item);
+
+				if (key === "unique") {
+					continue;
+				}
+
+				if (!buckets[key]) {
+					buckets[key] = [];
+				}
+
+				buckets[key].push({
+					gid: item.gid,
+					score: this.charmBucketScore(item)
+				});
+			} while (item.getNext());
+		}
+
+		for (key in buckets) {
+			if (!buckets.hasOwnProperty(key)) {
+				continue;
+			}
+
+			list = buckets[key];
+			limit = map.hasOwnProperty(key) ? map[key] : 2;
+
+			if (limit === undefined || limit === null) {
+				limit = 2;
+			}
+
+			list.sort(function (a, b) {
+				return b.score - a.score;
+			});
+
+			for (i = limit; i < list.length; i += 1) {
+				entry = list[i];
+				this.charmSellGids[entry.gid] = true;
+				overflow += 1;
+				item = me.getItem(-1, -1, entry.gid);
+
+				if (item && item.location === 3) {
+					junk.push(copyUnit(item));
+				}
+			}
+		}
+
+		if (overflow) {
+			print("ÿc2Townÿc0 :: CharmCaps trimmed " + overflow + " overflow charm(s)");
+		}
+
+		return overflow;
+	},
+
 	// Lock only cells occupied by parked (good) charms. Junk/unid stay unlocked → sellable after ID.
+	// Also lock parked mana buffer cells so Compare never treats them as sell candidates.
 	applyCharmInventoryLock: function () {
 		var item, r, c, y, x, h, w;
 
@@ -504,15 +896,22 @@ var Town = {
 
 		if (item) {
 			do {
-				if (item.location === 3 && this.shouldParkCharm(item)) {
-					for (h = 0; h < item.sizey; h += 1) {
-						for (w = 0; w < item.sizex; w += 1) {
-							y = item.y + h;
-							x = item.x + w;
+				if (item.location !== 3) {
+					continue;
+				}
 
-							if (y >= 0 && y < 8 && x >= 0 && x < 10) {
-								Config.Inventory[y][x] = 0;
-							}
+				// Parked charms OR parked mana buffer pots
+				if (!this.shouldParkCharm(item) && !this.isManaParked(item)) {
+					continue;
+				}
+
+				for (h = 0; h < item.sizey; h += 1) {
+					for (w = 0; w < item.sizex; w += 1) {
+						y = item.y + h;
+						x = item.x + w;
+
+						if (y >= 0 && y < 8 && x >= 0 && x < 10) {
+							Config.Inventory[y][x] = 0;
 						}
 					}
 				}
@@ -754,101 +1153,31 @@ var Town = {
 		return n;
 	},
 
-	// Dump every pot-like unit so we can see what the client reports
-	logPotionState: function (tag) {
-		var item, code, name, kind, where, n = 0, mpInv = 0, mpBelt = 0, hpInv = 0, hpBelt = 0,
-			beltSize = Storage.BeltSize(),
-			col = this.checkColumns(beltSize),
-			samples = [], suspects = [], invDump = 0;
+	// Empty belt slots configured for this pot type (hp/mp/rv)
+	beltEmptyFor: function (type) {
+		var i, beltSize, col, need = 0;
 
-		print("ÿc2PotDbgÿc0 :: --- " + (tag || "state") + " --- beltSize=" + beltSize +
-			" cols=[" + Config.BeltColumn.join(",") + "] emptySlots=[" + col.join(",") + "]" +
-			" MPBuffer=" + (Config.MPBuffer || 0) + " HPBuffer=" + (Config.HPBuffer || 0) +
-			" wantMp=" + this.potionNeedCount("mp") + " wantHp=" + this.potionNeedCount("hp"));
-
-		item = me.getItem(-1, -1);
-
-		if (!item) {
-			print("ÿc1PotDbgÿc0 :: me.getItem empty");
-			return;
+		if (type !== "hp" && type !== "mp" && type !== "rv") {
+			return 0;
 		}
 
-		do {
-			code = item.code ? String(item.code) : "";
-			name = item.name ? String(item.name).replace(/ÿc[0-9a-z]/gi, "") : "?";
-			kind = this.potionKind(item);
-			where = (item.mode === 2 || item.location === 2) ? "belt" : (item.location === 3 ? "inv" : ("loc" + item.location));
+		beltSize = Storage.BeltSize();
+		col = this.checkColumns(beltSize);
 
-			// Always dump first ~20 inventory units (raw) so we can spot silent mismatches
-			if (item.location === 3 && invDump < 20) {
-				print("ÿc2PotDbgÿc0 :: inv#" + invDump + " kind=" + (kind || "NONE") +
-					" code=" + code + " id=" + item.classid + " type=" + item.itemType +
-					" mode=" + item.mode + " xy=" + item.x + "," + item.y + " name=" + name);
-				invDump += 1;
+		for (i = 0; i < 4; i += 1) {
+			if (Config.BeltColumn[i] === type && col[i] > 0) {
+				need += col[i];
 			}
-
-			if (!kind) {
-				if ((item.location === 3 || item.mode === 2 || item.location === 2) &&
-						((item.itemType >= 76 && item.itemType <= 82) ||
-						name.toLowerCase().indexOf("mana") > -1 ||
-						name.toLowerCase().indexOf("heal") > -1 ||
-						name.toLowerCase().indexOf("potion") > -1 ||
-						name.toLowerCase().indexOf("rejuv") > -1)) {
-					if (suspects.length < 8) {
-						suspects.push("UNK@" + where + " code=" + code + " id=" + item.classid +
-							" type=" + item.itemType + " mode=" + item.mode + " name=" + name);
-					}
-				}
-
-				continue;
-			}
-
-			n += 1;
-
-			if (kind === "mp" && where === "inv") {
-				mpInv += 1;
-			}
-
-			if (kind === "mp" && where === "belt") {
-				mpBelt += 1;
-			}
-
-			if (kind === "hp" && where === "inv") {
-				hpInv += 1;
-			}
-
-			if (kind === "hp" && where === "belt") {
-				hpBelt += 1;
-			}
-
-			if (samples.length < 12) {
-				samples.push(kind + "@" + where + " code=" + code + " id=" + item.classid +
-					" type=" + item.itemType + " mode=" + item.mode + " loc=" + item.location + " name=" + name);
-			}
-		} while (item.getNext());
-
-		print("ÿc2PotDbgÿc0 :: totals pots=" + n + " mp belt/inv=" + mpBelt + "/" + mpInv +
-			" hp belt/inv=" + hpBelt + "/" + hpInv +
-			" maxMp=" + this.beltCapacityFor("mp") + "+" + (Config.MPBuffer || 0));
-
-		for (n = 0; n < samples.length; n += 1) {
-			print("ÿc2PotDbgÿc0 ::  " + samples[n]);
 		}
 
-		for (n = 0; n < suspects.length; n += 1) {
-			print("ÿc1PotDbgÿc0 :: suspect " + suspects[n]);
-		}
-
-		print("ÿc2PotDbgÿc0 :: countPotions mp inv/belt/all=" +
-			Misc.countPotions("mp", "inv") + "/" + Misc.countPotions("mp", "belt") + "/" + Misc.countPotions("mp", "all"));
+		return need;
 	},
 
-	// Keep inv ≤ buffer; sell excess at shop (drink only if shop unavailable)
+	// Keep inv ≤ buffer + empty belt slots of that type (shop buys often land in inv first).
+	// HPBuffer=0 must NOT sell HP still needed to fill the belt.
 	cullExcessPotions: function () {
 		var kind, kinds = ["hp", "mp", "rv", "vps"], list = {hp: [], mp: [], rv: [], vps: []},
-			item, i, k, buf, excess, sold = 0, drunk = 0, shopOk;
-
-		this.logPotionState("before cull");
+			item, i, k, buf, keep, excess, sold = 0, drunk = 0, shopOk, needSell = false;
 
 		item = me.getItem(-1, -1);
 
@@ -866,6 +1195,25 @@ var Town = {
 			} while (item.getNext());
 		}
 
+		// Decide if anything is over keep (buffer + belt holes) BEFORE opening a vendor
+		for (k = 0; k < kinds.length; k += 1) {
+			kind = kinds[k];
+			buf = kind === "hp" ? (Config.HPBuffer || 0) :
+				kind === "mp" ? (Config.MPBuffer || 0) :
+				kind === "rv" ? (Config.RejuvBuffer >= 0 ? Config.RejuvBuffer : 0) :
+				((Config.StaminaUntilLevel && me.charlvl < Config.StaminaUntilLevel) ? (Config.StaminaBuffer || 0) : 0);
+			keep = buf + ((kind === "hp" || kind === "mp" || kind === "rv") ? this.beltEmptyFor(kind) : 0);
+
+			if (list[kind].length > keep) {
+				needSell = true;
+				break;
+			}
+		}
+
+		if (!needSell) {
+			return 0;
+		}
+
 		shopOk = this.isShopOpen() || this.ensureShopOpen("cullPots");
 
 		for (k = 0; k < kinds.length; k += 1) {
@@ -874,14 +1222,13 @@ var Town = {
 				kind === "mp" ? (Config.MPBuffer || 0) :
 				kind === "rv" ? (Config.RejuvBuffer >= 0 ? Config.RejuvBuffer : 0) :
 				((Config.StaminaUntilLevel && me.charlvl < Config.StaminaUntilLevel) ? (Config.StaminaBuffer || 0) : 0);
+			keep = buf + ((kind === "hp" || kind === "mp" || kind === "rv") ? this.beltEmptyFor(kind) : 0);
 
-			excess = list[kind].length - buf;
+			excess = list[kind].length - keep;
 
 			if (excess <= 0) {
 				continue;
 			}
-
-			print("ÿc8PotDbgÿc0 :: cull " + kind + " inv=" + list[kind].length + " keep=" + buf + " excess=" + excess);
 
 			for (i = 0; i < excess; i += 1) {
 				item = me.getItem(-1, -1, list[kind][i].gid);
@@ -907,15 +1254,11 @@ var Town = {
 			}
 		}
 
-		print("ÿc2PotDbgÿc0 :: cull done sold=" + sold + " drunk=" + drunk);
-		this.logPotionState("after cull");
-
 		return sold + drunk;
 	},
 
-	// Mana buffer: always top-right 2×4 (cols 6–9, rows 0–1).
-	// Only nudge left of key when the key itself is already on the right edge.
-	// Never follow a left/mid key — that parked mana vertically on the left (light sorc bug).
+	// Mana buffer: FIXED top-right 2×4 (cols 6–9, rows 0–1).
+	// Never key-shift the zone (that parked mana mid/left). Key just occupies a cell.
 	getInvKey: function () {
 		// PD2: key=560. Never use 543 — that is aqv (arrows) on PD2.
 		var item = me.getItem("key", 0) || me.getItem(560, 0);
@@ -924,7 +1267,6 @@ var Town = {
 			return item;
 		}
 
-		// Any inv key stack by code
 		item = me.getItem(-1, -1);
 
 		if (item) {
@@ -940,49 +1282,64 @@ var Town = {
 	},
 
 	getManaParkZone: function () {
-		var key = this.getInvKey(),
-			minCol = 6,
-			maxCol = 9,
-			minRow = 0,
-			maxRow = 1,
-			parkWidth = 4;
+		return {
+			minCol: 6,
+			maxCol: 9,
+			minRow: 0,
+			maxRow: 1,
+			key: this.getInvKey() || false
+		};
+	},
 
-		// Key must be in the park rows AND on the right half (col >= 6)
-		if (key && key.y <= maxRow && key.x >= 6) {
-			maxCol = key.x - 1;
-			minCol = maxCol - (parkWidth - 1);
-
-			// Stay on the right — never spill into cols 0–5
-			if (minCol < 5) {
-				minCol = 5;
-			}
-
-			if (maxCol < minCol || maxCol < 5) {
-				minCol = 6;
-				maxCol = 9;
-			}
+	// True if (a,b) lies in the fixed mana park (cols 6–9, rows 0–1).
+	// Accepts normal item.x=col/item.y=row OR swapped reads (avoids endless reshuffle).
+	inManaParkCoords: function (a, b) {
+		if (a >= 6 && a <= 9 && b >= 0 && b <= 1) {
+			return true;
 		}
 
-		return {minCol: minCol, maxCol: maxCol, minRow: minRow, maxRow: maxRow, key: key || false};
+		if (b >= 6 && b <= 9 && a >= 0 && a <= 1) {
+			return true;
+		}
+
+		return false;
 	},
 
 	isManaParked: function (item) {
-		var kind, z;
+		if (!item || item.location !== 3 || item.mode === 2) {
+			return false;
+		}
 
+		if (this.potionKind(item) !== "mp") {
+			return false;
+		}
+
+		return this.inManaParkCoords(item.x, item.y);
+	},
+
+	// clickItem(btn, first, second, inv=3). Normal: first=col item.x, second=row item.y.
+	clickManaParkCell: function (col, row) {
+		if (this._manaCoordSwap) {
+			clickItem(0, row, col, 3);
+		} else {
+			clickItem(0, col, row, 3);
+		}
+	},
+
+	// After a park click, learn if this client reports x/y swapped vs click args.
+	learnManaParkAxes: function (item, intendedCol, intendedRow) {
 		if (!item || item.location !== 3) {
-			return false;
+			return;
 		}
 
-		kind = this.potionKind(item);
-
-		if (kind !== "mp") {
-			return false;
+		if (item.x === intendedCol && item.y === intendedRow) {
+			this._manaCoordSwap = false;
+			return;
 		}
 
-		z = this.getManaParkZone();
-
-		return item.y >= z.minRow && (item.y + item.sizey - 1) <= z.maxRow &&
-			item.x >= z.minCol && (item.x + item.sizex - 1) <= z.maxCol;
+		if (item.x === intendedRow && item.y === intendedCol) {
+			this._manaCoordSwap = true;
+		}
 	},
 
 	// Top 4 rows — generic (hp/rv); mana uses isManaParked
@@ -999,27 +1356,29 @@ var Town = {
 			return this.isManaParked(item);
 		}
 
-		return item.y >= 0 && (item.y + item.sizey) <= 4;
+		return item.y >= 0 && (item.y + (item.sizey || 1)) <= 4;
 	},
 
-	// Mana: 4 cols × 2 rows, right→left within zone. Returns {x:row, y:col} for clickItem.
+	// Mana: right→left within fixed zone. Returns {col, row} (inventory axes).
 	findManaSpot: function (item) {
-		var row, col, r, c, ok, z,
+		var row, col, r, c, ok, z, sx, sy,
 			inv = Storage.Inventory;
 
 		if (!item) {
 			return false;
 		}
 
+		sx = item.sizex || 1;
+		sy = item.sizey || 1;
 		z = this.getManaParkZone();
 		Storage.Reload();
 
-		for (row = z.minRow; row <= z.maxRow - (item.sizey - 1); row += 1) {
-			for (col = z.maxCol - (item.sizex - 1); col >= z.minCol; col -= 1) {
+		for (row = z.minRow; row <= z.maxRow - (sy - 1); row += 1) {
+			for (col = z.maxCol - (sx - 1); col >= z.minCol; col -= 1) {
 				ok = true;
 
-				for (r = 0; r < item.sizey && ok; r += 1) {
-					for (c = 0; c < item.sizex; c += 1) {
+				for (r = 0; r < sy && ok; r += 1) {
+					for (c = 0; c < sx; c += 1) {
 						if (!inv.buffer[row + r] || inv.buffer[row + r][col + c] > 0) {
 							ok = false;
 							break;
@@ -1028,12 +1387,49 @@ var Town = {
 				}
 
 				if (ok) {
-					return {x: row, y: col};
+					return {col: col, row: row};
 				}
 			}
 		}
 
 		return false;
+	},
+
+	// Click cursor into mana park. Never Storage.MoveTo (left dump).
+	clickManaParkFromCursor: function () {
+		var cursor, spot, after, gid;
+
+		if (!me.itemoncursor) {
+			return true;
+		}
+
+		cursor = getUnit(100);
+
+		if (!cursor || this.potionKind(cursor) !== "mp") {
+			return false;
+		}
+
+		gid = cursor.gid;
+		spot = this.findManaSpot(cursor);
+
+		if (!spot) {
+			return false;
+		}
+
+		this.clickManaParkCell(spot.col, spot.row);
+		delay(me.ping + 150);
+
+		if (me.itemoncursor) {
+			return false;
+		}
+
+		after = me.getItem(-1, -1, gid);
+
+		if (after) {
+			this.learnManaParkAxes(after, spot.col, spot.row);
+		}
+
+		return !!(after && this.isManaParked(after));
 	},
 
 	// Prefer top-right for non-mana pots (legacy)
@@ -1048,7 +1444,10 @@ var Town = {
 		kind = this.potionKind(item);
 
 		if (kind === "mp") {
-			return this.findManaSpot(item);
+			// Return {x:row,y:col} shape for any legacy caller; prefer findManaSpot+clickManaParkCell
+			spot = this.findManaSpot(item);
+
+			return spot ? {x: spot.row, y: spot.col, col: spot.col, row: spot.row} : false;
 		}
 
 		Storage.Reload();
@@ -1075,9 +1474,9 @@ var Town = {
 		return false;
 	},
 
-	// Clear blockers from a mana-park cell (never move parked mana or the key)
+	// Clear blockers from a mana-park cell (never move mana pots or the key)
 	clearManaParkCell: function (row, col) {
-		var item, gid, spot, z, code;
+		var item, gid, spot, z, code, kind, origCol, origRow;
 
 		z = this.getManaParkZone();
 		item = me.getItem(-1, -1);
@@ -1091,37 +1490,50 @@ var Town = {
 				continue;
 			}
 
-			if (this.isManaParked(item)) {
+			kind = this.potionKind(item);
+
+			// Never shove mana (parked or not) or the key
+			if (kind === "mp") {
 				continue;
 			}
 
 			code = item.code ? String(item.code).toLowerCase() : "";
 
 			if (code === "key") {
-				continue; // never shove the key
+				continue;
 			}
 
 			if (item.y <= row && item.y + item.sizey > row &&
 					item.x <= col && item.x + item.sizex > col) {
 				gid = item.gid;
+				origCol = item.x;
+				origRow = item.y;
+				// Blockers → left of park only (cols 0–5), not into charm rows if possible
 				spot = this.findInvSpotInCols(item, 0, 3, 0, z.minCol - 1);
 
 				if (!spot) {
-					spot = this.findInvSpotInRows(item, 2, 7);
+					spot = this.findInvSpotInRows(item, 2, 3);
 				}
 
-				if (spot) {
-					if (!item.toCursor()) {
-						return false;
-					}
-
-					clickItem(0, spot.y, spot.x, 3);
-					delay(me.ping + 200);
-
-					return !me.itemoncursor || !getUnit(100) || getUnit(100).gid !== gid;
+				if (!spot) {
+					return false;
 				}
 
-				return false;
+				if (!item.toCursor()) {
+					return false;
+				}
+
+				clickItem(0, spot.y, spot.x, 3);
+				delay(me.ping + 200);
+
+				if (me.itemoncursor && getUnit(100) && getUnit(100).gid === gid) {
+					// Put blocker back — never MoveTo / cancel-drop
+					clickItem(0, origCol, origRow, 3);
+					delay(me.ping + 150);
+					return false;
+				}
+
+				return !me.itemoncursor || !getUnit(100) || getUnit(100).gid !== gid;
 			}
 		} while (item.getNext());
 
@@ -1157,8 +1569,9 @@ var Town = {
 	},
 
 	// Put cursor item away without dropping potions (hp/mp/rv/stamina/tox).
+	// Mana: park zone or belt/drink ONLY — never Storage.MoveTo (left dump).
 	returnCursorSafe: function () {
-		var cursor, kind, i, col, beltSize;
+		var cursor, kind, i, col, beltSize, spot;
 
 		if (!me.itemoncursor) {
 			return true;
@@ -1167,35 +1580,70 @@ var Town = {
 		cursor = getUnit(100);
 
 		if (!cursor) {
-			me.cancel();
-			delay(50 + me.ping);
-
 			return !me.itemoncursor;
 		}
 
 		kind = this.potionKind(cursor);
 
-		me.cancel();
-		delay(80 + me.ping);
-
-		if (!me.itemoncursor) {
-			return true;
-		}
-
-		cursor = getUnit(100);
-
-		if (!cursor) {
-			return true;
-		}
-
-		if (kind) {
-			// Any inventory cell — better than ground
-			if (Storage.Inventory.CanFit(cursor) && Storage.Inventory.MoveTo(cursor)) {
+		if (kind === "mp") {
+			if (this.clickManaParkFromCursor()) {
 				return true;
 			}
 
-			// Belt slot for hp/mp/rv
-			if (kind === "hp" || kind === "mp" || kind === "rv") {
+			beltSize = Storage.BeltSize();
+			col = this.checkColumns(beltSize);
+
+			for (i = 0; i < 4; i += 1) {
+				if (Config.BeltColumn[i] !== "mp" || col[i] <= 0) {
+					continue;
+				}
+
+				cursor = getUnit(100);
+
+				if (!cursor || !me.itemoncursor) {
+					return true;
+				}
+
+				clickItem(0, i, 0, 2);
+				delay(me.ping + 120);
+
+				if (!me.itemoncursor) {
+					return true;
+				}
+			}
+
+			cursor = getUnit(100);
+
+			if (cursor && me.itemoncursor) {
+				print("ÿc8Townÿc0 :: cursor mp — drink instead of left-dump/drop");
+
+				try {
+					cursor.interact();
+				} catch (eDrinkMp) {}
+
+				delay(120 + me.ping);
+			}
+
+			if (me.itemoncursor) {
+				print("ÿc1Townÿc0 :: cursor mp stuck — will not MoveTo/drop");
+			}
+
+			return !me.itemoncursor;
+		}
+
+		if (kind) {
+			spot = this.findPotionSpot(cursor);
+
+			if (spot) {
+				clickItem(0, spot.y, spot.x, 3);
+				delay(me.ping + 150);
+
+				if (!me.itemoncursor) {
+					return true;
+				}
+			}
+
+			if (kind === "hp" || kind === "rv") {
 				beltSize = Storage.BeltSize();
 				col = this.checkColumns(beltSize);
 
@@ -1219,7 +1667,6 @@ var Town = {
 				}
 			}
 
-			// Drink rather than drop
 			cursor = getUnit(100);
 
 			if (cursor && me.itemoncursor) {
@@ -1233,8 +1680,7 @@ var Town = {
 			}
 
 			if (me.itemoncursor) {
-				me.cancel();
-				delay(50 + me.ping);
+				print("ÿc1Townÿc0 :: cursor " + kind + " stuck — will not drop");
 			}
 
 			return !me.itemoncursor;
@@ -1250,13 +1696,10 @@ var Town = {
 		if (me.itemoncursor) {
 			cursor = getUnit(100);
 
-			// Still no — only drop non-potions
 			if (cursor && !this.potionKind(cursor)) {
 				try {
 					cursor.drop();
 				} catch (eDrop) {}
-			} else {
-				me.cancel();
 			}
 		}
 
@@ -1264,9 +1707,9 @@ var Town = {
 	},
 
 	// Place a potion onto inventory without Storage.MoveTo (FindSpot = vertical left dump).
-	// Mana → key-anchored park; other pots → top-right; returns false if no spot.
+	// Mana: fixed top-right only. Inv mana left alone until organizeManaIfNeeded (once).
 	placeInvPotion: function (item) {
-		var kind, spot, gid, cursor, tries, r, c, z, moved;
+		var kind, spot, gid, origCol, origRow;
 
 		if (!item) {
 			return false;
@@ -1275,55 +1718,69 @@ var Town = {
 		kind = this.potionKind(item);
 		gid = item.gid;
 
-		// Already parked mana — don't shuffle/reprint
-		if (kind === "mp" && item.location === 3 && !me.itemoncursor && this.isManaParked(item)) {
-			return true;
+		if (kind === "mp" && Config.ManaPark !== false) {
+			// Already parked — do nothing
+			if (item.location === 3 && !me.itemoncursor && this.isManaParked(item)) {
+				return true;
+			}
+
+			// Still in inv (not on cursor) — defer to single organizeManaIfNeeded pass
+			if (item.location === 3 && !me.itemoncursor) {
+				return true;
+			}
+
+			// On cursor (belt/stash pull) — park zone only, no blocker thrash / MoveTo
+			Storage.Reload();
+			spot = this.findManaSpot(getUnit(100) || item);
+
+			if (spot) {
+				gid = (getUnit(100) && getUnit(100).gid) || gid;
+				this.clickManaParkCell(spot.col, spot.row);
+				delay(me.ping + 150);
+
+				if (!me.itemoncursor) {
+					item = me.getItem(-1, -1, gid);
+
+					if (item) {
+						this.learnManaParkAxes(item, spot.col, spot.row);
+					}
+
+					return !!(item && this.isManaParked(item));
+				}
+			}
+
+			// Belt / drink — never left-dump
+			return this.returnCursorSafe();
 		}
 
 		Storage.Reload();
+		spot = this.findPotionSpot(item);
 
-		if (kind === "mp") {
-			spot = this.findManaSpot(item);
-			z = this.getManaParkZone();
-
-			for (tries = 0; !spot && tries < 8; tries += 1) {
-				moved = false;
-
-				for (r = z.minRow; r <= z.maxRow && !moved; r += 1) {
-					for (c = z.maxCol; c >= z.minCol; c -= 1) {
-						if (Storage.Inventory.buffer[r] && Storage.Inventory.buffer[r][c] > 0) {
-							if (this.clearManaParkCell(r, c)) {
-								moved = true;
-								Storage.Reload();
-								item = me.getItem(-1, -1, gid) || getUnit(100);
-								spot = item ? this.findManaSpot(item) : false;
-								break;
-							}
-						}
-					}
-				}
-
-				if (!moved) {
-					break;
-				}
-			}
-		} else {
-			spot = this.findPotionSpot(item);
-
-			if (!spot) {
-				spot = this.findInvSpotInCols(item, 0, 3, 0, 9);
-			}
+		if (!spot) {
+			spot = this.findInvSpotInCols(item, 0, 3, 0, 9);
 		}
 
 		if (!spot) {
 			print("ÿc8Townÿc0 :: placeInvPotion — no spot for " + kind);
+
+			if (me.itemoncursor) {
+				this.returnCursorSafe();
+			}
+
 			return false;
 		}
 
 		if (!me.itemoncursor) {
 			item = me.getItem(-1, -1, gid);
 
-			if (!item || !item.toCursor()) {
+			if (!item || item.location !== 3) {
+				return false;
+			}
+
+			origCol = item.x;
+			origRow = item.y;
+
+			if (!item.toCursor()) {
 				return false;
 			}
 		}
@@ -1332,14 +1789,16 @@ var Town = {
 		delay(me.ping + 150);
 
 		if (me.itemoncursor) {
-			// Never drop pots via click-on-char — restore safely
-			this.returnCursorSafe();
+			if (origCol !== undefined) {
+				clickItem(0, origCol, origRow, 3);
+				delay(me.ping + 150);
+			}
+
+			if (me.itemoncursor) {
+				this.returnCursorSafe();
+			}
 
 			return !me.itemoncursor;
-		}
-
-		if (kind === "mp") {
-			print("ÿc2Townÿc0 :: mana placed col=" + spot.y + " row=" + spot.x);
 		}
 
 		return true;
@@ -1351,6 +1810,10 @@ var Town = {
 
 	needsManaOrganize: function () {
 		var item = me.getItem(-1, -1);
+
+		if (Config.ManaPark === false) {
+			return false;
+		}
 
 		if (!item) {
 			return false;
@@ -1366,13 +1829,15 @@ var Town = {
 		return false;
 	},
 
-	// Park inv mana in key-anchored 2×4. Only when unparked mana exists.
-	// Never Storage.MoveTo — that dumps left (FindSpot scans from col 0).
-	// Once per chores pass (flag cleared at doChores start).
+	// Park inv mana in FIXED top-right 2×4. No-op unless ManaPark on + unparked mana exists.
 	organizeManaIfNeeded: function () {
-		var pots = [], item, i, spot, gid, tries, r, c, moved, z;
+		var pots = [], item, i, spot, gid, tries, r, c, moved, z, origX, origY, after;
 
-		if (this._manaOrgDone) {
+		if (Config.ManaPark === false) {
+			return true;
+		}
+
+		if (this._manaOrgRunning) {
 			return true;
 		}
 
@@ -1381,26 +1846,20 @@ var Town = {
 		}
 
 		if (!this.needsManaOrganize()) {
-			this._manaOrgDone = true;
-
 			return true;
 		}
 
-		this._manaOrgDone = true;
+		this._manaOrgRunning = true;
 		z = this.getManaParkZone();
 
 		me.cancel();
 		delay(80 + me.ping);
 		Storage.Reload();
 
-		if (z.key && z.key.y <= z.maxRow && z.key.x >= 6) {
-			print("ÿc2Townÿc0 :: key @ col=" + z.key.x + " row=" + z.key.y +
-				" → mana cols " + z.minCol + "-" + z.maxCol + " rows " + z.minRow + "-" + z.maxRow);
-		} else if (z.key) {
-			print("ÿc2Townÿc0 :: key @ col=" + z.key.x + " row=" + z.key.y +
-				" ignored (not right-edge) — mana cols " + z.minCol + "-" + z.maxCol);
-		} else {
-			print("ÿc2Townÿc0 :: no top-right key — mana default cols " + z.minCol + "-" + z.maxCol);
+		if (!this.needsManaOrganize()) {
+			this._manaOrgRunning = false;
+
+			return true;
 		}
 
 		item = me.getItem(-1, -1);
@@ -1409,17 +1868,20 @@ var Town = {
 			do {
 				if (item.location === 3 && item.mode !== 2 &&
 						this.potionKind(item) === "mp" && !this.isManaParked(item)) {
-					pots.push(copyUnit(item));
+					pots.push({
+						gid: item.gid,
+						x: item.x,
+						y: item.y
+					});
 				}
 			} while (item.getNext());
 		}
 
 		if (!pots.length) {
+			this._manaOrgRunning = false;
+
 			return true;
 		}
-
-		print("ÿc2Townÿc0 :: parking " + pots.length + " mana → cols " +
-			z.minCol + "-" + z.maxCol + " rows " + z.minRow + "-" + z.maxRow);
 
 		for (i = 0; i < pots.length; i += 1) {
 			item = me.getItem(-1, -1, pots[i].gid);
@@ -1429,9 +1891,11 @@ var Town = {
 			}
 
 			gid = item.gid;
+			origX = item.x;
+			origY = item.y;
 			spot = this.findManaSpot(item);
 
-			for (tries = 0; !spot && tries < 10; tries += 1) {
+			for (tries = 0; !spot && tries < 2; tries += 1) {
 				moved = false;
 
 				for (r = z.minRow; r <= z.maxRow && !moved; r += 1) {
@@ -1464,29 +1928,42 @@ var Town = {
 				continue;
 			}
 
+			// Already in park under either axis — never pick up to "reshuffle"
+			if (this.isManaParked(item)) {
+				continue;
+			}
+
 			if (!item.toCursor()) {
 				continue;
 			}
 
-			// clickItem(btn, col, row, inv) — spot.y=col, spot.x=row
-			clickItem(0, spot.y, spot.x, 3);
+			this.clickManaParkCell(spot.col, spot.row);
 			delay(me.ping + 200);
 
 			if (me.itemoncursor) {
-				// Never drop mana — cancel / MoveTo / belt / drink
-				if (typeof Town !== "undefined" && typeof Town.returnCursorSafe === "function") {
-					Town.returnCursorSafe();
-				} else {
-					me.cancel();
-					delay(80 + me.ping);
+				clickItem(0, origX, origY, 3);
+				delay(me.ping + 150);
+
+				if (me.itemoncursor) {
+					this.returnCursorSafe();
 				}
 			} else {
-				print("ÿc2Townÿc0 :: mana parked col=" + spot.y + " row=" + spot.x);
+				after = me.getItem(-1, -1, gid);
+
+				if (after) {
+					this.learnManaParkAxes(after, spot.col, spot.row);
+				}
 			}
+		}
+
+		if (me.itemoncursor) {
+			this.returnCursorSafe();
 		}
 
 		me.cancel();
 		Storage.Reload();
+		this.applyCharmInventoryLock();
+		this._manaOrgRunning = false;
 
 		return true;
 	},
@@ -1854,9 +2331,10 @@ var Town = {
 
 	// Move inventory hp/mp/rv onto matching empty belt columns.
 	// Must NOT run with shop/stash open — clicks fail and used to false-loop.
-	// Returns true only if at least one pot actually landed on the belt.
+	// In town: NEVER pull mana out of the top-right park (that forced re-organize every chores).
 	refillBeltFromInventory: function () {
-		var i, items = [], item, beltSize, col, moved = 0, potType, gid, before, after, cursor;
+		var i, items = [], item, beltSize, col, moved = 0, potType, gid, before, after,
+			preserveManaPark = !!me.inTown && Config.ManaPark !== false;
 
 		if (this.isShopOpen() || getUIFlag(0x1A) || getUIFlag(0x19)) {
 			return false;
@@ -1877,16 +2355,23 @@ var Town = {
 
 			potType = this.potionKind(item);
 
-			if (potType === "hp" || potType === "mp" || potType === "rv") {
-				items.push(copyUnit(item));
+			if (potType !== "hp" && potType !== "mp" && potType !== "rv") {
+				continue;
 			}
+
+			// Keep parked mana buffer intact while shopping — vendor fills the belt
+			if (preserveManaPark && potType === "mp" && this.isManaParked(item)) {
+				continue;
+			}
+
+			items.push(copyUnit(item));
 		} while (item.getNext());
 
 		if (!items.length) {
 			return false;
 		}
 
-		// HP first when hp columns need fill
+		// HP first; among mana prefer unparked (already filtered in town)
 		items.sort(function (a, b) {
 			var ra = Town.potionKind(a) === "hp" ? 0 : 1,
 				rb = Town.potionKind(b) === "hp" ? 0 : 1;
@@ -1911,6 +2396,10 @@ var Town = {
 				continue;
 			}
 
+			if (preserveManaPark && potType === "mp" && this.isManaParked(item)) {
+				continue;
+			}
+
 			for (i = 0; i < 4; i += 1) {
 				if (col[i] <= 0 || Config.BeltColumn[i] !== potType) {
 					continue;
@@ -1919,7 +2408,6 @@ var Town = {
 				gid = item.gid;
 				before = col[i];
 
-				// Always cursor → belt (clickItem(2,...) can drink on some builds)
 				if (!item.toCursor()) {
 					break;
 				}
@@ -1928,12 +2416,8 @@ var Town = {
 				delay(me.ping + 150);
 
 				if (me.itemoncursor) {
-					// Put back — never drop pots
 					if (typeof this.returnCursorSafe === "function") {
 						this.returnCursorSafe();
-					} else {
-						me.cancel();
-						delay(80 + me.ping);
 					}
 
 					delay(50 + me.ping);
@@ -1943,7 +2427,6 @@ var Town = {
 				after = this.checkColumns(beltSize);
 				item = me.getItem(-1, -1, gid);
 
-				// Success = column filled or pot now on belt
 				if (after[i] < before || (item && item.mode === 2)) {
 					col = after;
 					moved += 1;
@@ -1962,34 +2445,36 @@ var Town = {
 		return moved > 0;
 	},
 
-	buyPotions: function () {
+	buyPotions: function (shopAlreadyOpen) {
 		// Inventory gold only — never pull from stash for pots
 		if (me.gold < (me.charlvl < 12 ? 50 : 500)) {
 			return false;
 		}
-
-		this.clearBeltStamina();
 
 		var i, j, npc, col, beltSize, pot, stamBuffer,
 			needPots = false,
 			needBuffer = false,
 			needStamina = false,
 			buffer = {hp: 0, mp: 0, vps: 0},
-			shopWasOpen = this.isShopOpen(),
-			refillTries, beforeEmpty, afterEmpty, bought, wantHp, wantMp;
+			beforeEmpty, afterEmpty, wantHp, wantMp, hpBuf, mpBuf;
 
-		this.logPotionState("buyPotions start");
+		// Belt cursor moves need shop closed — doChores preps belt before opening trade
+		if (!shopAlreadyOpen) {
+			if (this.isShopOpen() || getUIFlag(0x08)) {
+				me.cancel();
+				delay(120 + me.ping);
+			}
 
-		// Refill belt from inv only when slots empty / wrong column (not every town)
-		if (!shopWasOpen) {
+			this.clearBeltStamina();
 			this.refillBeltIfNeeded();
 		}
 
 		stamBuffer = (Config.StaminaUntilLevel && me.charlvl < Config.StaminaUntilLevel) ? (Config.StaminaBuffer || 0) : 0;
+		hpBuf = Config.HPBuffer || 0;
+		mpBuf = Config.MPBuffer || 0;
 		beltSize = Storage.BeltSize();
 		col = this.checkColumns(beltSize);
 
-		// Always count inv pots (code/classid) — this is what stops "buy forever"
 		buffer.hp = (typeof Misc.countPotions === "function") ? Misc.countPotions("hp", "inv") : 0;
 		buffer.mp = (typeof Misc.countPotions === "function") ? Misc.countPotions("mp", "inv") : 0;
 		buffer.vps = 0;
@@ -2010,7 +2495,6 @@ var Town = {
 		wantMp = this.potionNeedCount("mp");
 
 		if (wantHp <= 0 && wantMp <= 0 && buffer.vps >= stamBuffer) {
-			print("ÿc2Townÿc0 :: pots OK (inv mp=" + buffer.mp + " hp=" + buffer.hp + ") — skip buy");
 			this.cullExcessPotions();
 
 			return true;
@@ -2018,16 +2502,11 @@ var Town = {
 
 		for (i = 0; i < 4; i += 1) {
 			if (["hp", "mp"].indexOf(Config.BeltColumn[i]) > -1 && col[i] > 0) {
-				// Only buy for belt if that type still needs slots AND inv isn't already overflowing buffer
-				if (Config.BeltColumn[i] === "mp" && buffer.mp > (Config.MPBuffer || 0) && col[i] === 0) {
-					continue;
-				}
-
 				needPots = true;
 			}
 		}
 
-		needBuffer = (buffer.hp < (Config.HPBuffer || 0)) || (buffer.mp < (Config.MPBuffer || 0));
+		needBuffer = (buffer.hp < hpBuf) || (buffer.mp < mpBuf);
 		needStamina = buffer.vps < stamBuffer;
 
 		if (needStamina) {
@@ -2045,53 +2524,80 @@ var Town = {
 			return true;
 		}
 
-		npc = this.initNPC("Shop", "buyPotions");
+		if (shopAlreadyOpen && this.isShopOpen()) {
+			npc = getInteractedNPC();
+		}
+
+		if (!npc) {
+			npc = this.initNPC("Shop", "buyPotions");
+		}
 
 		if (!npc) {
 			return false;
 		}
 
-		// Belt fill — stop a column if buys spill into inventory (empty count doesn't drop)
-		for (i = 0; i < 4; i += 1) {
-			if (col[i] <= 0 || ["hp", "mp"].indexOf(Config.BeltColumn[i]) === -1) {
+		// Belt fill — one shift-buy per type fills all empty matching columns
+		col = this.checkColumns(beltSize);
+
+		for (i = 0; i < 2; i += 1) {
+			wantHp = (i === 0) ? "hp" : "mp";
+
+			if (this.beltEmptyFor(wantHp) <= 0) {
 				continue;
 			}
 
-			// Already have inv buffer+ — only top up fully empty belt columns
-			if (Config.BeltColumn[i] === "mp" && buffer.mp >= (Config.MPBuffer || 0) && col[i] < beltSize) {
-				continue;
-			}
+			// Skip partial top-up when inv buffer already covers drinking
+			if (wantHp === "mp" && mpBuf > 0 && buffer.mp >= mpBuf) {
+				needPots = false;
 
-			if (Config.BeltColumn[i] === "hp" && buffer.hp >= (Config.HPBuffer || 0) && col[i] < beltSize) {
-				continue;
-			}
-
-			for (j = 0; j < col[i]; j += 1) {
-				pot = this.getPotion(npc, Config.BeltColumn[i]);
-
-				if (!pot) {
-					break;
+				for (j = 0; j < 4; j += 1) {
+					if (Config.BeltColumn[j] === "mp" && col[j] >= beltSize) {
+						needPots = true; // fully empty column — still buy
+						break;
+					}
 				}
 
-				beforeEmpty = this.checkColumns(beltSize)[i];
+				if (!needPots) {
+					continue;
+				}
+			}
+
+			if (wantHp === "hp" && hpBuf > 0 && buffer.hp >= hpBuf) {
+				needPots = false;
+
+				for (j = 0; j < 4; j += 1) {
+					if (Config.BeltColumn[j] === "hp" && col[j] >= beltSize) {
+						needPots = true;
+						break;
+					}
+				}
+
+				if (!needPots) {
+					continue;
+				}
+			}
+
+			pot = this.getPotion(npc, wantHp);
+
+			if (!pot) {
+				continue;
+			}
+
+			try {
+				// Shift-click: fill all empty belt slots of this potion type
+				pot.buy(true);
+			} catch (eBuy) {
+				print("ÿc1Townÿc0 :: pot.buy(shift) failed: " + eBuy);
 
 				try {
 					pot.buy(false);
-				} catch (eBuy) {
-					print("ÿc1Townÿc0 :: pot.buy failed: " + eBuy);
-					break;
-				}
-
-				delay(50 + me.ping);
-				afterEmpty = this.checkColumns(beltSize)[i];
-
-				// Buy didn't land on belt → went to inv; stop flooding
-				if (afterEmpty >= beforeEmpty) {
-					print("ÿc8Townÿc0 :: " + Config.BeltColumn[i] + " buy spilled to inv — stop column " + i);
-					break;
+				} catch (eBuy2) {
+					print("ÿc1Townÿc0 :: pot.buy failed: " + eBuy2);
+					continue;
 				}
 			}
 
+			delay(80 + me.ping);
 			col = this.checkColumns(beltSize);
 			buffer.mp = Misc.countPotions("mp", "inv");
 			buffer.hp = Misc.countPotions("hp", "inv");
@@ -2101,8 +2607,8 @@ var Town = {
 		buffer.hp = Misc.countPotions("hp", "inv");
 		buffer.mp = Misc.countPotions("mp", "inv");
 
-		if ((Config.HPBuffer || 0) > buffer.hp) {
-			for (i = 0; i < (Config.HPBuffer || 0) - buffer.hp; i += 1) {
+		if (hpBuf > buffer.hp) {
+			for (i = 0; i < hpBuf - buffer.hp; i += 1) {
 				pot = this.getPotion(npc, "hp");
 
 				if (!pot || !Storage.Inventory.CanFit(pot)) {
@@ -2116,8 +2622,8 @@ var Town = {
 
 		buffer.mp = Misc.countPotions("mp", "inv");
 
-		if ((Config.MPBuffer || 0) > buffer.mp) {
-			for (i = 0; i < (Config.MPBuffer || 0) - buffer.mp; i += 1) {
+		if (mpBuf > buffer.mp) {
+			for (i = 0; i < mpBuf - buffer.mp; i += 1) {
 				pot = this.getPotion(npc, "mp");
 
 				if (!pot || !Storage.Inventory.CanFit(pot)) {
@@ -2128,7 +2634,7 @@ var Town = {
 				delay(30 + me.ping);
 				buffer.mp = Misc.countPotions("mp", "inv");
 
-				if (buffer.mp >= (Config.MPBuffer || 0)) {
+				if (buffer.mp >= mpBuf) {
 					break;
 				}
 			}
@@ -2163,9 +2669,7 @@ var Town = {
 			}
 		}
 
-		// Sell inv above MPBuffer/HPBuffer while vendor is still open
 		this.cullExcessPotions();
-		this.logPotionState("buyPotions end");
 
 		return true;
 	},
@@ -2328,7 +2832,7 @@ var Town = {
 					moved += 1;
 					delay(me.ping + 100);
 				} else if (me.itemoncursor) {
-					me.cancel();
+					this.returnCursorSafe();
 				}
 			} else if (Storage.Inventory.CanFit(item) && Storage.Inventory.MoveTo(item)) {
 				moved += 1;
@@ -2498,6 +3002,7 @@ var Town = {
 	},
 
 	// Ensure trade UI is open and shop list loaded (heal leaves TALK menu open)
+	// WARNING: cancels and reopens — NEVER call during doChores single vendor pass
 	ensureShop: function (npc) {
 		var tick, tries, lines, i, text;
 
@@ -2610,7 +3115,7 @@ var Town = {
 		return hit;
 	},
 
-	fillTome: function (code) {
+	fillTome: function (code, shopAlreadyOpen) {
 		if (me.gold < 50) {
 			return false;
 		}
@@ -2644,7 +3149,14 @@ var Town = {
 			return true;
 		}
 
-		npc = this.initNPC("Shop", "fillTome");
+		// Reuse open chores trade — never cancel/reopen (ensureShop does that)
+		if (shopAlreadyOpen && this.isShopOpen()) {
+			npc = getInteractedNPC();
+		}
+
+		if (!npc) {
+			npc = this.initNPC("Shop", "fillTome");
+		}
 
 		if (!npc) {
 			return false;
@@ -2653,7 +3165,12 @@ var Town = {
 		delay(300);
 		this.dismissShopError();
 
-		if (!this.ensureShop(npc)) {
+		if (shopAlreadyOpen) {
+			if (!this.isShopOpen() && !npc.startTrade("Shop")) {
+				print("ÿc1Townÿc0 :: shop not open for " + scrollCode + " (chores pass)");
+				return false;
+			}
+		} else if (!this.ensureShop(npc)) {
 			print("ÿc1Townÿc0 :: shop not open for " + scrollCode);
 			return false;
 		}
@@ -2698,9 +3215,17 @@ var Town = {
 
 		scroll = this.getShopItem(npc, scrollCode, scrollCode === "tsc" ? [546, 529] : [547]);
 
-		// Shop list sometimes empty right after heal/TALK — refresh without walking away
+		// Shop list sometimes empty — refresh. Chores pass: never ensureShop (cancel/reopen).
 		if (!scroll) {
-			if (this.ensureShop(npc)) {
+			if (shopAlreadyOpen) {
+				if (!getUIFlag(0x0C)) {
+					npc.startTrade("Shop");
+				}
+			} else if (!this.ensureShop(npc)) {
+				scroll = null;
+			}
+
+			if (shopAlreadyOpen || this.isShopOpen()) {
 				scroll = this.getShopItem(npc, scrollCode, scrollCode === "tsc" ? [546, 529] : [547]);
 			}
 		}
@@ -2720,7 +3245,11 @@ var Town = {
 					scroll = this.getShopItem(npc, scrollCode, [546, 529]);
 
 					if (!scroll) {
-						if (!this.ensureShop(npc)) {
+						if (shopAlreadyOpen) {
+							if (!getUIFlag(0x0C) && !npc.startTrade("Shop")) {
+								break;
+							}
+						} else if (!this.ensureShop(npc)) {
 							break;
 						}
 
@@ -2792,13 +3321,43 @@ var Town = {
 		return tome.getStat(70);
 	},
 
-	identify: function () {
+	// Real scroll count for logs — never the fake 20 from checkScrolls when no ID tome
+	scrollFillCount: function (scrollCode) {
+		var tomeCode, tome, scroll, n = 0;
+
+		scrollCode = scrollCode ? String(scrollCode).toLowerCase() : "";
+		tomeCode = (scrollCode === "tsc") ? "tbk" : "ibk";
+		tome = me.findItem(tomeCode, 0, 3);
+
+		if (tome) {
+			return tome.getStat(70) || 0;
+		}
+
+		scroll = me.findItem(scrollCode, 0, 3);
+
+		if (scroll) {
+			do {
+				if (scroll.location === 3) {
+					n += 1;
+				}
+			} while (scroll.getNext());
+		}
+
+		return n;
+	},
+
+	identify: function (shopAlreadyOpen) {
 		var i, item, tome, scroll, npc, list, timer, tpTome, result,
 			tpTomePos = {},
 			usedCain = false,
 			needShop = false;
 
-		usedCain = this.cainID();
+		// Never re-call cainID while shop is open — it cancels the trade
+		if (shopAlreadyOpen) {
+			usedCain = !!this._choresUsedCain;
+		} else {
+			usedCain = this.cainID();
+		}
 
 		list = Storage.Inventory.Compare(Config.Inventory);
 
@@ -2815,6 +3374,19 @@ var Town = {
 			}
 
 			if (!list[i].getFlag(0x10)) {
+				// Charms must be IDed before stash/sell (early: use inv isc)
+				if (this.isCharmItem(list[i])) {
+					needShop = true;
+					break;
+				}
+
+				// Magic/rare rings & amulets — always ID (keep/sell/equip needs stats)
+				if ((list[i].itemType === 10 || list[i].itemType === 12) &&
+						(list[i].quality === 4 || list[i].quality === 6)) {
+					needShop = true;
+					break;
+				}
+
 				if (!usedCain && ([-1, 4].indexOf(result.result) > -1 || Item.hasTier(list[i]))) {
 					needShop = true;
 					break;
@@ -2840,16 +3412,22 @@ var Town = {
 			return false;
 		}
 
-		npc = this.initNPC("Shop", usedCain ? "sell" : "identify");
+		if (shopAlreadyOpen && this.isShopOpen()) {
+			npc = getInteractedNPC();
+		}
+
+		if (!npc) {
+			npc = this.initNPC("Shop", usedCain ? "sell" : "identify");
+		}
 
 		if (!npc) {
 			return false;
 		}
 
-		tome = me.findItem("ibk", 0, 3) || me.findItem(536, 0, 3);
+		tome = this.findIdTome() || me.findItem("ibk", 0, 3) || me.findItem(536, 0, 3);
 
 		if (!usedCain && tome && tome.getStat(70) < list.length) {
-			this.fillTome("ibk");
+			this.fillTome("ibk", !!shopAlreadyOpen);
 		}
 
 MainLoop:
@@ -2860,16 +3438,17 @@ MainLoop:
 				continue;
 			}
 
-			// After Cain: never shop-ID — only sell identified crap
-			if (usedCain) {
-				if (!item.getFlag(0x10)) {
-					continue;
-				}
-
+			// After Cain: sell identified junk — but still shop-ID jewelry Cain missed
+			if (usedCain && item.getFlag(0x10)) {
 				result = Pickit.checkItem(item);
 
 				// Player upgrade — keep
 				if (Item.autoEquipCheck(item)) {
+					continue;
+				}
+
+				// Better than equipped but can't wear yet — keep
+				if (typeof Item.isPendingPlayerUpgrade === "function" && Item.isPendingPlayerUpgrade(item)) {
 					continue;
 				}
 
@@ -2923,6 +3502,17 @@ MainLoop:
 					result.result = -1;
 				}
 
+				// Unid charms always ID (leveling keep nip needs stats)
+				if (!item.getFlag(0x10) && this.isCharmItem(item)) {
+					result.result = -1;
+				}
+
+				// Unid magic/rare rings & amulets — always ID (never keep/sell blind)
+				if (!item.getFlag(0x10) && (item.itemType === 10 || item.itemType === 12) &&
+						(item.quality === 4 || item.quality === 6)) {
+					result.result = -1;
+				}
+
 				switch (result.result) {
 				// Items for gold, will sell magics, etc. w/o id, but at low levels
 				// magics are often not worth iding.
@@ -2941,31 +3531,39 @@ MainLoop:
 
 					break;
 				case -1:
+					tome = this.findIdTome() || tome;
+
 					if (tome) {
 						this.identifyItem(item, tome);
 					} else {
-						scroll = this.getShopItem(npc, "isc", [547]);
+						scroll = this.findIdScroll();
 
-						if (scroll) {
-							if (!Storage.Inventory.CanFit(scroll)) {
-								tpTome = me.findItem("tbk", 0, 3);
+						if (!scroll) {
+							scroll = this.getShopItem(npc, "isc",
+								(typeof NTIPAliasClassID !== "undefined" && NTIPAliasClassID.isc) ? [NTIPAliasClassID.isc] : [547]);
 
-								if (tpTome) {
-									tpTomePos = {x: tpTome.x, y: tpTome.y};
+							if (scroll) {
+								if (!Storage.Inventory.CanFit(scroll)) {
+									tpTome = me.findItem("tbk", 0, 3);
 
-									tpTome.sell();
-									delay(500);
+									if (tpTome) {
+										tpTomePos = {x: tpTome.x, y: tpTome.y};
+
+										tpTome.sell();
+										delay(500);
+									}
+								}
+
+								delay(500);
+
+								if (Storage.Inventory.CanFit(scroll) &&
+										me.getStat(14) + me.getStat(15) >= (scroll.getItemCost(0) || 100)) {
+									scroll.buy();
 								}
 							}
 
-							delay(500);
-
-							if (Storage.Inventory.CanFit(scroll)) {
-								scroll.buy();
-							}
+							scroll = this.findIdScroll();
 						}
-
-						scroll = me.findItem("isc", 0, 3);
 
 						if (!scroll) {
 							break MainLoop;
@@ -3039,7 +3637,10 @@ MainLoop:
 			}
 		}
 
-		this.fillTome("tbk"); // Check for TP tome in case it got sold for ID scrolls
+		// TP top-up is doChores vendor order (after pots) — don't fill mid-identify when shopAlreadyOpen
+		if (!shopAlreadyOpen) {
+			this.fillTome("tbk");
+		}
 
 		return true;
 	},
@@ -3103,6 +3704,12 @@ MainLoop:
 			if (Item.autoEquipCheck(items[i])) {
 				Misc.itemLogger("Kept", items[i]);
 				Misc.logItem("Kept", items[i], result.line);
+				continue;
+			}
+
+			// Better than equipped but can't wear yet — keep for next autoEquip
+			if (typeof Item.isPendingPlayerUpgrade === "function" && Item.isPendingPlayerUpgrade(items[i])) {
+				Misc.itemLogger("Kept", items[i]);
 				continue;
 			}
 
@@ -3244,6 +3851,52 @@ MainLoop:
 		}
 
 		return false;
+	},
+
+	// MiniShop: 4os Spirit swords only exist on Repair NPCs (Charsi/Fara/…).
+	// Never open Repair just to hunt — only scan when trade is already open for real repair.
+	needSpiritSwordShop: function () {
+		if (!Config.MiniShopBot || !Config.MakeRunewords || me.charlvl < 18) {
+			return false;
+		}
+
+		if (typeof Runewords === "undefined" || typeof Runeword === "undefined" || !Runeword.Spirit) {
+			return false;
+		}
+
+		if (typeof Runewords.hasSpiritRecipe !== "function" || !Runewords.hasSpiritRecipe()) {
+			return false;
+		}
+
+		if (typeof Runewords.hasCompletedSpiritSword === "function" && Runewords.hasCompletedSpiritSword()) {
+			return false;
+		}
+
+		if (typeof Runewords.hasEmptySpiritBase === "function" && Runewords.hasEmptySpiritBase()) {
+			return false;
+		}
+
+		return true;
+	},
+
+	// Opportunistic only: Repair trade must already be open (from Town.repair). Never initNPC Repair here.
+	buySpiritSwordBase: function () {
+		var npc;
+
+		if (!this.needSpiritSwordShop()) {
+			return true;
+		}
+
+		npc = getInteractedNPC();
+
+		if (!npc || !npc.itemcount) {
+			return true;
+		}
+
+		print("ÿc4MiniShopBotÿc0: Repair already open — scanning for 4-socket Spirit sword");
+		this.shopItems();
+
+		return true;
 	},
 
 	// Once Poison Strike is known, always keep a dagger equipped (no level cap)
@@ -3420,7 +4073,9 @@ MainLoop:
 		return (eq.item.quality || 0) <= 2;
 	},
 
-	// Buy spear/polearm/javelin for Act2 merc from Fara (or Repair NPC). force = shop-scan even if armed.
+	// Act2 desert merc spear from Fara. Inventory equip: any act.
+	// Fara shop-scan: ONLY while already in Act2 AND this chore pass already needs heal or repair
+	// (Fara is Heal+Repair there). Never change acts for this. force = Act2 hire path (already in Lut).
 	buyMercWeapon: function (force) {
 		var npc, item, cand, best, cost, gold, i, eq, list = [], invBest = null;
 
@@ -3439,7 +4094,7 @@ MainLoop:
 		eq = Item.getMercItem(4);
 		gold = me.getStat(14) + me.getStat(15);
 
-		// Inventory first — equip upgrade without shopping
+		// Inventory first — equip upgrade without shopping / without leaving current act
 		item = me.getItem(-1, 0);
 
 		if (item) {
@@ -3482,6 +4137,17 @@ MainLoop:
 			return true;
 		}
 
+		// Never leave current act for Fara — shop only in Lut Gholein
+		if (me.act !== 2) {
+			return true;
+		}
+
+		// Chores: only piggyback when this pass already visits Fara for heal or repair
+		// force: post-hire while already standing in Act2
+		if (!force && !this._act2FaraMercShop) {
+			return true;
+		}
+
 		if (gold < 50) {
 			print("ÿc8Townÿc0 :: Need merc weapon but not enough gold");
 
@@ -3492,25 +4158,12 @@ MainLoop:
 			this.goToTown();
 		}
 
+		if (me.act !== 2) {
+			return true;
+		}
+
 		me.cancel();
 		delay(150 + me.ping);
-
-		// Act2 Fara (Repair) sells spears/polearms — soft-fail WP so chores never hard-throw
-		if (me.act !== 2 && Pather.accessToAct(2)) {
-			try {
-				this.goToTown(2);
-			} catch (eWp) {
-				print("ÿc8Townÿc0 :: buyMercWeapon — Act2 WP failed, skip (" + eWp + ")");
-
-				return false;
-			}
-
-			if (me.act !== 2) {
-				print("ÿc8Townÿc0 :: buyMercWeapon — still not Act2, skip");
-
-				return false;
-			}
-		}
 
 		npc = this.initNPC("Repair", "buyMercWeapon");
 
@@ -3663,8 +4316,12 @@ CursorLoop:
 			return true;
 		}
 
-		var i, item, result,
+		var i, item, result, buy, stealthHunt, stealthFound, stealthBought, stealthBuy,
+			loreHunt, loreFound, loreBought, loreBuy,
+			spiritHunt, spiritFound, spiritBought, spiritBuy,
 			items = [],
+			equipBest = {}, // bodyLoc → {unit, tier, def, line}
+			loc, locs, tier, def, key, entry, boughtName,
 			npc = getInteractedNPC();
 
 		if (!npc || !npc.itemcount) {
@@ -3679,6 +4336,48 @@ CursorLoop:
 
 		print("ÿc4MiniShopBotÿc0: Scanning " + npc.itemcount + " items.");
 
+		stealthHunt = false;
+		stealthFound = false;
+		stealthBought = false;
+		loreHunt = false;
+		loreFound = false;
+		loreBought = false;
+		spiritHunt = false;
+		spiritFound = false;
+		spiritBought = false;
+
+		// Notify when Tal+Eth are ready and we still need a Stealth base
+		if (typeof Runewords !== "undefined" && typeof Runeword !== "undefined" && Runeword.Stealth &&
+				typeof Runewords.hasStealthRecipe === "function" && Runewords.hasStealthRecipe() &&
+				typeof Runewords.haveRunes === "function" && Runewords.haveRunes(Runeword.Stealth) &&
+				typeof Runewords.hasCompletedArmorRuneword === "function" && !Runewords.hasCompletedArmorRuneword() &&
+				typeof Runewords.hasEmptyStealthBase === "function" && !Runewords.hasEmptyStealthBase() &&
+				me.charlvl >= 17) {
+			stealthHunt = true;
+			print("ÿc4MiniShopBotÿc0: Searching for 2-socket armor for Stealth (Tal+Eth in inv/stash)");
+		}
+
+		// Same for Lore — Ort+Sol ready, need empty 2os helm (or higher-def upgrade)
+		if (typeof Runewords !== "undefined" && typeof Runeword !== "undefined" && Runeword.Lore &&
+				typeof Runewords.hasLoreRecipe === "function" && Runewords.hasLoreRecipe() &&
+				typeof Runewords.haveRunes === "function" && Runewords.haveRunes(Runeword.Lore) &&
+				typeof Runewords.hasCompletedLoreHelm === "function" && !Runewords.hasCompletedLoreHelm() &&
+				me.charlvl >= 20) {
+			loreHunt = true;
+			print("ÿc4MiniShopBotÿc0: Searching for 2-socket helm for Lore (best def; Ort+Sol ready)");
+		}
+
+		// Spirit — Tal+Thul+Ort+Amn ready, need empty 4os Crystal/Broad/Long
+		if (typeof Runewords !== "undefined" && typeof Runeword !== "undefined" && Runeword.Spirit &&
+				typeof Runewords.hasSpiritRecipe === "function" && Runewords.hasSpiritRecipe() &&
+				typeof Runewords.haveRunes === "function" && Runewords.haveRunes(Runeword.Spirit) &&
+				typeof Runewords.hasCompletedSpiritSword === "function" && !Runewords.hasCompletedSpiritSword() &&
+				typeof Runewords.hasEmptySpiritBase === "function" && !Runewords.hasEmptySpiritBase() &&
+				me.charlvl >= 18) {
+			spiritHunt = true;
+			print("ÿc4MiniShopBotÿc0: Searching for 4-socket sword for Spirit (Tal+Thul+Ort+Amn in inv/stash)");
+		}
+
 		do {
 			if (this.ignoredItemTypes.indexOf(item.itemType) === -1) {
 				items.push(copyUnit(item));
@@ -3687,13 +4386,77 @@ CursorLoop:
 
 		for (i = 0; i < items.length; i += 1) {
 			result = Pickit.checkItem(items[i]);
+			buy = false;
+			stealthBuy = false;
+			loreBuy = false;
+			spiritBuy = false;
 
-			if (result.result === 1 && Item.autoEquipCheck(items[i])) {
+			// Stealth / Lore / Spirit RW bases — not gated on worthShopBuy/autoequip
+			if (typeof Runewords !== "undefined") {
+				if (typeof Runewords.wantStealthShopBase === "function" && Runewords.wantStealthShopBase(items[i])) {
+					buy = true;
+					stealthFound = true;
+					stealthBuy = true;
+				} else if (typeof Runewords.wantLoreShopBase === "function" && Runewords.wantLoreShopBase(items[i])) {
+					buy = true;
+					loreFound = true;
+					loreBuy = true;
+				} else if (typeof Runewords.wantSpiritShopBase === "function" && Runewords.wantSpiritShopBase(items[i])) {
+					buy = true;
+					spiritFound = true;
+					spiritBuy = true;
+				}
+			}
+
+			if (!buy && (result.result === 3 || result.result === 2 || result.result === 5)) {
+				// RW base / cubing / crafting — MiniShopBot must buy these (result 1 path skips them)
+				buy = true;
+			} else if (!buy && result.result === 1 && Item.worthShopBuy(items[i])) {
+				// AutoEquip: remember best candidate per body slot — buy once after scan
+				// (was buying every Drognan shield that beat equipped, without re-equip mid-loop)
+				locs = Item.getBodyLoc(items[i]);
+				tier = NTIP.GetTier(items[i]);
+				def = items[i].getStat(31) || 0;
+
+				if (typeof items[i].getStatEx === "function") {
+					def = Math.max(def, items[i].getStatEx(31) || 0);
+				}
+
+				if (locs && locs.length && tier > 0) {
+					key = locs[0];
+					entry = equipBest[key];
+
+					if (!entry || tier > entry.tier || (tier === entry.tier && def > entry.def)) {
+						equipBest[key] = {
+							unit: items[i],
+							tier: tier,
+							def: def,
+							line: result.line || "autoequip"
+						};
+					}
+				}
+
+				buy = false; // deferred
+			}
+
+			if (buy) {
 				try {
 					if (Storage.Inventory.CanFit(items[i]) && me.getStat(14) + me.getStat(15) >= items[i].getItemCost(0)) {
 						Misc.itemLogger("Shopped", items[i]);
-						Misc.logItem("Shopped", items[i], result.line);
+						Misc.logItem("Shopped", items[i], result.line || "rw-base");
 						items[i].buy();
+
+						if (stealthBuy) {
+							stealthBought = true;
+						}
+
+						if (loreBuy) {
+							loreBought = true;
+						}
+
+						if (spiritBuy) {
+							spiritBought = true;
+						}
 					}
 				} catch (e) {
 					print(e);
@@ -3701,6 +4464,70 @@ CursorLoop:
 			}
 
 			delay(2);
+		}
+
+		// One autoequip upgrade per body slot (best tier, then defense)
+		for (loc in equipBest) {
+			if (!equipBest.hasOwnProperty(loc)) {
+				continue;
+			}
+
+			entry = equipBest[loc];
+			item = entry.unit;
+
+			if (!item) {
+				continue;
+			}
+
+			// Re-check vs equipped — another buy this visit shouldn't matter (one per slot)
+			if (!Item.worthShopBuy(item)) {
+				continue;
+			}
+
+			try {
+				if (Storage.Inventory.CanFit(item) && me.getStat(14) + me.getStat(15) >= item.getItemCost(0)) {
+					boughtName = (item.name || item.classid || "?").toString().replace(/ÿc[0-9a-z]/gi, "").split("\n")[0];
+					Misc.itemLogger("Shopped", item);
+					Misc.logItem("Shopped", item, entry.line);
+					item.buy();
+					print("ÿc2MiniShopBotÿc0: Bought best slot " + loc + " — " + boughtName +
+						" tier=" + entry.tier + " def=" + entry.def);
+				}
+			} catch (eBuy) {
+				print(eBuy);
+			}
+
+			delay(2);
+		}
+
+		if (stealthHunt) {
+			if (stealthBought) {
+				print("ÿc2MiniShopBotÿc0: Found 2-socket armor for Stealth — bought");
+			} else if (stealthFound) {
+				print("ÿc1MiniShopBotÿc0: Found 2-socket armor for Stealth — could not buy (gold/space)");
+			} else {
+				print("ÿc1MiniShopBotÿc0: No 2-socket Breast/Light Plate for Stealth in this shop");
+			}
+		}
+
+		if (loreHunt) {
+			if (loreBought) {
+				print("ÿc2MiniShopBotÿc0: Found 2-socket helm for Lore — bought");
+			} else if (loreFound) {
+				print("ÿc1MiniShopBotÿc0: Found 2-socket helm for Lore — could not buy (gold/space)");
+			} else {
+				print("ÿc1MiniShopBotÿc0: No 2-socket Lore helm in this shop");
+			}
+		}
+
+		if (spiritHunt) {
+			if (spiritBought) {
+				print("ÿc2MiniShopBotÿc0: Found 4-socket sword for Spirit — bought");
+			} else if (spiritFound) {
+				print("ÿc1MiniShopBotÿc0: Found 4-socket sword for Spirit — could not buy (gold/space)");
+			} else {
+				print("ÿc1MiniShopBotÿc0: No 4-socket Crystal/Broad/Long for Spirit in this shop");
+			}
 		}
 
 		return true;
@@ -3863,6 +4690,8 @@ CursorLoop:
 		npc = this.initNPC("Key", "buyKeys");
 
 		if (!npc) {
+			this._keysBrokeTick = getTickCount();
+
 			if (!keepOpen) {
 				me.cancel();
 			}
@@ -3883,7 +4712,7 @@ CursorLoop:
 		}
 
 		cost = key.getItemCost(0) || 50;
-		gold = me.gold;
+		gold = me.getStat(14) + me.getStat(15);
 
 		if (gold < cost) {
 			print("ÿc8Townÿc0 :: can't afford keys (gold " + gold + " < " + cost + ")");
@@ -3915,7 +4744,7 @@ CursorLoop:
 
 					cost = key.getItemCost(0) || cost;
 
-					if (me.gold < cost) {
+					if (me.getStat(14) + me.getStat(15) < cost) {
 						break;
 					}
 
@@ -3992,20 +4821,49 @@ CursorLoop:
 			return 12;
 		}
 
+		// Early game: no key shopping / no TownCheck key loops
+		if (me.charlvl <= 7) {
+			return 12;
+		}
+
 		if (!me.getItem("key") && !Storage.Inventory.CanFit({sizex: 1, sizey: 1})) {
 			return 12;
 		}
 
 		// Broke / recent failed buy — pretend full so townCheck stops
-		if (me.gold < 50 || (this._keysBrokeTick && getTickCount() - this._keysBrokeTick < 120000)) {
+		if (this.keysUnbuyable()) {
 			return 12;
 		}
 
 		return this.countKeys();
 	},
 
+	// Not worth a town trip for keys (lvl / gold / recent fail)
+	keysUnbuyable: function () {
+		var gold = me.getStat(14) + me.getStat(15);
+
+		if (me.charlvl <= 7) {
+			return true;
+		}
+
+		// Key stack / single still needs cash — 50 was too low vs walk spam
+		if (gold < 100) {
+			return true;
+		}
+
+		if (this._keysBrokeTick && getTickCount() - this._keysBrokeTick < 3 * 60 * 1000) {
+			return true;
+		}
+
+		return false;
+	},
+
 	needKeys: function () {
-		if (me.gold < 50 || (this._keysBrokeTick && getTickCount() - this._keysBrokeTick < 120000)) {
+		if (!Config.OpenChests || me.classid === 6) {
+			return false;
+		}
+
+		if (this.keysUnbuyable()) {
 			return false;
 		}
 
@@ -4013,7 +4871,11 @@ CursorLoop:
 	},
 
 	wantKeys: function () {
-		if (me.gold < 50 || (this._keysBrokeTick && getTickCount() - this._keysBrokeTick < 120000)) {
+		if (!Config.OpenChests || me.classid === 6) {
+			return false;
+		}
+
+		if (this.keysUnbuyable()) {
 			return false;
 		}
 
@@ -4027,7 +4889,7 @@ CursorLoop:
 
 		var needRal = 0,
 			needOrt = 0,
-			items = this.getItemsForRepair(Config.RepairPercent, false);
+			items = this.getItemsForRepair(Config.RepairPercent, false, true);
 
 		if (items && items.length) {
 			while (items.length > 0) {
@@ -4081,7 +4943,7 @@ CursorLoop:
 			return false;
 		}
 
-		var items = this.getItemsForRepair(Config.RepairPercent, false);
+		var items = this.getItemsForRepair(Config.RepairPercent, false, true);
 
 		items.sort(function (a, b) {
 			return a.getStat(72) * 100 / a.getStat(73) - b.getStat(72) * 100 / b.getStat(73);
@@ -4113,11 +4975,11 @@ CursorLoop:
 		case 71:
 		case 72:
 		case 75:
-			rune = me.getItem(617); // Ral rune
+			rune = me.getItem(635); // PD2 Ral (was LoD 617)
 
 			break;
 		default:
-			rune = me.getItem(618); // Ort rune
+			rune = me.getItem(636); // PD2 Ort (was LoD 618)
 
 			break;
 		}
@@ -4186,6 +5048,8 @@ CursorLoop:
 				}
 
 				me.repair();
+				// Already at Repair for durability — piggyback RW-base MiniShop (Spirit/Stealth/Lore)
+				this.shopItems();
 
 				break;
 			case "buyQuiver":
@@ -4215,6 +5079,9 @@ CursorLoop:
 					if (quiver) {
 						quiver.buy();
 					}
+
+					// Quiver restock already opened Repair — scan RW bases while here
+					this.shopItems();
 				}
 
 				break;
@@ -4269,54 +5136,57 @@ CursorLoop:
 		return repairAction;
 	},
 
-	getItemsForRepair: function (repairPercent, chargedItems) {
+	getItemsForRepair: function (repairPercent, chargedItems, includeEthereal) {
 		var i, charge, quantity, durability,
 			itemList = [],
 			item = me.getItem(-1, 1);
 
 		if (item) {
 			do {
-				if (!item.getFlag(0x400000)) { // Skip ethereal items
-					if (!item.getStat(152)) { // Skip indestructible items
-						switch (item.itemType) {
-						// Quantity check
-						case 42: // Throwing knives
-						case 43: // Throwing axes
-						case 44: // Javelins
-						case 87: // Amazon javelins
-							quantity = item.getStat(70);
+				// Ethereal: NPC me.repair() cannot fix — skip unless CubeRepair Ort/Ral path
+				if (item.getFlag(0x400000) && !includeEthereal) {
+					continue;
+				}
 
-							if (typeof quantity === "number" && quantity * 100 / (getBaseStat("items", item.classid, "maxstack") + item.getStat(254)) <= repairPercent) { // Stat 254 = increased stack size
-								itemList.push(copyUnit(item));
-							}
+				if (!item.getStat(152)) { // Skip indestructible items
+					switch (item.itemType) {
+					// Quantity check
+					case 42: // Throwing knives
+					case 43: // Throwing axes
+					case 44: // Javelins
+					case 87: // Amazon javelins
+						quantity = item.getStat(70);
 
-							break;
-						// Durability check
-						default:
-							durability = item.getStat(72);
-
-							if (typeof durability === "number" && durability * 100 / item.getStat(73) <= repairPercent) {
-								itemList.push(copyUnit(item));
-							}
-
-							break;
+						if (typeof quantity === "number" && quantity * 100 / (getBaseStat("items", item.classid, "maxstack") + item.getStat(254)) <= repairPercent) { // Stat 254 = increased stack size
+							itemList.push(copyUnit(item));
 						}
+
+						break;
+					// Durability check
+					default:
+						durability = item.getStat(72);
+
+						if (typeof durability === "number" && durability * 100 / item.getStat(73) <= repairPercent) {
+							itemList.push(copyUnit(item));
+						}
+
+						break;
 					}
+				}
 
-					if (chargedItems) {
-						// Charged item check
-						charge = item.getStat(-2)[204];
+				if (chargedItems) {
+					// Charged item check
+					charge = item.getStat(-2)[204];
 
-						if (typeof (charge) === "object") {
-							if (charge instanceof Array) {
-								for (i = 0; i < charge.length; i += 1) {
-									if (charge[i] !== undefined && charge[i].hasOwnProperty("charges") && charge[i].charges * 100 / charge[i].maxcharges <= repairPercent) {
-										itemList.push(copyUnit(item));
-									}
+					if (typeof (charge) === "object") {
+						if (charge instanceof Array) {
+							for (i = 0; i < charge.length; i += 1) {
+								if (charge[i] !== undefined && charge[i].hasOwnProperty("charges") && charge[i].charges * 100 / charge[i].maxcharges <= repairPercent) {
+									itemList.push(copyUnit(item));
 								}
-							} else if (charge.charges * 100 / charge.maxcharges <= repairPercent) {
-								itemList.push(copyUnit(item));
 							}
+						} else if (charge.charges * 100 / charge.maxcharges <= repairPercent) {
+							itemList.push(copyUnit(item));
 						}
 					}
 				}
@@ -4324,6 +5194,23 @@ CursorLoop:
 		}
 
 		return itemList;
+	},
+
+	// Equipped ethereal with 0 durability — needRepair ignores these (NPC can't repair)
+	hasBrokenEtherealEquipped: function () {
+		var item = me.getItem(-1, 1);
+
+		if (!item) {
+			return false;
+		}
+
+		do {
+			if (item.getFlag(0x400000) && typeof Item !== "undefined" && Item.isBroken && Item.isBroken(item)) {
+				return true;
+			}
+		} while (item.getNext());
+
+		return false;
 	},
 
 	reviveMerc: function () {
@@ -4336,7 +5223,7 @@ CursorLoop:
 			this.goToTown(2);
 		}
 
-		var i, tick, dialog, lines,
+		var i, tick, dialog, lines, text, clicked,
 			preArea = me.area,
 			npc = this.initNPC("Merc", "reviveMerc");
 
@@ -4346,24 +5233,46 @@ CursorLoop:
 
 MainLoop:
 		for (i = 0; i < 3; i += 1) {
-			dialog = getDialogLines();
+			try {
+				dialog = getDialogLines();
+			} catch (eDlg) {
+				dialog = null;
+			}
 
-			for (lines = 0; lines < dialog.length; lines += 1) {
-				if (dialog[lines].text.match(":", "gi")) {
-					dialog[lines].handler();
-					delay(Math.max(750, me.ping * 2));
-				}
+			clicked = false;
 
-				// "You do not have enough gold for that."
-				if (dialog[lines].text.match(getLocaleString(3362), "gi")) {
-					return false;
+			if (dialog && dialog.length) {
+				for (lines = 0; lines < dialog.length; lines += 1) {
+					text = (dialog[lines].text || "").toString();
+
+					// "You do not have enough gold for that."
+					if (text.match(getLocaleString(3362), "gi") || text.match(/enough gold/i)) {
+						me.cancel();
+						print("ÿc8Townÿc0 :: reviveMerc — not enough gold");
+						return false;
+					}
+
+					// ONLY Revive/Resurrect — never match bare ":" (Hire list entries all have colons → stutter)
+					if (text.match(/revive|resurrect/i) ||
+							text.match(getLocaleString(22695), "gi") ||
+							text.match(getLocaleString(22696), "gi")) {
+						dialog[lines].handler();
+						clicked = true;
+						delay(Math.max(750, me.ping * 2));
+						break;
+					}
 				}
 			}
 
+			if (!clicked) {
+				delay(300 + me.ping);
+			}
+
+			tick = getTickCount();
+
 			while (getTickCount() - tick < 2000) {
 				if (!!me.getMerc()) {
-					delay(Math.max(750, me.ping * 2));
-
+					delay(Math.max(500, me.ping * 2));
 					break MainLoop;
 				}
 
@@ -4373,6 +5282,10 @@ MainLoop:
 
 		Attack.checkInfinity();
 
+		// Always close Greiz dialog — open Hire UI stalls chores / equip
+		me.cancel();
+		delay(100 + me.ping);
+
 		if (!!me.getMerc()) {
 			if (Config.MercWatch) { // Cast BO on merc so he doesn't just die again
 				print("MercWatch precast");
@@ -4381,9 +5294,11 @@ MainLoop:
 				Pather.useWaypoint(preArea);
 			}
 
+			print("ÿc2Townÿc0 :: reviveMerc ok");
 			return true;
 		}
 
+		print("ÿc8Townÿc0 :: reviveMerc failed — no merc");
 		return false;
 	},
 
@@ -4431,11 +5346,102 @@ MainLoop:
 		return true;
 	},
 
+	// Magic/rare 2os helm/armor/circlet cannot be runewords — pull to inv for sell
+	// Also bare white orbs kept as false "pending switch" junk
+	isFakeRwBase: function (item) {
+		var socks, tier;
+
+		if (!item || item.getFlag(0x4000000)) {
+			return false;
+		}
+
+		if (Item.hasTier(item) && Item.autoEquipCheck(item)) {
+			return false;
+		}
+
+		if (typeof Item.isPendingPlayerUpgrade === "function" && Item.isPendingPlayerUpgrade(item)) {
+			return false;
+		}
+
+		// Useless orb (no skill/FCR tier) — was banked while on staff
+		if (typeof Item.isOrbItem === "function" && Item.isOrbItem(item)) {
+			if (typeof Item.isPendingOrb === "function" && Item.isPendingOrb(item)) {
+				return false;
+			}
+
+			tier = (typeof NTIP !== "undefined" && NTIP.GetTier) ? (NTIP.GetTier(item) || 0) : 0;
+
+			if (tier < 12) {
+				return true;
+			}
+		}
+
+		if (item.quality < 4 || item.getItem()) {
+			return false;
+		}
+
+		if (item.itemType !== 37 && item.itemType !== 75 && item.itemType !== 3) {
+			return false;
+		}
+
+		socks = item.getStat(194) || 0;
+
+		if (typeof item.getStatEx === "function") {
+			socks = Math.max(socks, item.getStatEx(194) || 0);
+		}
+
+		return socks >= 2;
+	},
+
+	hasFakeRwBasesInStash: function () {
+		var item = me.getItem(-1, -1);
+
+		if (!item) {
+			return false;
+		}
+
+		do {
+			if (item.location === 7 && this.isFakeRwBase(item)) {
+				return true;
+			}
+		} while (item.getNext());
+
+		return false;
+	},
+
+	unstashFakeRwBases: function () {
+		var item, moved = 0;
+
+		item = me.getItem(-1, -1);
+
+		if (!item) {
+			return 0;
+		}
+
+		do {
+			if (item.location !== 7 || !this.isFakeRwBase(item)) {
+				continue;
+			}
+
+			if (Storage.Inventory.CanFit(item) && Storage.Inventory.MoveTo(item)) {
+				print("ÿc8Townÿc0 :: unstash junk (" + (item.name || item.classid) + ")");
+				moved += 1;
+			}
+		} while (item.getNext());
+
+		return moved;
+	},
+
 	// Same keep rules as stash() — used by needStash so we don't walk for junk that won't bank
 	shouldStashItem: function (item) {
 		var result, tier;
 
 		if (!item || !this.canStash(item)) {
+			return false;
+		}
+
+		// Never bank magic/rare socketed "fake" RW bases (only white/grey are runewordable)
+		if (this.isFakeRwBase(item)) {
 			return false;
 		}
 
@@ -4449,16 +5455,34 @@ MainLoop:
 		result = (Pickit.checkItem(item).result > 0 && Pickit.checkItem(item).result < 4) ||
 			Cubing.keepItem(item) || Runewords.keepItem(item) || CraftingSystem.keepItem(item);
 
+		// Empty RW bases must bank even if nip miss / result 0
+		if (!result && typeof Item !== "undefined" && Item.isProtectedRWBase && Item.isProtectedRWBase(item)) {
+			result = true;
+		}
+
+		// Tiered autoequip leftovers stay in inv — BUT empty Stealth/Lore bases match armor
+		// starter #tier == 1 and must still bank (ProtectRWBases blocks wear).
 		if (Config.AutoEquip && Pickit.checkItem(item).result === 1) {
 			tier = NTIP.GetTier(item);
 
 			if (tier > 0 && tier < 100) {
-				result = false;
+				if (!(typeof Item !== "undefined" && Item.isProtectedRWBase && Item.isProtectedRWBase(item))) {
+					result = false;
+				}
 			}
 		}
 
-		if (this.isCharmItem(item) && !this.isKeptCharm(item)) {
-			result = false;
+		if (this.isCharmItem(item)) {
+			// Never bank unid charms — ID + sell/keep in town first
+			if (!item.getFlag(0x10) || !this.isKeptCharm(item)) {
+				return false;
+			}
+		}
+
+		// Never bank unid magic/rare jewelry — ID first
+		if (!item.getFlag(0x10) && (item.itemType === 10 || item.itemType === 12) &&
+				(item.quality === 4 || item.quality === 6)) {
+			return false;
 		}
 
 		if (result || (typeof Pickit.isRuneItem === "function" && Pickit.isRuneItem(item))) {
@@ -4468,9 +5492,10 @@ MainLoop:
 		return false;
 	},
 
-	// One stash open: pull pots → bank keeps → gold → close
+	// One stash open: promote flawless→perfect → pull pots → bank → gold → close
+	// (rune/gem merge runs after Runewords.makeRunewords in doChores)
 	doStashVisit: function (stashGold) {
-		var needPots, needBank, i, items;
+		var needPots, needBank, needPromote, needCull, i, items;
 
 		if (stashGold === undefined) {
 			stashGold = true;
@@ -4478,8 +5503,11 @@ MainLoop:
 
 		needPots = this.hasStashedPotions();
 		needBank = this.needStash(stashGold);
+		needPromote = (typeof Pd2Stack !== "undefined" && typeof Pd2Stack.needsPromoteFlawless === "function" &&
+			Pd2Stack.needsPromoteFlawless());
+		needCull = this.hasFakeRwBasesInStash();
 
-		if (!needPots && !needBank) {
+		if (!needPots && !needBank && !needPromote && !needCull) {
 			print("ÿc2Townÿc0 :: stash skip (nothing to bank / no stashed pots)");
 			return true;
 		}
@@ -4492,7 +5520,19 @@ MainLoop:
 			return false;
 		}
 
-		print("ÿc2Townÿc0 :: stash once (pots=" + needPots + " bank=" + needBank + ")");
+		print("ÿc2Townÿc0 :: stash once (pots=" + needPots + " bank=" + needBank +
+			" promote=" + needPromote + " cull=" + needCull + ")");
+
+		// Pull magic/rare 2os "fake" RW bases out of stash so clearInventory can sell them
+		this.unstashFakeRwBases();
+
+		// PD2: flawless→perfect (stack + key) before banking
+		if (typeof Pd2Stack !== "undefined" && typeof Pd2Stack.promoteFlawlessAtStash === "function") {
+			Pd2Stack.promoteFlawlessAtStash();
+		}
+
+		// Rune/gem merge moved to after Runewords.makeRunewords() — avoid stacking
+		// socketables that make just peeled, and skip unstack→merge→unstack churn.
 
 		if (needPots) {
 			this.retrieveStashedPotions(true);
@@ -4563,7 +5603,10 @@ MainLoop:
 		}
 
 		for (i = 0; i < 5; i += 1) {
-			me.cancel();
+			// me.cancel with item on cursor drops on PD2 — never cancel while holding
+			if (!me.itemoncursor) {
+				me.cancel();
+			}
 
 			if (this.move("stash")) {
 				stash = getUnit(2, 267);
@@ -4788,12 +5831,21 @@ MainLoop:
 
 	clearScrolls: function () {
 		var i, items = me.getItems(),
-			shopped = false;
+			shopped = false,
+			code, hasCain;
+
+		hasCain = !!(me.getQuest(4, 0) || me.getQuest(4, 1) || me.act >= 2);
 
 		for (i = 0; !!items && i < items.length; i += 1) {
 			if (items[i].location === 3 && items[i].mode === 0 && items[i].itemType === 22) {
-				// Keep TP/ID scrolls until we have tomes (and always useful early)
-				if (items[i].code === "tsc" || items[i].code === "isc") {
+				code = items[i].code ? String(items[i].code).toLowerCase() : "";
+
+				// Keep loose TP scrolls (fill tome). ID scrolls only pre-Cain.
+				if (code === "tsc") {
+					continue;
+				}
+
+				if (code === "isc" && !hasCain) {
 					continue;
 				}
 
@@ -4835,23 +5887,36 @@ MainLoop:
 			return false;
 		}
 
+		// Never sell empty Stealth/Lore/Leaf bases we're still banking for RW
+		if (typeof Item !== "undefined" && Item.isProtectedRWBase && Item.isProtectedRWBase(item)) {
+			return false;
+		}
+
+		if (typeof Runewords !== "undefined" && Runewords.keepItem && Runewords.keepItem(item)) {
+			return false;
+		}
+
 		code = item.code ? String(item.code).toLowerCase() : "";
 		kind = (typeof this.potionKind === "function") ? this.potionKind(item) : false;
 
+		// Never sell/drop hp/mp/rv/stamina — potionKind first (PD2 type/code can disagree)
+		if (kind === "hp" || kind === "mp" || kind === "rv" || kind === "vps") {
+			return false;
+		}
+
 		// Sell antidote / thawing leftovers (never keep after field pick / old buys)
-		if (kind === "yps" || kind === "wms" || item.itemType === 80 || item.itemType === 81 ||
-				code === "yps" || code === "wms") {
+		if (kind === "yps" || kind === "wms" ||
+				((item.itemType === 80 || item.itemType === 81 || code === "yps" || code === "wms") && !kind)) {
 			if (!this.ensureShopOpen("sellToxPot")) {
-				// Shop fail — drop so they don't clog inv
+				// Shop fail — drink tox rather than ground-drop
 				try {
 					if (this.isShopOpen() || getUIFlag(0x08)) {
 						me.cancel();
 						delay(100 + me.ping);
 					}
 
-					Misc.itemLogger("Dropped", item, "toxPot");
-					item.drop();
-				} catch (eDropTox) {}
+					item.interact();
+				} catch (eDrinkTox) {}
 
 				return true;
 			}
@@ -4866,15 +5931,18 @@ MainLoop:
 				try {
 					me.cancel();
 					delay(100 + me.ping);
-					item.drop();
-				} catch (eDrop2) {}
+					item.interact();
+				} catch (eDrink2) {}
 
 				return true;
 			}
 		}
 
-		// Never sell/drop hp/mp/rv/stamina / scrolls / tomes
-		if ([76, 77, 78, 79].indexOf(item.itemType) > -1 ||
+		// Never sell/drop scrolls / tomes (and leftover type checks)
+		// Exception: ID scrolls after Cain — Cain IDs, no need to keep isc
+		if (code === "isc" && (me.getQuest(4, 0) || me.getQuest(4, 1) || me.act >= 2)) {
+			// fall through to sell below
+		} else if ([76, 77, 78, 79].indexOf(item.itemType) > -1 ||
 				code.indexOf("hp") === 0 || code.indexOf("mp") === 0 || code.indexOf("rv") === 0 ||
 				code === "vps" ||
 				code === "tsc" || code === "isc" || code === "tbk" || code === "ibk" ||
@@ -4922,10 +5990,21 @@ MainLoop:
 
 	// True if this inv item should be sold this chores pass
 	isTownJunk: function (item) {
-		var result;
+		var result, kind, best;
 
 		if (!item || item.location !== 3) {
 			return false;
+		}
+
+		// potionKind first — PD2 itemType/code can disagree; never sell hp/mp/rv/stamina
+		kind = this.potionKind(item);
+
+		if (kind === "hp" || kind === "mp" || kind === "rv" || kind === "vps") {
+			return false;
+		}
+
+		if (kind === "yps" || kind === "wms") {
+			return true;
 		}
 
 		if ([18, 41, 76, 77, 78, 79].indexOf(item.itemType) > -1) {
@@ -4944,7 +6023,16 @@ MainLoop:
 
 		if (item.code && (item.code.indexOf("hp") === 0 || item.code.indexOf("mp") === 0 ||
 				item.code.indexOf("rv") === 0 || item.code === "vps" ||
-				item.code === "tsc" || item.code === "isc" || item.code === "tbk" || item.code === "ibk")) {
+				item.code === "tsc" || item.code === "tbk" || item.code === "ibk")) {
+			return false;
+		}
+
+		// ID scrolls: keep only before Cain; sell after (Cain IDs)
+		if (item.code && String(item.code).toLowerCase() === "isc") {
+			if (me.getQuest(4, 0) || me.getQuest(4, 1) || me.act >= 2) {
+				return true;
+			}
+
 			return false;
 		}
 
@@ -4960,9 +6048,34 @@ MainLoop:
 			return false;
 		}
 
+		// Empty Config.Runewords bases (Stealth Breast/Light Plate, Lore, Leaf, …) — never sell
+		if (typeof Item !== "undefined" && Item.isProtectedRWBase && Item.isProtectedRWBase(item)) {
+			return false;
+		}
+
 		// Real player autoequip upgrade only
 		if (Item.hasTier(item) && Item.autoEquipCheck(item)) {
 			return false;
+		}
+
+		// Better than equipped but can't wear yet (str/lvl/dex) — keep, never sell
+		if (typeof Item.isPendingPlayerUpgrade === "function" && Item.isPendingPlayerUpgrade(item)) {
+			return false;
+		}
+
+		// Magic/rare socketed helm/armor/circlet — not RW-able; sell unless upgrade (above)
+		// Bare white orbs (no skill/FCR) — same
+		if (this.isFakeRwBase(item)) {
+			return true;
+		}
+
+		// Best pending orb while on 2H staff — keep for switch
+		if (typeof Item.isPendingOrb === "function" && Item.isPendingOrb(item)) {
+			if (Item.isBestPendingOrb(item)) {
+				return false;
+			}
+
+			return true; // inferior pending orbs — sell
 		}
 
 		// Best pending shield (2H staff era) — keep/stash, never sell
@@ -4975,28 +6088,82 @@ MainLoop:
 			return true; // inferior pending shields — sell
 		}
 
+		// Merc upgrades FIRST — player #tier armor/helm/gloves and Act1 bows were sold
+		// before this check (tiered-leftover + hard bow sell), so merc never got them.
+		if (typeof Item.autoEquipMercCheck === "function" && Item.autoEquipMercCheck(item)) {
+			return false;
+		}
+
+		// Broken ethereal: NPC can't repair. Keep for Ort/Ral if CubeRepair; else sell.
+		if (item.getFlag(0x400000) && typeof Item.isBroken === "function" && Item.isBroken(item)) {
+			return !Config.CubeRepair;
+		}
+
 		// Tiered leftovers (extra amulets/rings/etc. that aren't upgrades) — sell
 		if (Config.AutoEquip && NTIP.GetTier(item) > 0 && !Item.autoEquipCheck(item)) {
 			return true;
 		}
 
-		// Sorc: bows/xbows are never kept in inv (PD2 amazon bow = 86, not 85 grand charm)
+		// Sorc: bows/xbows — sell only when merc does not want them (check already above)
 		if ([27, 35, 86].indexOf(item.itemType) > -1) {
 			return true;
 		}
 
-		// Leftover merc gear (not an upgrade) — sell. Pending merc upgrades stay.
+		// Junk circlets — sell unless player upgrade / empty Lore base (already kept above)
+		if (item.itemType === 75) {
+			if (typeof Item !== "undefined" && Item.isProtectedRWBase && Item.isProtectedRWBase(item)) {
+				return false;
+			}
+
+			return true;
+		}
+
+		// Paladin-only shields — sell on necro/sorc/etc.
+		if (me.classid !== 3 && typeof Item.isAuricShield === "function" && Item.isAuricShield(item)) {
+			return true;
+		}
+
+		// Melee poisonstrike: FCR-only rings/amulets — sell
+		if (typeof Item.isMeleeJunkFcrJewelry === "function" && Item.isMeleeJunkFcrJewelry(item)) {
+			return true;
+		}
+
+		// Past lvl 18: sell leftover chipped/flawed/normal gems
+		if (me.charlvl > 18 && typeof Pickit !== "undefined" && Pickit.isLowTierGem && Pickit.isLowTierGem(item)) {
+			return true;
+		}
+
+		// Caster: axes / barb helms / javelins that somehow landed in inv
+		if (typeof Item !== "undefined") {
+			if (typeof Item.isCasterJunkAxe === "function" && Item.isCasterJunkAxe(item)) {
+				return true;
+			}
+
+			if (typeof Item.isBarbHelm === "function" && Item.isBarbHelm(item) && me.classid !== 4) {
+				return true;
+			}
+		}
+
+		if (item.itemType === 44 || item.itemType === 88) {
+			return true;
+		}
+
+		// Wrong-act merc weapons in inv — sell (not keep for “maybe later”)
+		if ([27, 33, 34, 35, 85, 86].indexOf(item.itemType) > -1) {
+			if (!(typeof Item !== "undefined" && typeof Item.autoEquipMercCheck === "function" &&
+					Item.autoEquipMercCheck(item))) {
+				return true;
+			}
+		}
+
+		// Leftover merc gear (not an upgrade) — sell
 		if (typeof Item.isMercInvLeftover === "function" && Item.isMercInvLeftover(item)) {
 			return true;
 		}
 
-		if (typeof Item.autoEquipMercCheck === "function" && Item.autoEquipMercCheck(item)) {
-			return false;
-		}
-
-		// Antidote (80) / thawing (81) — sell leftovers (Andy/Duriel buy fresh when needed)
-		if (item.itemType === 80 || item.itemType === 81 ||
-				(item.code && (String(item.code).toLowerCase() === "yps" || String(item.code).toLowerCase() === "wms"))) {
+		// Antidote (80) / thawing (81) — sell leftovers only when not a known consumable pot
+		if (!kind && (item.itemType === 80 || item.itemType === 81 ||
+				(item.code && (String(item.code).toLowerCase() === "yps" || String(item.code).toLowerCase() === "wms")))) {
 			return true;
 		}
 
@@ -5005,17 +6172,30 @@ MainLoop:
 			return !this.isKeptCharm(item);
 		}
 
-		// Arrows/bolts: sell whites/magic leftovers; keep rare/unique
+		// Arrows/bolts: sell whites/magic leftovers; keep rare/unique (merc upgrades kept above)
 		if (item.itemType === 5 || item.itemType === 6) {
 			return item.quality !== 6 && item.quality !== 7;
 		}
 
 		result = Pickit.checkItem(item).result;
 
-		// Nip "keep" that isn't autoequip upgrade / cubing → still sell if junk quality
-		// (never quest — already returned above)
-		if (result === 1 && !Item.hasTier(item) && !Cubing.keepItem(item) && !Runewords.keepItem(item)) {
+		// Nip "keep" that isn't autoequip upgrade / cubing / RW base → still sell if junk quality
+		// (never quest — already returned above). Without this skip, 2os Stealth/Lore bases (no #tier)
+		// were sold as soon as vendor value > 50.
+		if (result === 1 && !Item.hasTier(item) && !Cubing.keepItem(item) && !Runewords.keepItem(item) &&
+				!(typeof Item !== "undefined" && Item.isProtectedRWBase && Item.isProtectedRWBase(item)) &&
+				!(typeof Runewords !== "undefined" && Runewords.wantBaseForRunes && Runewords.wantBaseForRunes(item))) {
 			if (item.quality >= 4 || item.getItemCost(1) > 50) {
+				return true;
+			}
+		}
+
+		// Worse empty Insight poles (we already bank a better one) — sell
+		if (typeof Runewords !== "undefined" && Runewords.isConfiguredInsightBase &&
+				Runewords.isConfiguredInsightBase(item) && Runewords.insightBaseScore(item) > 0) {
+			best = Runewords.getBestEmptyInsightBase();
+
+			if (best && best.gid !== item.gid && !(Runewords.wantInsightBase && Runewords.wantInsightBase(item))) {
 				return true;
 			}
 		}
@@ -5043,8 +6223,9 @@ MainLoop:
 				code = item.code ? String(item.code).toLowerCase() : "";
 				kind = this.potionKind(item);
 
-				if (kind === "yps" || kind === "wms" || item.itemType === 80 || item.itemType === 81 ||
-						code === "yps" || code === "wms") {
+				// Only real tox — never match by itemType alone (can false-hit mana/hp on PD2)
+				if (kind === "yps" || kind === "wms" ||
+						((code === "yps" || code === "wms") && kind !== "hp" && kind !== "mp" && kind !== "rv" && kind !== "vps")) {
 					list.push(copyUnit(item));
 				}
 			} while (item.getNext());
@@ -5101,20 +6282,19 @@ MainLoop:
 		return n;
 	},
 
-	clearInventory: function () {
+	clearInventory: function (keepShopOpen) {
 		var i, item,
 			items = [],
 			junk = [];
 
 		this.checkQuestItems(); // only golden bird quest for now
 
-		// Return potions to belt (shop/stash must be closed)
-		me.cancel();
-		delay(50 + me.ping);
-
-		this.logPotionState("clearInventory start");
-
-		this.refillBeltIfNeeded();
+		// Belt moves need shop closed — skip when already inside chores vendor pass
+		if (!keepShopOpen) {
+			me.cancel();
+			delay(50 + me.ping);
+			this.refillBeltIfNeeded();
+		}
 
 		// Sell (prefer) / drink inv pots above buffer (belt already filled)
 		this.cullExcessPotions();
@@ -5122,9 +6302,14 @@ MainLoop:
 		// Antidote / thawing — never keep as field loot (shop prep buys fresh)
 		this.flushToxPots();
 
-		// Collect junk, then one shop visit — sell everything worth gold
+		// Collect junk, then sell (reuse open shop when keepShopOpen)
 		this.charmKeepList = null;
-		this.identifyAllCharms();
+
+		if (!keepShopOpen) {
+			this.identifyAllCharms(true);
+		}
+
+		this.trimCharmInventory(junk);
 		this.applyCharmInventoryLock();
 		items = Storage.Inventory.Compare(Config.Inventory);
 
@@ -5143,7 +6328,10 @@ MainLoop:
 
 		if (junk.length) {
 			print("ÿc2Townÿc0 :: Selling " + junk.length + " junk item(s)");
-			this.ensureShopOpen("clearInventory");
+
+			if (!keepShopOpen || !this.isShopOpen()) {
+				this.ensureShopOpen("clearInventory");
+			}
 
 			for (i = 0; i < junk.length; i += 1) {
 				item = me.getItem(-1, -1, junk[i].gid);
@@ -5228,6 +6416,11 @@ MainLoop:
 			do {
 				// PD2: 27 bow, 35 xbow, 86 amazon bow — NOT 85 (grand charm)
 				if (item.location === 3 && [27, 35, 86].indexOf(item.itemType) > -1 && !seen[item.gid]) {
+					if (typeof Item !== "undefined" && typeof Item.autoEquipMercCheck === "function" &&
+							Item.autoEquipMercCheck(item)) {
+						continue; // pending rogue weapon
+					}
+
 					gids.push(item.gid);
 					seen[item.gid] = true;
 				}
@@ -5288,6 +6481,11 @@ MainLoop:
 
 				if (!item || item.location !== 3) {
 					continue; // equipped onto merc
+				}
+
+				// Still needed but equip failed this pass — keep for next autoEquipMerc
+				if (typeof Item.autoEquipMercCheck === "function" && Item.autoEquipMercCheck(item)) {
+					continue;
 				}
 			}
 

@@ -73,7 +73,12 @@ function Duriel() {
 	if (unit) {
 		for (i = 0; i < 3; i += 1) {
 			if (me.area === unit.area) {
-				Skill.cast(43, 0, unit);
+				// Duriel orifice — only allowed non-pickit TK use
+				if (typeof Skill.castTelekinesis === "function") {
+					Skill.castTelekinesis(unit);
+				} else if (me.classid === 1) {
+					Skill.cast(43, 0, unit);
+				}
 			}
 
 			if (me.area === 73) {

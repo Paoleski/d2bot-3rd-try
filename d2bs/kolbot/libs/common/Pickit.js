@@ -41,8 +41,9 @@ var Pickit = {
 			return true;
 		}
 
-		// PD2 types: 75=rune, 138=runs, 149=rung. Keep 74 for LoD safety.
-		if ([74, 75, 138, 149].indexOf(unit.itemType) > -1) {
+		// PD2 types: 75=rune, 137/138=runs, 149=rung, 164–196=r01g–r33g. Keep 74 for LoD safety.
+		if ([74, 75, 137, 138, 149].indexOf(unit.itemType) > -1 ||
+				(unit.itemType >= 164 && unit.itemType <= 196)) {
 			return true;
 		}
 
@@ -112,16 +113,44 @@ var Pickit = {
 	// 4 - Pickup to sell (triggered when low on gold)
 	checkItem: function (unit) {
 		var rval = NTIP.CheckItem(unit, false, true),
-			code;
+			code, n, scroll;
 
-		// NEVER pick Identify scrolls (Cain IDs for us). Match by code only —
-		// live PD2 rvs uses classid 530 (old LoD isc id collision).
+		// Identify scrolls: skip once Cain can ID. Before Cain, keep a couple for charms/gear.
 		code = unit && unit.code ? String(unit.code).toLowerCase() : "";
 
 		if (code === "isc") {
+			if (me.getQuest(4, 0) || me.getQuest(4, 1)) {
+				return {
+					result: 0,
+					line: null
+				};
+			}
+
+			n = 0;
+			scroll = me.getItem("isc");
+
+			if (!scroll && typeof NTIPAliasClassID !== "undefined" && NTIPAliasClassID.isc) {
+				scroll = me.getItem(NTIPAliasClassID.isc);
+			}
+
+			if (scroll) {
+				do {
+					if (scroll.location === 3) {
+						n += 1;
+					}
+				} while (scroll.getNext());
+			}
+
+			if (n >= 2) {
+				return {
+					result: 0,
+					line: null
+				};
+			}
+
 			return {
-				result: 0,
-				line: null
+				result: 1,
+				line: "early-isc"
 			};
 		}
 
@@ -199,6 +228,53 @@ var Pickit = {
 			};
 		}
 
+		// Fire Leaf bases: ignore nip keep once a better skill orb exists
+		if (rval.result === 1 && typeof Runewords !== "undefined" &&
+				Runewords.hasBetterThanLeafOrb && Runewords.hasBetterThanLeafOrb() &&
+				Runewords.isConfiguredLeafBase && Runewords.isConfiguredLeafBase(unit)) {
+			rval = {
+				result: 0,
+				line: null
+			};
+		}
+
+		// Stealth bases: ignore nip keep once one Stealth is finished
+		if (rval.result === 1 && typeof Runewords !== "undefined" &&
+				Runewords.hasCompletedArmorRuneword && Runewords.hasCompletedArmorRuneword() &&
+				Runewords.isStealthRecipe && unit.quality <= 3 && !unit.getItem() &&
+				(unit.getStat(194) || 0) === 2 && (unit.classid === 334 || unit.classid === 341)) {
+			rval = {
+				result: 0,
+				line: null
+			};
+		}
+
+		// Insight poles: ignore nip keep if we already have Insight, or base is worse than banked
+		if (rval.result === 1 && typeof Runewords !== "undefined" &&
+				Runewords.isConfiguredInsightBase && Runewords.isConfiguredInsightBase(unit)) {
+			if ((Runewords.hasCompletedInsight && Runewords.hasCompletedInsight()) ||
+					(Runewords.wantInsightBase && !Runewords.wantInsightBase(unit) &&
+						Runewords.getBestEmptyInsightBase && Runewords.getBestEmptyInsightBase())) {
+				rval = {
+					result: 0,
+					line: null
+				};
+			}
+		}
+
+		// Lore helms: ignore nip keep if Lore done, or base is lower def than banked
+		if (rval.result === 1 && typeof Runewords !== "undefined" &&
+				Runewords.isConfiguredLoreBase && Runewords.isConfiguredLoreBase(unit)) {
+			if ((Runewords.hasCompletedLoreHelm && Runewords.hasCompletedLoreHelm()) ||
+					(Runewords.wantLoreBase && !Runewords.wantLoreBase(unit) &&
+						Runewords.getBestEmptyLoreBase && Runewords.getBestEmptyLoreBase())) {
+				rval = {
+					result: 0,
+					line: null
+				};
+			}
+		}
+
 		// Potions: let canPick decide belt/buffer — don't rely on nip classids alone (PD2 shifts)
 		if (rval.result === 0 && this.isPotion(unit)) {
 			return {
@@ -215,7 +291,7 @@ var Pickit = {
 			};
 		}
 
-		// Rare/set/unique jewelry: always keep (early rares miss nip floors + sell gold threshold)
+		// Rare/set/unique jewelry: set/unique/crafted always; rares need nip floors
 		if ((rval.result === 0 || rval.result === -1) && this.isKeepJewelry(unit)) {
 			return {
 				result: 1,
@@ -223,11 +299,19 @@ var Pickit = {
 			};
 		}
 
-		// Leveling gems (chipped→perfect): always keep — nip name OR-lines / PD2 stacks were easy to miss
-		if ((rval.result === 0 || rval.result === -1) && this.isLevelingGem(unit)) {
+		// Leveling gems: chipped→normal only while leveling; flawless+ always
+		if ((rval.result === 0 || rval.result === -1) && this.isWantedGem(unit)) {
 			return {
 				result: 1,
 				line: "gem"
+			};
+		}
+
+		// Nip matched a low gem we no longer want — drop the keep
+		if (rval.result === 1 && this.isLevelingGem(unit) && !this.isWantedGem(unit)) {
+			rval = {
+				result: 0,
+				line: null
 			};
 		}
 
@@ -259,12 +343,35 @@ var Pickit = {
 		return rval;
 	},
 
-	// Vendor bait — valuables always; white/blue only when low gold AND high vendor value
+		// Vendor bait — valuables always; white/blue only when low gold AND high vendor value
 	isSellCandidate: function (unit) {
 		var cost, size, minPerSq, minTotal, junkMin, q, lowGold;
 
 		if (!unit || Town.ignoredItemTypes.indexOf(unit.itemType) > -1) {
 			return false;
+		}
+
+		// Never vacuum caster axes / barb helms / javelins as gold bait
+		if (typeof Item !== "undefined") {
+			if (typeof Item.isCasterJunkAxe === "function" && Item.isCasterJunkAxe(unit)) {
+				return false;
+			}
+
+			if (typeof Item.isBarbHelm === "function" && Item.isBarbHelm(unit)) {
+				return false;
+			}
+		}
+
+		if (unit.itemType === 44 || unit.itemType === 88) {
+			return false;
+		}
+
+		// Wrong-act merc weapons — never sell-bait (need the right merc or leave on ground)
+		if ([27, 33, 34, 35, 85, 86].indexOf(unit.itemType) > -1) {
+			if (!(typeof Item !== "undefined" && typeof Item.autoEquipMercCheck === "function" &&
+					Item.autoEquipMercCheck(unit))) {
+				return false;
+			}
 		}
 
 		if (typeof QuestItems !== "undefined" && QuestItems.isQuestItem(unit)) {
@@ -358,19 +465,56 @@ var Pickit = {
 			return true;
 		}
 
-		// Chipped→perfect gems always (cube ladder)
+		// Gems: flawless+ always; chipped/flawed/normal only while charlvl <= 18
 		if (this.isLevelingGem(unit)) {
-			return true;
+			return this.isWantedGem(unit);
+		}
+
+		// Sorc/necro: axes (Military Pick etc.) — never pick, never sell-bait
+		if (typeof Item !== "undefined" && typeof Item.isCasterJunkAxe === "function" && Item.isCasterJunkAxe(unit)) {
+			return false;
+		}
+
+		// Barb helms — only Act5 barb merc (or barb player); never sorc sell-bait
+		if (typeof Item !== "undefined" && typeof Item.isBarbHelm === "function" && Item.isBarbHelm(unit)) {
+			if (me.classid === 4 && Config.AutoEquip && Item.autoEquipCheck(unit)) {
+				return true;
+			}
+
+			if (typeof Item.autoEquipMercCheck === "function" && Item.autoEquipMercCheck(unit)) {
+				return true;
+			}
+
+			return false;
+		}
+
+		// Javelins/glaives — never (merc uses spear/polearm; player casters don't)
+		if (unit.itemType === 44 || unit.itemType === 88) {
+			return false;
 		}
 
 		if (!status || status.result === 0 || status.result === false || status.result === null || status.result === undefined) {
 			return false;
 		}
 
-		// NEVER pick Identify scrolls (code only — 530 is rvs here)
+		// Identify scrolls: allow when checkItem marked early-isc (pre-Cain)
 		code = unit && unit.code ? String(unit.code).toLowerCase() : "";
 
 		if (code === "isc") {
+			return !!(status && status.line === "early-isc");
+		}
+
+		// Merc-only weapons BEFORE generic result-4 sell — never vacuum xbow/spear/bow without the right merc
+		// Bows/xbows → Act1 Rogue. Spears/polearms → Act2 Desert.
+		if ([27, 33, 34, 35, 85, 86].indexOf(unit.itemType) > -1) {
+			if (Config.AutoEquip && Item.autoEquipCheck(unit)) {
+				return true;
+			}
+
+			if (typeof Item.autoEquipMercCheck === "function" && Item.autoEquipMercCheck(unit)) {
+				return true;
+			}
+
 			return false;
 		}
 
@@ -397,27 +541,6 @@ var Pickit = {
 			return false;
 		}
 
-		// Merc-only weapons: keep only if player AutoEquip wants them OR the hired merc can use them.
-		// Bows/xbows → Act1 Rogue. Spears (pike)/polearms/javelins → Act2 Desert.
-		// Without this, Act1 hoards spears from leveling_merc.nip (no #tier → always keep).
-		if ([27, 33, 34, 35, 44, 85, 86].indexOf(unit.itemType) > -1) {
-			if (Config.AutoEquip && Item.autoEquipCheck(unit)) {
-				return true;
-			}
-
-			if (typeof Item.autoEquipMercCheck === "function" && Item.autoEquipMercCheck(unit)) {
-				return true;
-			}
-
-			if (status.result === 4 || this.isSellCandidate(unit)) {
-				status.result = 4;
-				status.line = "sell";
-				return true;
-			}
-
-			return false;
-		}
-
 		// Merc-slot armor (body/helm/boots/etc.): only pick if better for player OR merc.
 		// leveling_merc.nip has no #tier — without this we hoard worse armor forever.
 		if (typeof Item !== "undefined" && typeof Item.getMercBodyLoc === "function" && Item.getMercBodyLoc(unit)) {
@@ -425,7 +548,25 @@ var Pickit = {
 				return true;
 			}
 
+			// Player upgrade we can't wear yet (str/lvl) — keep, don't demote to vendor bait
+			if (typeof Item.isPendingPlayerUpgrade === "function" && Item.isPendingPlayerUpgrade(unit)) {
+				return true;
+			}
+
 			if (typeof Item.autoEquipMercCheck === "function" && Item.autoEquipMercCheck(unit)) {
+				return true;
+			}
+
+			// Empty Stealth/Lore RW bases (white/grey) — keep even when not an equip upgrade
+			if (Item.isProtectedRWBase && Item.isProtectedRWBase(unit)) {
+				return true;
+			}
+
+			if (typeof Runewords !== "undefined" &&
+					((Runewords.wantLoreShopBase && Runewords.wantLoreShopBase(unit)) ||
+						(Runewords.wantStealthShopBase && Runewords.wantStealthShopBase(unit)) ||
+						(Runewords.wantSpiritShopBase && Runewords.wantSpiritShopBase(unit)) ||
+						(Runewords.wantBaseForRunes && Runewords.wantBaseForRunes(unit)))) {
 				return true;
 			}
 
@@ -447,10 +588,66 @@ var Pickit = {
 			return true;
 		}
 
+		if (typeof Item.isPendingPlayerUpgrade === "function" && Item.isPendingPlayerUpgrade(unit)) {
+			return true;
+		}
+
+		// Sorc on 2H staff — pick best orb (type/tier floors otherwise leave them on the ground)
+		if (typeof Item.isPendingOrb === "function" && Item.isPendingOrb(unit)) {
+			if (Item.isBestPendingOrb(unit)) {
+				return true;
+			}
+
+			if (this.isSellCandidate(unit) &&
+					!(typeof QuestItems !== "undefined" && QuestItems.isQuestItem(unit))) {
+				status.result = 4;
+				status.line = "sell";
+				return true;
+			}
+
+			return false;
+		}
+
 		// Tiered shield while on 2H staff — pick best for stash until we find an orb/1H
 		if (typeof Item.isPendingShield === "function" && Item.isPendingShield(unit)) {
 			if (Item.isBestPendingShield(unit)) {
 				Item.rememberPendingShield(unit);
+				return true;
+			}
+
+			if (this.isSellCandidate(unit) &&
+					!(typeof QuestItems !== "undefined" && QuestItems.isQuestItem(unit))) {
+				status.result = 4;
+				status.line = "sell";
+				return true;
+			}
+
+			return false;
+		}
+
+		// Circlets: keep player/merc upgrades, empty Lore RW bases; else sell junk (not merc MaxQuantity hoard)
+		if (unit.itemType === 75) {
+			if (Config.AutoEquip && Item.autoEquipCheck(unit)) {
+				return true;
+			}
+
+			if (typeof Item.isPendingPlayerUpgrade === "function" && Item.isPendingPlayerUpgrade(unit)) {
+				return true;
+			}
+
+			if (typeof Item.autoEquipMercCheck === "function" && Item.autoEquipMercCheck(unit)) {
+				return true;
+			}
+
+			if (typeof Item !== "undefined" && Item.isProtectedRWBase && Item.isProtectedRWBase(unit)) {
+				return true;
+			}
+
+			if (typeof Runewords !== "undefined" &&
+					((Runewords.wantLoreShopBase && Runewords.wantLoreShopBase(unit)) ||
+						(Runewords.wantSpiritShopBase && Runewords.wantSpiritShopBase(unit)) ||
+						(Runewords.wantBaseForRunes && Runewords.wantBaseForRunes(unit)) ||
+						(Runewords.keepItem && Runewords.keepItem(unit)))) {
 				return true;
 			}
 
@@ -509,9 +706,10 @@ var Pickit = {
 		return unit.classid === 661;
 	},
 
-	// Ring (10) / amulet (12) — rare/set/unique/crafted always keep (cheap rares fail sell floor)
+	// Ring (10) / amulet (12) — set/unique/crafted always; rares need nip/AutoEquip floors
 	isKeepJewelry: function (unit) {
-		return !!(unit && (unit.itemType === 10 || unit.itemType === 12) && unit.quality >= 5 && unit.quality <= 8);
+		return !!(unit && (unit.itemType === 10 || unit.itemType === 12) &&
+			(unit.quality === 5 || unit.quality === 7 || unit.quality === 8));
 	},
 
 	// Gems for leveling cube recipes — match by code (stable); include PD2 stacks (*s)
@@ -542,6 +740,66 @@ var Pickit = {
 		}
 
 		return false;
+	},
+
+	// Chipped / flawed / normal (cube ladder) — stop field-picking after lvl 18
+	isLowTierGem: function (unit) {
+		var code, t, name;
+
+		if (!unit || !this.isLevelingGem(unit)) {
+			return false;
+		}
+
+		code = unit.code ? String(unit.code).toLowerCase() : "";
+
+		// Flawless / perfect codes — not low
+		if (/^g[lpz][vybgrw]s?$/.test(code) || code === "gzv" || code === "gzvs" ||
+				code === "skl" || code === "skls" || code === "skz" || code === "skzs") {
+			return false;
+		}
+
+		// Chipped / flawed / normal codes
+		if (/^g[cfs][vybgrw]s?$/.test(code) || code === "skc" || code === "skcs" ||
+				code === "skf" || code === "skfs" || code === "sku" || code === "skus") {
+			return true;
+		}
+
+		t = unit.itemType;
+
+		// gem0–2 = chipped/flawed/standard; stackgem (128) treated as low
+		if (t === 93 || t === 94 || t === 95 || t === 128) {
+			return true;
+		}
+
+		// flawlessgem / perfectgem / stackflawless / stackperfect
+		if (t === 96 || t === 97 || t === 129 || t === 130) {
+			return false;
+		}
+
+		name = unit.name ? String(unit.name).toLowerCase().replace(/ÿc[0-9a-z]/gi, "") : "";
+
+		if (/flawless|perfect/.test(name)) {
+			return false;
+		}
+
+		if (/chipped|flawed/.test(name) || (/\bgem\b/.test(name) && !/flawless|perfect/.test(name))) {
+			return true;
+		}
+
+		return false;
+	},
+
+	// Flawless+ always; low gems only while charlvl <= 18
+	isWantedGem: function (unit) {
+		if (!this.isLevelingGem(unit)) {
+			return false;
+		}
+
+		if (me.charlvl > 18 && this.isLowTierGem(unit)) {
+			return false;
+		}
+
+		return true;
 	},
 
 	isPotion: function (unit) {
@@ -676,8 +934,8 @@ var Pickit = {
 				// Potions / sell junk skip autoEquipCheck (tiered nip otherwise leaves blues/yellows on ground)
 				// Potions: allow when canPick+want even if nip/check result was 0 (PD2 id shifts)
 				if ((status.result || this.isPotion(pickList[0]) || this.isRejuv(pickList[0]) ||
-						this.isJewel(pickList[0]) || this.isKeepJewelry(pickList[0]) || this.isLevelingGem(pickList[0])) &&
-						this.canPick(pickList[0]) && this.wantToPick(pickList[0], status)) {
+						this.isJewel(pickList[0]) || this.isKeepJewelry(pickList[0]) || this.isWantedGem(pickList[0])) &&
+					this.canPick(pickList[0]) && this.wantToPick(pickList[0], status)) {
 					// Override canFit for scrolls, potions and gold
 					canFit = Storage.Inventory.CanFit(pickList[0]) || [4, 22, 76, 77, 78].indexOf(pickList[0].itemType) > -1 || this.isPotion(pickList[0]);
 
@@ -772,6 +1030,57 @@ var Pickit = {
 		return false;
 	},
 
+	// PD2 Telekinesis pickup ONLY: gold, scrolls, keys, potions (not arrows/bolts; not near packs)
+	// Gate: lvl 14+ (early game — walk-pick only; Duriel orifice TK is separate)
+	canTelekinesisPick: function (unit) {
+		var t, code, dist, mon;
+
+		if (!unit || !Config.UseTelekinesis || me.classid !== 1 || me.charlvl < 14) {
+			return false;
+		}
+
+		if (!(me.getSkill(43, 1) || me.getSkill(43, 0) || me.getStat(97, 43))) {
+			return false;
+		}
+
+		t = unit.itemType;
+		code = unit.code ? String(unit.code).toLowerCase() : "";
+
+		// PD2: TK no longer picks arrows/bolts
+		if (t === 5 || t === 6) {
+			return false;
+		}
+
+		// Gold (4), scroll (22), key (41), hp/mp/rv/stamina/antidote/thawing (76–81)
+		if (!(t === 4 || t === 22 || t === 41 || (t >= 76 && t <= 81) ||
+				code === "key" || code === "tsc" || code === "isc" ||
+				code.indexOf("hp") === 0 || code.indexOf("mp") === 0 || code.indexOf("rv") === 0 ||
+				code === "vps" || code === "yps" || code === "wms" ||
+				unit.classid === 523 || unit.classid === 540)) {
+			return false;
+		}
+
+		dist = getDistance(me, unit);
+
+		// Close enough to walk-click — skip TK; too far / blocked — skip
+		if (dist <= 3 || dist >= 25 || checkCollision(me, unit, 0x4)) {
+			return false;
+		}
+
+		// PD2 TK deals lightning + knockback — don't cast near monsters (looks like attacking)
+		mon = getUnit(1);
+
+		if (mon) {
+			do {
+				if (Attack.checkMonster(mon) && getDistance(mon, unit) < 10) {
+					return false;
+				}
+			} while (mon.getNext());
+		}
+
+		return true;
+	},
+
 	pickItem: function (unit, status, keptLine) {
 		if (!unit) {
 			return false;
@@ -788,8 +1097,7 @@ var Pickit = {
 			this.name = rawName.replace(/ÿc[0-9a-z]/gi, "").replace(/^\s+|\s+$/g, "");
 			this.color = Pickit.itemColor(unit);
 			this.gold = unit.getStat(14);
-			this.useTk = Config.UseTelekinesis && me.classid === 1 && me.getSkill(43, 1) && (this.type === 4 || this.type === 22 || (this.type >= 76 && this.type <= 81)) &&
-						getDistance(me, unit) > 5 && getDistance(me, unit) < 20 && !checkCollision(me, unit, 0x4);
+			this.useTk = Pickit.canTelekinesisPick(unit);
 			this.picked = false;
 		}
 
@@ -838,7 +1146,11 @@ MainLoop:
 			}
 
 			if (stats.useTk) {
-				Skill.cast(43, 0, item);
+				if (typeof Skill.castTelekinesis === "function") {
+					Skill.castTelekinesis(item);
+				} else {
+					Skill.cast(43, 0, item);
+				}
 			} else {
 				if (getDistance(me, item) > (Config.FastPick === 2 && i < 1 ? 6 : 4) || checkCollision(me, item, 0x1)) {
 					if (Pather.useTeleport) {
@@ -880,7 +1192,7 @@ MainLoop:
 
 					if (code === "tsc" || code === "isc") {
 						print("ÿc7Picked up " + stats.color + stats.name + " ÿc7(" +
-							Town.checkScrolls(code === "tsc" ? "tbk" : "ibk") + "/20)");
+							Town.scrollFillCount(code) + "/20)");
 
 						return true;
 					}
@@ -1103,9 +1415,13 @@ MainLoop:
 		case 22: // Scroll
 			code = unit.code ? String(unit.code).toLowerCase() : "";
 
-			// NEVER pick ID scrolls (code only)
+			// ID scrolls: only pre-Cain (checkItem early-isc), max 2 already gated there
 			if (code === "isc") {
-				return false;
+				if (me.getQuest(4, 0) || me.getQuest(4, 1)) {
+					return false;
+				}
+
+				break; // inventory room check below
 			}
 
 			// TP scrolls only (tsc) — fill tome if room
@@ -1357,8 +1673,8 @@ MainLoop:
 				status = this.checkItem(item);
 
 				if ((status.result || this.isPotion(item) || this.isRejuv(item) ||
-						this.isJewel(item) || this.isKeepJewelry(item) || this.isLevelingGem(item)) &&
-						this.canPick(item) && this.wantToPick(item, status) &&
+						this.isJewel(item) || this.isKeepJewelry(item) || this.isWantedGem(item)) &&
+					this.canPick(item) && this.wantToPick(item, status) &&
 						(Storage.Inventory.CanFit(item) || [4, 22, 76, 77, 78].indexOf(item.itemType) > -1 || this.isPotion(item))) {
 					this.pickItem(item, status.result, status.line);
 				}

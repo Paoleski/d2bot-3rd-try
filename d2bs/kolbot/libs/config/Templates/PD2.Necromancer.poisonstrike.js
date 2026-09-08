@@ -248,8 +248,9 @@ function LoadConfig() {
 	Config.UseMercHP = 75; // Give a healing potion to your merc if his/her life is under designated percent.
 	Config.UseMercRejuv = 0; // Give a rejuvenation potion to your merc if his/her life is under designated percent.
 	Config.HPBuffer = 0; // Number of healing potions to keep in inventory.
-	Config.MPBuffer = 0; // Number of mana potions to keep in inventory.
+	Config.MPBuffer = 0; // No inv mana — belt only
 	Config.RejuvBuffer = 8; // Keep up to 8 rejuvs in inventory (belt is hp/mp only)
+	Config.ManaPark = false; // no top-right mana organizer
 
 	Config.StaminaBuffer = 2; // Keep up to 2 stamina pots in inventory while leveling.
 	Config.StaminaUntilLevel = 20; // Buy/pick/drink stamina only while below this level.
@@ -290,8 +291,8 @@ function LoadConfig() {
 	 * Supported potions - Healing ("hp"), Mana ("mp") and Rejuvenation ("rv")
 	 */
 	Config.BeltColumn[0] = "hp";
-	Config.BeltColumn[1] = "mp";
-	Config.BeltColumn[2] = "mp"; // extra mana while leveling (rv later)
+	Config.BeltColumn[1] = "hp";
+	Config.BeltColumn[2] = "mp";
 	Config.BeltColumn[3] = "mp";
 
 	/* Minimum amount of potions. If we have less, go to vendor to purchase more.
@@ -525,6 +526,7 @@ function LoadConfig() {
 	Config.DodgeRange = 15;
 	Config.DodgeHP = 100;
 	Config.BossPriority = false;
+	Config.NecroShamanFocus = true; // Act1: kill shamans before fallen packs
 	Config.ClearType = 0;
 	Config.TeleStomp = false;
 	Config.Wereform = false;
@@ -535,6 +537,7 @@ function LoadConfig() {
 
 	Config.ExplodeCorpses = 0; // do NOT set 83 — that is Desecrate
 	Config.Golem = "Blood";
+	Config.MaxGolems = 1; // one golem — resummon only when dead (PD2 mastery can hold more)
 	// Wand soft Raise Skeleton at lvl 1 — "max" uses getSkill(70,1) soft points
 	Config.Skeletons = "max";
 	Config.SkeletonMages = 0;

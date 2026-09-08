@@ -5,6 +5,439 @@
 */
 
 var ClassAttack = {
+	// Fallen / fetish shamans — CB bolts often miss at stand-off
+	shamanIds: [58, 59, 60, 61, 62, 278, 279, 280, 281, 282, 645, 646, 647, 662, 663, 664],
+
+	isShaman: function (unit) {
+		return !!(unit && this.shamanIds.indexOf(unit.classid) > -1);
+	},
+
+	// Cheap: only special-cases CB vs shaman under 18
+	castRangeFor: function (skillId, unit) {
+		if (skillId === 38 && me.charlvl < 18 && this.isShaman(unit)) {
+			return 2; // melee hug — bolts connect
+		}
+
+		return Skill.getRange(skillId);
+	},
+
+	// PD2 Static Field: 25% of current life (lightning), only while HP above 55/70/85 (N/NM/H)
+	getStaticFloor: function () {
+		if (me.diff === 0) {
+			return 55;
+		}
+
+		if (me.diff === 1) {
+			return 70;
+		}
+
+		return 85; // Hell
+	},
+
+	// Stop casting Static at max(Config.CastStatic, PD2 floor) — never below the difficulty cap
+	getStaticThreshold: function () {
+		var floor, cfg;
+
+		if (Config.CastStatic === false || Config.CastStatic >= 100) {
+			return 100; // disabled
+		}
+
+		floor = this.getStaticFloor();
+		cfg = Config.CastStatic;
+
+		if (cfg === true || cfg === 0 || cfg === undefined || cfg === null) {
+			return floor;
+		}
+
+		return Math.max(cfg, floor);
+	},
+
+	// Only Static act bosses + Izual (not Blood Raven / Smith / random uniques)
+	staticBossIds: [156, 211, 242, 243, 544, 256], // Andy, Duriel, Meph, Diablo, Baal, Izual
+
+	wantStaticTarget: function (unit) {
+		var i, id, name;
+
+		if (!unit) {
+			return false;
+		}
+
+		if (this.staticBossIds.indexOf(unit.classid) > -1) {
+			return true;
+		}
+
+		name = unit.name ? String(unit.name).toLowerCase().replace(/ÿc[0-9a-z]/gi, "") : "";
+
+		if (name.indexOf("andariel") > -1 || name.indexOf("duriel") > -1 ||
+				name.indexOf("mephisto") > -1 || name.indexOf("diablo") > -1 ||
+				name.indexOf("baal") > -1 || name.indexOf("izual") > -1) {
+			return true;
+		}
+
+		// Optional Config.StaticList still honored for extra names/ids (never spectype spam)
+		if (!Config.StaticList || !Config.StaticList.length) {
+			return false;
+		}
+
+		for (i = 0; i < Config.StaticList.length; i += 1) {
+			id = Config.StaticList[i];
+
+			switch (typeof id) {
+			case "number":
+				if (unit.classid === id) {
+					return true;
+				}
+
+				break;
+			case "string":
+				if (name && name === id.toLowerCase()) {
+					return true;
+				}
+
+				break;
+			default:
+				throw new Error("Bad Config.StaticList settings.");
+			}
+		}
+
+		return false;
+	},
+
+	// Infector of Souls (Chaos seal / pit lords) — never walk onto him
+	isInfector: function (unit) {
+		var name;
+
+		if (!unit) {
+			return false;
+		}
+
+		if (unit.classid === 704) {
+			return true;
+		}
+
+		name = unit.name ? String(unit.name).toLowerCase().replace(/ÿc[0-9a-z]/gi, "") : "";
+
+		return name.indexOf("infector") > -1;
+	},
+
+	// Lord De Seis — same pull fight as Infector
+	isSeis: function (unit) {
+		var name;
+
+		if (!unit) {
+			return false;
+		}
+
+		if (unit.classid === 705) {
+			return true;
+		}
+
+		name = unit.name ? String(unit.name).toLowerCase().replace(/ÿc[0-9a-z]/gi, "") : "";
+
+		return name.indexOf("seis") > -1;
+	},
+
+	isSealPullBoss: function (unit) {
+		return this.isInfector(unit) || this.isSeis(unit);
+	},
+
+	/*
+		Infector / De Seis pull: HOLD the node — never walk closer.
+		If ClassAttack._sealHoldX/Y set, force-TP back there (no walk).
+	*/
+	sealPullStandOff: function (unit) {
+		var d;
+
+		if (!unit || !Attack.checkMonster(unit)) {
+			return false;
+		}
+
+		if (this._sealHoldX !== undefined && this._sealHoldY !== undefined) {
+			if (getDistance(me, this._sealHoldX, this._sealHoldY) > 5) {
+				if (typeof Pather.forceTeleportTo === "function" && Pather.canTeleport()) {
+					Pather.forceTeleportTo(this._sealHoldX, this._sealHoldY, 4);
+				}
+			}
+
+			return true;
+		}
+
+		d = getDistance(me, unit);
+
+		// No hold coords — stay put; never walk toward him
+		if (d < 8 && this.isSeis(unit) && typeof Pather.forceTeleportTo === "function" && Pather.canTeleport()) {
+			Pather.forceTeleportTo(me.x, me.y + 12, 4);
+		}
+
+		return true;
+	},
+
+	// Back-compat alias
+	infectorStandOff: function (unit) {
+		return this.sealPullStandOff(unit);
+	},
+
+	infectorDance: function (unit) {
+		if (!this.isSealPullBoss(unit) || !Attack.checkMonster(unit)) {
+			return false;
+		}
+
+		this.sealPullStandOff(unit);
+
+		if (me.getSkill(44, 1) && Attack.checkMonster(unit) && getDistance(me, unit) <= 10) {
+			Skill.cast(44, 0);
+		}
+
+		if (getDistance(me, unit) < 7) {
+			this.sealPullStandOff(unit);
+		}
+
+		return true;
+	},
+
+	// Diablo fight state — melee Static burst once, then AttackSkill from mid-range (merc tanks)
+	_diabloBurstGid: 0,
+
+	/*
+		Normal Diablo lightning hurts if you sit on him forever.
+		1) Close into melee and Static ×4 (must stay inside Static radius each cast)
+		2) Walk back off his face (NEVER teleport — merc must keep aggro/tank)
+		3) Spam this char's AttackSkill from stand-off — FN only while it's still the
+		   configured primary (cold early); once FO/FB/Lightning/etc. upgrades AttackSkill,
+		   that skill is used (FN only as untimed while FO is on skill delay)
+	*/
+	diabloStandOff: function (unit, minD, maxD) {
+		var i, offsets, ox, oy, tx, ty, d, best, bestD, savedTele, aim;
+
+		if (!unit || !Attack.checkMonster(unit)) {
+			return false;
+		}
+
+		minD = (minD === undefined) ? 4 : minD;
+		maxD = (maxD === undefined) ? 6 : maxD;
+		aim = Math.round((minD + maxD) / 2);
+		d = getDistance(me, unit);
+
+		if (d >= minD && d <= maxD && !checkCollision(me, unit, 0x4)) {
+			return true;
+		}
+
+		offsets = [
+			[aim, 0], [-aim, 0], [0, aim], [0, -aim],
+			[aim, aim], [aim, -aim], [-aim, aim], [-aim, -aim],
+			[aim + 2, 1], [-(aim + 2), 1], [1, aim + 2], [1, -(aim + 2)]
+		];
+		best = null;
+		bestD = 999;
+
+		for (i = 0; i < offsets.length; i += 1) {
+			tx = Math.round(unit.x + offsets[i][0]);
+			ty = Math.round(unit.y + offsets[i][1]);
+
+			if (!Attack.validSpot(tx, ty)) {
+				continue;
+			}
+
+			d = getDistance(unit.x, unit.y, tx, ty);
+
+			if (d < minD - 1 || d > maxD + 1) {
+				continue;
+			}
+
+			ox = getDistance(me.x, me.y, tx, ty);
+
+			if (ox < bestD) {
+				bestD = ox;
+				best = [tx, ty];
+			}
+		}
+
+		if (!best) {
+			ox = me.x - unit.x;
+			oy = me.y - unit.y;
+			d = Math.sqrt(ox * ox + oy * oy) || 1;
+			best = [Math.round(unit.x + (ox / d) * aim), Math.round(unit.y + (oy / d) * aim)];
+		}
+
+		// Walk only — teleporting away resets merc tank / Diablo target
+		savedTele = Pather.teleport;
+		Pather.teleport = false;
+		Pather.moveTo(best[0], best[1], 2);
+		Pather.teleport = savedTele;
+
+		return true;
+	},
+
+	// Keep old name for any callers; mid-range stand-off (FN band, not far star kite)
+	diabloKiteAway: function (unit) {
+		return this.diabloStandOff(unit, 4, 6);
+	},
+
+	diabloMeleeStatic: function (unit, casts) {
+		var i, staticRange, savedTele, closeRange;
+
+		if (!unit || !me.getSkill(42, 1) || !Attack.checkResist(unit, "lightning")) {
+			return false;
+		}
+
+		casts = casts || 4;
+		staticRange = Math.max(2, Math.floor((me.getSkill(42, 1) + 4) * 2 / 3));
+		closeRange = Math.min(staticRange, 3);
+		savedTele = Pather.teleport;
+		// Closing onto Diablo for Static may tele; standing off never does
+		Pather.teleport = !!(me.getSkill(54, 1) || me.getStat(97, 54));
+
+		for (i = 0; i < casts; i += 1) {
+			if (!Attack.checkMonster(unit) || me.dead) {
+				break;
+			}
+
+			// Static only hits inside its radius — stay in melee each cast
+			if (getDistance(me, unit) > closeRange || checkCollision(me, unit, 0x4)) {
+				if (!Attack.getIntoPosition(unit, closeRange, 0x4)) {
+					Pather.moveToUnit(unit);
+				}
+			}
+
+			if (getDistance(me, unit) > staticRange) {
+				Pather.moveToUnit(unit);
+			}
+
+			delay(100 + me.ping);
+			Skill.cast(42, 0);
+			delay(280 + me.ping);
+		}
+
+		Pather.teleport = savedTele;
+
+		return true;
+	},
+
+	// Boss skill for Diablo stand-off: use this char's AttackSkill (FN only until FO/etc. upgrades it)
+	diabloPickSkill: function (unit) {
+		var timed = Config.AttackSkill[1],
+			untimed = Config.AttackSkill[2];
+
+		if (timed > 0 && Attack.canUseSkill(timed) && Attack.checkResist(unit, timed) &&
+				(!me.getState(121) || !Skill.isTimed(timed))) {
+			return timed;
+		}
+
+		if (untimed > 0 && Attack.canUseSkill(untimed) && Attack.checkResist(unit, untimed)) {
+			return untimed;
+		}
+
+		// Cold early: FN if configured skills missing but FN is learned
+		if (me.getSkill(44, 1) && Attack.checkResist(unit, 44) &&
+				(!me.getSkill(64, 0) || me.getSkill(64, 0) <= 0)) {
+			return 44;
+		}
+
+		if (timed > 0 && Attack.canUseSkill(timed) && Attack.checkResist(unit, timed)) {
+			return timed;
+		}
+
+		return -1;
+	},
+
+	// Stand-off band for skill: FN close (4–6); longer skills ~6–12 off lightning face
+	diabloSkillBand: function (skillId) {
+		var range, minD, maxD;
+
+		range = this.castRangeFor(skillId) || Skill.getRange(skillId) || 10;
+
+		if (skillId === 44 || skillId === 48) {
+			return {min: 4, max: Math.min(6, Math.max(4, range))};
+		}
+
+		minD = 6;
+		maxD = Math.min(Math.max(range, 8), 14);
+
+		if (maxD <= minD) {
+			maxD = minD + 2;
+		}
+
+		return {min: minD, max: maxD};
+	},
+
+	diabloCastAtStandOff: function (unit, skillId) {
+		var band, d, hand;
+
+		if (!unit || skillId < 0 || !Attack.checkMonster(unit)) {
+			return false;
+		}
+
+		band = this.diabloSkillBand(skillId);
+		d = getDistance(me, unit);
+
+		if (d < band.min || d > band.max || checkCollision(me, unit, 0x4)) {
+			this.diabloStandOff(unit, band.min, band.max);
+		}
+
+		d = getDistance(me, unit);
+
+		// Too far for short skills (FN) — nudge in; never hug (<3)
+		if (d > band.max + 1) {
+			this.diabloStandOff(unit, band.min, band.max);
+		}
+
+		if (d < 3) {
+			this.diabloStandOff(unit, band.min, band.max);
+		}
+
+		if (!Attack.checkMonster(unit)) {
+			return false;
+		}
+
+		hand = this.castHand(skillId);
+
+		if (skillId === 44 || skillId === 48 || skillId === 42) {
+			return Skill.cast(skillId, hand);
+		}
+
+		return Skill.cast(skillId, hand, unit);
+	},
+
+	diabloDance: function (unit) {
+		var skillId, band;
+
+		if (!unit || unit.classid !== 243 || !Attack.checkMonster(unit)) {
+			return false;
+		}
+
+		// Opener once per Diablo gid: melee Static ×4 → walk stand off → char attack
+		if (this._diabloBurstGid !== unit.gid) {
+			this._diabloBurstGid = unit.gid;
+			print("ÿc2ClassAttackÿc0 :: Diablo — melee Static×4 → walk stand off → AttackSkill");
+
+			this.diabloMeleeStatic(unit, 4);
+
+			skillId = this.diabloPickSkill(unit);
+
+			if (skillId > 0) {
+				band = this.diabloSkillBand(skillId);
+				this.diabloStandOff(unit, band.min, band.max);
+				this.diabloCastAtStandOff(unit, skillId);
+			} else {
+				this.diabloStandOff(unit, 6, 10);
+			}
+
+			return true;
+		}
+
+		// After opener: keep stand-off, spam this build's boss skill (merc tanks)
+		skillId = this.diabloPickSkill(unit);
+
+		if (skillId > 0) {
+			this.diabloCastAtStandOff(unit, skillId);
+		} else {
+			band = {min: 6, max: 10};
+			this.diabloStandOff(unit, band.min, band.max);
+		}
+
+		return true;
+	},
+
 	doAttack: function (unit, preattack) {
 		if (Config.MercWatch && Town.needMerc()) {
 			print("mercwatch");
@@ -27,7 +460,7 @@ var ClassAttack = {
 			return true;
 		}
 
-		var index, staticRange, checkSkill,
+		var index, staticRange, staticThresh, checkSkill,
 			timedSkill = -1,
 			untimedSkill = -1;
 
@@ -82,42 +515,34 @@ var ClassAttack = {
 			}
 		}
 
-		// Static
-		if (Config.CastStatic < 100 && me.getSkill(42, 1) && Attack.checkResist(unit, "lightning") && Config.StaticList.some(
-				function (id) {
-					if (unit) {
-						switch (typeof id) {
-						case "number":
-							if (unit.classid && unit.classid === id) {
-								return true;
-							}
+		// Diablo: melee Static×4 → walk stand-off → this build's AttackSkill (owns fight)
+		if (unit && unit.classid === 243) {
+			this.diabloDance(unit);
 
-							break;
-						case "string":
-							if (unit.name && unit.name.toLowerCase() === id.toLowerCase()) {
-								return true;
-							}
+			return true;
+		}
 
-							break;
-						default:
-							throw new Error("Bad Config.StaticList settings.");
+		if (unit && this.isSealPullBoss(unit)) {
+			// Infector / De Seis: hold pull, merc tanks — never move onto them
+			this.infectorDance(unit);
+		} else {
+			// Static Field — PD2: 25% current life while above 55/70/85% (N/NM/H); bosses by default
+			staticThresh = this.getStaticThreshold();
+
+			if (staticThresh < 100 && me.getSkill(42, 1) && Attack.checkResist(unit, "lightning") &&
+					this.wantStaticTarget(unit) && Math.round(unit.hp * 100 / unit.hpmax) > staticThresh) {
+				staticRange = Math.floor((me.getSkill(42, 1) + 4) * 2 / 3);
+
+				while (!me.dead && Math.round(unit.hp * 100 / unit.hpmax) > staticThresh && Attack.checkMonster(unit)) {
+					if (getDistance(me, unit) > staticRange || checkCollision(me, unit, 0x4)) {
+						if (!Attack.getIntoPosition(unit, staticRange, 0x4)) {
+							return false;
 						}
 					}
 
-					return false;
-				}
-			) && Math.round(unit.hp * 100 / unit.hpmax) > Config.CastStatic) {
-			staticRange = Math.floor((me.getSkill(42, 1) + 4) * 2 / 3);
-
-			while (!me.dead && Math.round(unit.hp * 100 / unit.hpmax) > Config.CastStatic && Attack.checkMonster(unit)) {
-				if (getDistance(me, unit) > staticRange || checkCollision(me, unit, 0x4)) {
-					if (!Attack.getIntoPosition(unit, staticRange, 0x4)) {
-						return false;
+					if (!Skill.cast(42, 0)) {
+						break;
 					}
-				}
-
-				if (!Skill.cast(42, 0)) {
-					break;
 				}
 			}
 		}
@@ -186,12 +611,32 @@ var ClassAttack = {
 			untimedSkill = -1;
 		}
 
+		// Diablo / Infector / De Seis: prefer Frost Nova as boss untimed
+		if (unit && (unit.classid === 243 || this.isSealPullBoss(unit)) && me.getSkill(44, 1)) {
+			if (untimedSkill < 0 || untimedSkill === Config.AttackSkill[2] || untimedSkill === Config.AttackSkill[4]) {
+				untimedSkill = 44;
+			}
+		}
+
 		switch (this.doCast(unit, timedSkill, untimedSkill)) {
 		case 0: // Fail
 			break;
 		case 1: // Success
 			return true;
 		case 2: // Try to telestomp
+			// Diablo / Infector — never sit on them via TeleStomp
+			if (unit && unit.classid === 243) {
+				this.diabloDance(unit);
+
+				return true;
+			}
+
+			if (unit && this.isSealPullBoss(unit)) {
+				this.infectorDance(unit);
+
+				return true;
+			}
+
 			if (Config.TeleStomp && Attack.checkResist(unit, "physical") && !!me.getMerc() && Attack.validSpot(unit.x, unit.y)) {
 				while (Attack.checkMonster(unit)) {
 					if (getDistance(me, unit) > 3) {
@@ -226,7 +671,7 @@ var ClassAttack = {
 
 	// Returns: 0 - fail, 1 - success, 2 - no valid attack skills
 	doCast: function (unit, timedSkill, untimedSkill) {
-		var i, walk, hand;
+		var i, walk, hand, range, needRange;
 
 		// No valid skills can be found
 		if (timedSkill < 0 && untimedSkill < 0) {
@@ -234,14 +679,43 @@ var ClassAttack = {
 		}
 
 		if (timedSkill > -1 && (!me.getState(121) || !Skill.isTimed(timedSkill))) {
-			if (Skill.getRange(timedSkill) < 4 && !Attack.validSpot(unit.x, unit.y)) {
+			range = this.castRangeFor(timedSkill, unit);
+
+			// Diablo: keep breath distance except FN (cast then kite) / Static opener
+			if (unit && unit.classid === 243 && timedSkill !== 44 && timedSkill !== 42) {
+				// Short skills (CB etc.) stand ~8; longer skills keep ~12
+				needRange = Math.max(range, range <= 7 ? 8 : 12);
+
+				if (getDistance(me, unit) < 8) {
+					this.diabloKiteAway(unit);
+				}
+
+				if (getDistance(me, unit) > needRange || checkCollision(me, unit, 0x4)) {
+					// Walk only — tele onto/away from Diablo drops merc tank
+					walk = true;
+
+					if (!Attack.getIntoPosition(unit, needRange, 0x4, walk)) {
+						return 0;
+					}
+				}
+
+				if (getDistance(me, unit) < 8) {
+					this.diabloKiteAway(unit);
+				}
+			} else if (unit && this.isSealPullBoss(unit)) {
+				// Hold pull node — never getIntoPosition toward seal bosses
+				this.sealPullStandOff(unit);
+
+				if (getDistance(me, unit) > range || checkCollision(me, unit, 0x4)) {
+					delay(100);
+					return 1;
+				}
+			} else if (range < 4 && !Attack.validSpot(unit.x, unit.y)) {
 				return 0;
-			}
+			} else if (Math.round(getDistance(me, unit)) > range || checkCollision(me, unit, 0x4)) {
+				walk = range < 4 && getDistance(me, unit) < 12 && !checkCollision(me, unit, 0x1);
 
-			if (Math.round(getDistance(me, unit)) > Skill.getRange(timedSkill) || checkCollision(me, unit, 0x4)) {
-				walk = Skill.getRange(timedSkill) < 4 && getDistance(me, unit) < 10 && !checkCollision(me, unit, 0x1);
-
-				if (!Attack.getIntoPosition(unit, Skill.getRange(timedSkill), 0x4, walk)) {
+				if (!Attack.getIntoPosition(unit, range, 0x4, walk)) {
 					return 0;
 				}
 			}
@@ -254,6 +728,15 @@ var ClassAttack = {
 					if (!Skill.cast(timedSkill, hand, unit)) {
 						return 0;
 					}
+
+					// Frost Nova on Diablo — back out immediately after
+					if (unit.classid === 243 && timedSkill === 44) {
+						this.diabloKiteAway(unit);
+					}
+
+					if (this.isSealPullBoss(unit) && timedSkill === 44 && getDistance(me, unit) < 7) {
+						this.sealPullStandOff(unit);
+					}
 				} else {
 					return 0;
 				}
@@ -263,14 +746,39 @@ var ClassAttack = {
 		}
 
 		if (untimedSkill > -1) {
-			if (Skill.getRange(untimedSkill) < 4 && !Attack.validSpot(unit.x, unit.y)) {
+			range = this.castRangeFor(untimedSkill, unit);
+
+			if (unit && unit.classid === 243 && untimedSkill !== 44 && untimedSkill !== 42) {
+				needRange = Math.max(range, range <= 7 ? 8 : 12);
+
+				if (getDistance(me, unit) < 8) {
+					this.diabloKiteAway(unit);
+				}
+
+				if (getDistance(me, unit) > needRange || checkCollision(me, unit, 0x4)) {
+					walk = true;
+
+					if (!Attack.getIntoPosition(unit, needRange, 0x4, walk)) {
+						return 0;
+					}
+				}
+
+				if (getDistance(me, unit) < 8) {
+					this.diabloKiteAway(unit);
+				}
+			} else if (unit && this.isSealPullBoss(unit)) {
+				this.sealPullStandOff(unit);
+
+				if (getDistance(me, unit) > range || checkCollision(me, unit, 0x4)) {
+					delay(100);
+					return 1;
+				}
+			} else if (range < 4 && !Attack.validSpot(unit.x, unit.y)) {
 				return 0;
-			}
+			} else if (Math.round(getDistance(me, unit)) > range || checkCollision(me, unit, 0x4)) {
+				walk = range < 4 && getDistance(me, unit) < 12 && !checkCollision(me, unit, 0x1);
 
-			if (Math.round(getDistance(me, unit)) > Skill.getRange(untimedSkill) || checkCollision(me, unit, 0x4)) {
-				walk = Skill.getRange(untimedSkill) < 4 && getDistance(me, unit) < 10 && !checkCollision(me, unit, 0x1);
-
-				if (!Attack.getIntoPosition(unit, Skill.getRange(untimedSkill), 0x4, walk)) {
+				if (!Attack.getIntoPosition(unit, range, 0x4, walk)) {
 					return 0;
 				}
 			}
@@ -280,6 +788,14 @@ var ClassAttack = {
 
 				if (!Skill.cast(untimedSkill, hand, unit)) {
 					return 0;
+				}
+
+				if (unit.classid === 243 && untimedSkill === 44) {
+					this.diabloKiteAway(unit);
+				}
+
+				if (this.isSealPullBoss(unit) && untimedSkill === 44 && getDistance(me, unit) < 7) {
+					this.sealPullStandOff(unit);
 				}
 			}
 

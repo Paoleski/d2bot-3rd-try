@@ -184,6 +184,7 @@ var Config = {
 	MPBuffer: 0,
 	RejuvBuffer: 0,
 	StaminaBuffer: 0, // inventory stamina pots to keep while below StaminaUntilLevel
+	ManaPark: true, // false = belt-only mana (no inv mana organizer / top-right park)
 	PickRange: 40,
 	MakeRoom: true,
 	FastPick: false,
@@ -219,10 +220,14 @@ var Config = {
 	ShowCubingInfo: true,
 
 	Cubing: false,
+	// PD2: at stash, cube 3+ stacked flawless + key → perfect (via Pd2Stack, before rune stacking)
+	Pd2PromoteFlawless: true,
 	CubeRepair: false,
 	RepairPercent: 0, // 0 = only when broken (0 durability) / empty stack
 	Recipes: [],
 	MakeRunewords: false,
+	PauseOnRunewordFail: true, // lab: freeze bot on Lore/RW make fail so we can debug unstack
+	RunewordWatchDelay: 500, // lab: ms pause between unstack/separate/socket steps (0=off)
 	Runewords: [],
 	KeepRunewords: [],
 	Gamble: false,
@@ -264,6 +269,30 @@ var Config = {
 	AutoEquip: false,
 	AutoEquipMerc: false,
 
+	// AutoGear (PD2) — SoloPlay ideas transformed for this lab. See sdk/pd2-extract/AUTOGEAR_PD2_NOTES.md
+	AutoGearBuild: "",
+	AutoGear: {
+		ProtectRWBases: true, // never equip empty Config.Runewords bases
+		EnableMidRW: true, // Phase 2: gated Spirit/Insight (off until validated)
+		EnableSecondary: false, // Phase 4: swap CTA/Spirit
+		FinalGearBoost: 100000, // Phase 4: endgame identity boost
+		CharmCaps: {
+			Enabled: true,
+			SmallLife: 6,
+			SmallRes: 4,
+			SmallMf: 2,
+			SmallMisc: 2,
+			LargeLife: 3,
+			LargeRes: 2,
+			LargeMisc: 1,
+			GrandPreferredSkiller: 2,
+			GrandOtherSkiller: 1,
+			GrandLife: 2,
+			GrandRes: 2,
+			GrandMisc: 1
+		}
+	},
+
 	// GameData
 	ChampionBias: 60,
 
@@ -278,18 +307,20 @@ var Config = {
 	ClearType: false,
 	ClearPath: false,
 	BossPriority: false,
+	NecroShamanFocus: false, // necro Act1: peel fallen/fetish shamans first
 
 	// Amazon specific
 	LightningFuryDelay: 0,
 	SummonValkyrie: false,
 
 	// Sorceress specific
-	UseTelekinesis: false,
-	CastStatic: false,
+	UseTelekinesis: true, // Sorc: TK pick (lvl 14+) gold/scrolls/keys/pots + Duriel orifice (never attack/chests)
+	CastStatic: 55, // PD2: stop at max(this, 55/70/85 N/NM/H). 100 = disabled. Empty StaticList = act bosses+Izual only.
 	StaticList: [],
 
 	// Necromancer specific
 	Golem: 0,
+	MaxGolems: 1, // PD2 mastery allows more; keep 1 unless you set higher
 	ActiveSummon: false,
 	Skeletons: 0,
 	SkeletonMages: 0,

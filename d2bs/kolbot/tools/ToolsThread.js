@@ -24,6 +24,8 @@ include("common/Pickit.js");
 include("common/Pather.js");
 include("common/Precast.js");
 include("common/Prototypes.js");
+include("common/Pd2Stack.js");
+include("common/ConsoleLog.js");
 include("common/Runewords.js");
 include("common/Storage.js");
 include("common/Town.js");
@@ -41,6 +43,10 @@ function main() {
 		rejuvGaveUpAt = 0, // tick when we gave up — ignore retries until town/HP recover
 		mercPktSniff = false,
 		mercPktHandler = null;
+
+	if (typeof ConsoleLog !== "undefined") {
+		ConsoleLog.install();
+	}
 
 	print("ÿc3Start ToolsThread script");
 	D2Bot.init();
@@ -128,10 +134,22 @@ function main() {
 				[535, 536, 546, 547].indexOf(item.classid) > -1;
 		}
 
+		// Charms/jewels must never be "drunk" — potionKind name match can hit "of Mana" charms
+		function isCharmOrJewel(item) {
+			var code = item.code ? String(item.code).toLowerCase() : "";
+
+			if (code === "cm1" || code === "cm2" || code === "cm3" || code === "jew") {
+				return true;
+			}
+
+			// PD2: 83 small / 84 large / 85 grand (LoD was 82–84)
+			return [82, 83, 84, 85].indexOf(item.itemType) > -1;
+		}
+
 		function matchesPot(item) {
 			var code, name, kind;
 
-			if (!item || isScrollOrTome(item)) {
+			if (!item || isScrollOrTome(item) || isCharmOrJewel(item)) {
 				return false;
 			}
 
@@ -265,9 +283,7 @@ function main() {
 		}
 
 		if (invPot) {
-			if (pottype === 77) {
-				print("ÿc2Drinking mana from inventory.");
-			} else {
+			if (pottype !== 77) {
 				print("ÿc2Drinking potion from inventory.");
 			}
 
@@ -277,28 +293,35 @@ function main() {
 		return false;
 	};
 
+	this.userPaused = false; // Pause/Break — distinct from TownChicken holding default.dbj
+
 	this.togglePause = function () {
-		var i,	script,
+		var i, script,
 			scripts = ["default.dbj", "tools/townchicken.js", "tools/antihostile.js", "tools/party.js", "tools/rushthread.js"];
 
-		for (i = 0; i < scripts.length; i += 1) {
-			script = getScript(scripts[i]);
+		// Flip USER pause intent — never infer from script.running (TownChicken also pauses default.dbj)
+		this.userPaused = !this.userPaused;
 
-			if (script) {
-				if (script.running) {
-					if (i === 0) { // default.dbj
-						print("ÿc1Pausing.");
-					}
+		if (this.userPaused) {
+			print("ÿc1Pausing.");
+			scriptBroadcast("userPause");
 
-					// don't pause townchicken during clone walk
-					if (scripts[i] !== "tools/townchicken.js" || !cloneWalked) {
-						script.pause();
-					}
-				} else {
-					if (i === 0) { // default.dbj
-						print("ÿc2Resuming.");
-					}
+			for (i = 0; i < scripts.length; i += 1) {
+				script = getScript(scripts[i]);
 
+				// don't pause townchicken during clone walk
+				if (script && script.running && (scripts[i] !== "tools/townchicken.js" || !cloneWalked)) {
+					script.pause();
+				}
+			}
+		} else {
+			print("ÿc2Resuming.");
+			scriptBroadcast("userResume");
+
+			for (i = 0; i < scripts.length; i += 1) {
+				script = getScript(scripts[i]);
+
+				if (script && !script.running) {
 					script.resume();
 				}
 			}
@@ -335,7 +358,7 @@ function main() {
 	};
 
 	this.drinkPotion = function (type) {
-		var pottype, potion, code, where, pct, coolMs,
+		var pottype, potion, code, where, pct, coolMs, gid, mpBefore,
 			tNow = getTickCount();
 
 		// Per-type cooldown (ms). HP/MP need real gaps or the belt dumps in one fight.
@@ -432,6 +455,8 @@ function main() {
 
 			code = potion.code ? String(potion.code).toLowerCase() : "?";
 			where = (potion.mode === 2 || potion.location === 2) ? "belt" : "inv";
+			gid = potion.gid;
+			mpBefore = me.mp;
 
 			// Stamp cooldown BEFORE interact so a failed/spammy interact can't double-fire next tick
 			timerLastDrink[type] = getTickCount();
@@ -453,6 +478,13 @@ function main() {
 			}
 
 			delay(80 + Math.min(me.ping, 150));
+
+			// Confirm inv mana actually consumed (not charm false-positive / failed interact)
+			if (type === 1 && where === "inv") {
+				if (me.getState(106) || me.mp > mpBefore || (gid && !me.getItem(-1, -1, gid))) {
+					print("ÿc2Drank mana from inventory (" + code + ").");
+				}
+			}
 
 			if (type === 2) {
 				rejuvMisses = 0;
@@ -795,7 +827,8 @@ function main() {
 	// Event functions
 	this.keyEvent = function (key) {
 		switch (key) {
-		case 19: // Pause/Break key
+		case 19: // Pause/Break
+		case 35: // End
 			this.togglePause();
 
 			break;
@@ -807,6 +840,7 @@ function main() {
 			// DO NOT gate on Config.AutoSkill.UICalibrate — that flag was repeatedly left false
 			// and broke calibrate. ToolsThread stays alive while default.dbj is paused.
 			// NEVER move this handler to default.dbj / AutoSkill.init (those pause with the bot).
+			// Empty-inv cell for Pd2Stack is F10 (case 121) — do NOT write last_mouse here.
 			try {
 				var mc = getMouseCoords(0),
 					treeOpen = false;
@@ -820,6 +854,38 @@ function main() {
 				me.overhead("calib " + mc[0] + "," + mc[1]);
 			} catch (eCal) {
 				print("ÿc1AutoSkill CALIBRATE error: " + eCal);
+			}
+
+			break;
+		case 121: // F10 — Pd2Stack CLIENT coords (MUST match bot: stash OPEN)
+			// Pause → open stash (bank) → hover the inv slot where runes land → F10
+			// Inv panel moves when stash is closed — don't calibrate with only I open.
+			try {
+				var emc = getMouseCoords(0),
+					stashOpen = false;
+
+				try {
+					stashOpen = !!getUIFlag(0x19);
+				} catch (eSt) {}
+
+				if (!stashOpen) {
+					print("ÿc1Pd2Stack F10ÿc0 :: open STASH first (coords differ without it), then hover inv slot + F10");
+					me.overhead("open stash!");
+					break;
+				}
+
+				try {
+					FileTools.writeText("data/pd2_last_mouse.txt", emc[0] + " " + emc[1]);
+				} catch (eWrite) {
+					print("ÿc1Pd2Stackÿc0 :: failed to write data/pd2_last_mouse.txt: " + eWrite);
+					break;
+				}
+
+				print("ÿc2Pd2Stack F10ÿc0 :: client " + emc[0] + "," + emc[1] +
+					" (stash OPEN) — EMPTY first inv slot: separate drops here, then Ctrl+Shift clear+");
+				me.overhead("F10 " + emc[0] + "," + emc[1]);
+			} catch (eEmpty) {
+				print("ÿc1Pd2Stack F10 error: " + eEmpty);
 			}
 
 			break;
@@ -986,6 +1052,45 @@ function main() {
 			}
 
 			if (obj) {
+				// PD2 stack toggle: main bot asks us to ctrl+shift+click
+				if (obj.event === "pd2Stack" && obj.op === "modClick") {
+					(function () {
+						var reply, res;
+
+						try {
+							if (typeof Pd2Stack === "undefined" || typeof Pd2Stack.executeModClick !== "function") {
+								res = {ok: false, err: "no_pd2stack"};
+							} else {
+								res = Pd2Stack.executeModClick(obj);
+							}
+						} catch (eClick) {
+							res = {ok: false, err: "exception"};
+						}
+
+						reply = {
+							event: "pd2Stack",
+							op: "modClickResult",
+							token: obj.token,
+							ok: !!(res && res.ok),
+							err: (res && res.err) || (res && res.ok ? "" : "fail")
+						};
+
+						if (typeof Pd2Stack !== "undefined" && typeof Pd2Stack.log === "function") {
+							Pd2Stack.log("ÿc4Pd2Stackÿc0 :: ToolsThread modClick " +
+								(reply.ok ? "ok" : ("fail " + reply.err)) +
+								(obj.gid ? (" gid=" + obj.gid) : ""));
+						} else {
+							print("ÿc4Pd2Stackÿc0 :: ToolsThread modClick " +
+								(reply.ok ? "ok" : ("fail " + reply.err)) +
+								(obj.gid ? (" gid=" + obj.gid) : ""));
+						}
+
+						scriptBroadcast(JSON.stringify(reply));
+					})();
+
+					return;
+				}
+
 				if (obj.hasOwnProperty("currScript")) {
 					debugInfo.currScript = obj.currScript;
 				}
@@ -1031,13 +1136,17 @@ function main() {
 			}
 
 			if (me.gameReady && !me.inTown) {
-				if (Config.UseHP > 0 && me.hp < Math.floor(me.hpmax * Config.UseHP / 100)) {
-					this.drinkPotion(0);
-				}
+				// User pause: ToolsThread stays alive for chicken, but do NOT keep
+				// dumping belt/inv pots (esp. parked mana) while inspecting.
+				if (!this.userPaused) {
+					if (Config.UseHP > 0 && me.hp < Math.floor(me.hpmax * Config.UseHP / 100)) {
+						this.drinkPotion(0);
+					}
 
-				if (Config.UseRejuvHP > 0 && !rejuvGaveUp &&
-						me.hp < Math.floor(me.hpmax * Config.UseRejuvHP / 100)) {
-					this.drinkPotion(2);
+					if (Config.UseRejuvHP > 0 && !rejuvGaveUp &&
+							me.hp < Math.floor(me.hpmax * Config.UseRejuvHP / 100)) {
+						this.drinkPotion(2);
+					}
 				}
 
 				// Give rejuv a tick to land before LifeChicken on the same low-HP frame
@@ -1059,19 +1168,21 @@ function main() {
 					}
 				}
 
-				if (Config.UseMP > 0 && me.mp < Math.floor(me.mpmax * Config.UseMP / 100)) {
-					this.drinkPotion(1);
-				}
+				if (!this.userPaused) {
+					if (Config.UseMP > 0 && me.mp < Math.floor(me.mpmax * Config.UseMP / 100)) {
+						this.drinkPotion(1);
+					}
 
-				if (Config.UseStaminaPotion > 0 && me.staminamax > 0 &&
-						(!Config.StaminaUntilLevel || me.charlvl < Config.StaminaUntilLevel) &&
-						me.stamina < Math.floor(me.staminamax * Config.UseStaminaPotion / 100)) {
-					this.drinkPotion(5);
-				}
+					if (Config.UseStaminaPotion > 0 && me.staminamax > 0 &&
+							(!Config.StaminaUntilLevel || me.charlvl < Config.StaminaUntilLevel) &&
+							me.stamina < Math.floor(me.staminamax * Config.UseStaminaPotion / 100)) {
+						this.drinkPotion(5);
+					}
 
-				if (Config.UseRejuvMP > 0 && !rejuvGaveUp &&
-						me.mp < Math.floor(me.mpmax * Config.UseRejuvMP / 100)) {
-					this.drinkPotion(2);
+					if (Config.UseRejuvMP > 0 && !rejuvGaveUp &&
+							me.mp < Math.floor(me.mpmax * Config.UseRejuvMP / 100)) {
+						this.drinkPotion(2);
+					}
 				}
 
 				if (Config.ManaChicken > 0 && me.mp <= Math.floor(me.mpmax * Config.ManaChicken / 100)) {
@@ -1159,6 +1270,20 @@ function main() {
 
 			//D2Bot.store(JSON.stringify(debugInfo));
 			DataFile.updateStats("debugInfo", JSON.stringify(debugInfo));
+		}
+
+		// One-shot Tal/Eth unstack test (data/pd2_force_unstack.txt) — every ~2s
+		if (me.gameReady && me.inTown && typeof Pd2Stack !== "undefined" &&
+				typeof Pd2Stack.runForceUnstackTest === "function") {
+			if (!this._pd2UnstackTick || getTickCount() - this._pd2UnstackTick > 5000) {
+				this._pd2UnstackTick = getTickCount();
+
+				try {
+					if (FileTools.exists("data/pd2_force_unstack.txt")) {
+						Pd2Stack.runForceUnstackTest();
+					}
+				} catch (eForceUnstack) {}
+			}
 		}
 
 		delay(20);

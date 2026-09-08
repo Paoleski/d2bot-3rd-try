@@ -77,6 +77,15 @@ var AutoSkill = new function () {
 		case 369: // Ice Barrage
 			reqLvl = 30;
 			break;
+		case 367: // Blood Warp (PD2 custom — bin reqlevel often wrong)
+			reqLvl = 18;
+			break;
+		case 73: // Poison Strike (PD2; was Poison Dagger)
+			reqLvl = 6;
+			break;
+		case 83: // Desecrate (PD2; was Poison Explosion)
+			reqLvl = 18;
+			break;
 		default:
 			break;
 		}
@@ -104,7 +113,7 @@ var AutoSkill = new function () {
 	 * Does NOT auto-spend random prereqs — put prereqs in Config.AutoSkill.Build yourself.
 	 */
 	this.skillToAdd = function (inputArray) {
-		var i, id, count, hard,
+		var i, id, count, hard, minLvl, prevMin,
 			dumpId = Config.AutoSkill && Config.AutoSkill.DumpSkill;
 
 		for (i = 0; i < inputArray.length; i += 1) {
@@ -120,22 +129,32 @@ var AutoSkill = new function () {
 			// Honor satisfy — but skip level-gated previous so DumpSkill / later entries keep spending
 			if (i > 0 && inputArray[i - 1][2]) {
 				hard = me.getSkill(inputArray[i - 1][0], 0) || 0;
+				prevMin = inputArray[i - 1][3];
+
 				if (hard < inputArray[i - 1][1]) {
-					if (this.skillCheck(inputArray[i - 1][0], inputArray[i - 1][1])) {
+					if (prevMin && me.charlvl < prevMin) {
+						this.status("Skill " + inputArray[i - 1][0] + " delayed until lvl " + prevMin + " — trying next");
+					} else if (this.skillCheck(inputArray[i - 1][0], inputArray[i - 1][1])) {
 						if (!this.hasSkillCoords(inputArray[i - 1][0])) {
 							this.status("Need coords for skill " + inputArray[i - 1][0] + " (previous satisfy) — F9 calibrate");
 							return false;
 						}
 
 						return inputArray[i - 1][0];
+					} else {
+						this.status("Skill " + inputArray[i - 1][0] + " not available yet (hard=" + hard + " charlvl=" + me.charlvl + ") — trying next");
 					}
-
-					this.status("Skill " + inputArray[i - 1][0] + " not available yet (hard=" + hard + " charlvl=" + me.charlvl + ") — trying next");
 				}
 			}
 
 			id = inputArray[i][0];
 			count = inputArray[i][1];
+			minLvl = inputArray[i][3];
+
+			// Optional Build[i][3] = min character level (delay Static/TK etc.)
+			if (minLvl && me.charlvl < minLvl) {
+				continue;
+			}
 
 			if (!this.skillCheck(id, count)) {
 				continue;
@@ -440,4 +459,6 @@ var AutoSkill = new function () {
 		print("AutoSkill: Finished allocating skill points");
 		return true;
 	};
+};
+
 };

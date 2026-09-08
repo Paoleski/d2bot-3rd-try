@@ -1,0 +1,5 @@
+// Melee leveling RW bases — Steel (Tir+El) 2os swords/axes.
+// Loaded from AutoGear.js for non-caster classes (not sorc / caster necro / poisonstrike).
+// Casters use leveling_rw_caster.nip (+ leaf for fire sorc).
+
+([Name] == ShortSword || [Name] == Scimitar || [Name] == Saber || [Name] == Falchion || [Name] == CrystalSword || [Name] == HandAxe || [Name] == Axe) && [Flag] != Ethereal # [Sockets] == 2 # [MaxQuantity] == 1

@@ -21,37 +21,74 @@ include("common/Pickit.js");
 include("common/Pather.js");
 include("common/Precast.js");
 include("common/Prototypes.js");
+include("common/ConsoleLog.js");
 include("common/Runewords.js");
 include("common/Storage.js");
 include("common/Town.js");
 
 function main() {
-	var townCheck = false;
+	var townCheck = false,
+		holdingMain = false, // we paused default.dbj for a town trip
+		userPaused = false; // Pause/Break from ToolsThread — never auto-resume over it
 
-	this.togglePause = function () {
-		var i,	script,
-			scripts = ["default.dbj", "tools/antihostile.js", "tools/rushthread.js", "tools/CloneKilla.js"];
+	if (typeof ConsoleLog !== "undefined") {
+		ConsoleLog.install();
+	}
 
-		for (i = 0; i < scripts.length; i += 1) {
-			script = getScript(scripts[i]);
+	// Hold main bot for town trip (idempotent)
+	this.holdMain = function () {
+		var script = getScript("default.dbj"),
+			i, anti,
+			extras = ["tools/antihostile.js", "tools/rushthread.js", "tools/CloneKilla.js"];
 
-			if (script) {
-				if (script.running) {
-					if (i === 0) { // default.dbj
-						print("ÿc1Pausing.");
-					}
+		if (script && script.running) {
+			print("ÿc1TownChickenÿc0 :: holding script (town trip)");
+			script.pause();
+			holdingMain = true;
+		} else if (script && !script.running) {
+			// Already paused (user pause or prior hold) — remember we still owe a release check
+			holdingMain = true;
+		}
 
-					script.pause();
-				} else {
-					if (i === 0) { // default.dbj
-						if (!getScript("tools/clonekilla.js")) { // resume only if clonekilla isn't running
-							print("ÿc2Resuming.");
-							script.resume();
-						}
-					} else {
-						script.resume();
-					}
-				}
+		for (i = 0; i < extras.length; i += 1) {
+			anti = getScript(extras[i]);
+
+			if (anti && anti.running) {
+				anti.pause();
+			}
+		}
+
+		return true;
+	};
+
+	// Release after town trip — never resume if user Pause/Break is active
+	this.releaseMain = function () {
+		var script = getScript("default.dbj"),
+			i, anti,
+			extras = ["tools/antihostile.js", "tools/rushthread.js", "tools/CloneKilla.js"];
+
+		if (!holdingMain) {
+			return true;
+		}
+
+		holdingMain = false;
+
+		if (userPaused) {
+			print("ÿc8TownChickenÿc0 :: trip done — leaving paused (user pause)");
+
+			return true;
+		}
+
+		if (script && !script.running && !getScript("tools/clonekilla.js")) {
+			print("ÿc2TownChickenÿc0 :: resume script");
+			script.resume();
+		}
+
+		for (i = 0; i < extras.length; i += 1) {
+			anti = getScript(extras[i]);
+
+			if (anti && !anti.running) {
+				anti.resume();
 			}
 		}
 
@@ -63,9 +100,14 @@ function main() {
 			if (msg === "townCheck") {
 				if (me.area === 136) {
 					print("Can't tp from uber trist.");
-				} else {
+				} else if (!userPaused) {
 					townCheck = true;
 				}
+			} else if (msg === "userPause") {
+				userPaused = true;
+				townCheck = false;
+			} else if (msg === "userResume") {
+				userPaused = false;
 			}
 		});
 
@@ -80,6 +122,12 @@ function main() {
 	Cubing.init();
 
 	while (true) {
+		if (userPaused) {
+			townCheck = false;
+			delay(50);
+			continue;
+		}
+
 		if (!me.inTown && (townCheck ||
 			(Config.TownHP > 0 && me.hp < Math.floor(me.hpmax * Config.TownHP / 100)) ||
 			(Config.TownMP > 0 && me.mp < Math.floor(me.mpmax * Config.TownMP / 100)))) {
@@ -99,7 +147,7 @@ function main() {
 				continue;
 			}
 
-			this.togglePause();
+			this.holdMain();
 
 			while (!me.gameReady) {
 				delay(100);
@@ -110,8 +158,12 @@ function main() {
 				if (Config.LifeChicken > 0 && me.hpmax > 0 &&
 						me.hp <= Math.floor(me.hpmax * Config.LifeChicken / 100)) {
 					townCheck = false;
+				} else if (userPaused) {
+					townCheck = false;
 				} else {
 					me.overhead("Going to town");
+					// Always run full chores — we interrupted the bot for a reason (pots/heal)
+					Town.forceNextChores = true;
 					Town.visitTown();
 				}
 			} catch (e) {
@@ -120,7 +172,7 @@ function main() {
 
 				return;
 			} finally {
-				this.togglePause();
+				this.releaseMain();
 
 				townCheck = false;
 			}

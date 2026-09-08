@@ -540,8 +540,9 @@ function LoadConfig() {
 	Config.Wereform = false; // 0 / false - don't shapeshift, 1 / "Werewolf" - change to werewolf, 2 / "Werebear" - change to werebear
 
 	// Class specific config
-	Config.CastStatic = 60; // Cast static until the target is at designated life percent. 100 = disabled.
-	Config.StaticList = []; // List of monster NAMES or CLASSIDS to static. Example: Config.StaticList = ["Andariel", 243];
+	// PD2 Static: 25% current HP (lightning) while above 55/70/85 (N/NM/H). Empty list = unique/bosses.
+	Config.CastStatic = 55; // stop-%; clamped up to PD2 floor. 100 = disabled.
+	Config.StaticList = []; // empty = Andy/Duriel/Meph/Diablo/Baal/Izual only
 
 	/* ========================================================================
 	 * PD2 Sorc builds — skill/stat only (switch with SORC_BUILD).
@@ -641,19 +642,16 @@ function LoadConfig() {
 			[383, 20, false]   // leftover → Lesser Hydra
 		];
 
-		// Shared leveling stats (all SORC_BUILD): +5 str / +5 vit alternate → str 50;
-		// ~lvl 10–11 and ~18–19: +10 energy each (base ene 35 → 45 → 55).
+		// Shared leveling stats: 55 str ~lvl 25, 80 str ~lvl 50; energy bumps early
 		Config.AutoStat.Build = [
-			["strength", 15], ["vitality", 15],
 			["strength", 20], ["vitality", 20],
-			["strength", 25], ["vitality", 25],
 			["strength", 30], ["vitality", 30],
-			["energy", 45], // ~lvl 10–11 (10 pts)
-			["strength", 35], ["vitality", 35],
-			["strength", 40], ["vitality", 40],
-			["strength", 45], ["vitality", 45],
-			["energy", 55], // ~lvl 18–19 (10 pts)
-			["strength", 50], ["vitality", 50],
+			["energy", 45], // ~lvl 10-11
+			["strength", 45], ["vitality", 40],
+			["strength", 55], ["vitality", 50], // ~lvl 25 — gear str
+			["energy", 55], // ~lvl 18-25
+			["strength", 65], ["vitality", 70],
+			["strength", 80], ["vitality", 90], // ~lvl 50
 			["vitality", "all"]
 		];
 
@@ -689,17 +687,16 @@ function LoadConfig() {
 			[63, 20, false]    // max Lightning Mastery
 		];
 
+		// Shared leveling stats: 55 str ~lvl 25, 80 str ~lvl 50; energy bumps early
 		Config.AutoStat.Build = [
-			["strength", 15], ["vitality", 15],
 			["strength", 20], ["vitality", 20],
-			["strength", 25], ["vitality", 25],
 			["strength", 30], ["vitality", 30],
-			["energy", 45], // ~lvl 10–11 (10 pts)
-			["strength", 35], ["vitality", 35],
-			["strength", 40], ["vitality", 40],
-			["strength", 45], ["vitality", 45],
-			["energy", 55], // ~lvl 18–19 (10 pts)
-			["strength", 50], ["vitality", 50],
+			["energy", 45], // ~lvl 10-11
+			["strength", 45], ["vitality", 40],
+			["strength", 55], ["vitality", 50], // ~lvl 25 — gear str
+			["energy", 55], // ~lvl 18-25
+			["strength", 65], ["vitality", 70],
+			["strength", 80], ["vitality", 90], // ~lvl 50
 			["vitality", "all"]
 		];
 
@@ -742,17 +739,16 @@ function LoadConfig() {
 			[39, 20, false]    // leftover → Ice Bolt (FO synergy)
 		];
 
+		// Shared leveling stats: 55 str ~lvl 25, 80 str ~lvl 50; energy bumps early
 		Config.AutoStat.Build = [
-			["strength", 15], ["vitality", 15],
 			["strength", 20], ["vitality", 20],
-			["strength", 25], ["vitality", 25],
 			["strength", 30], ["vitality", 30],
-			["energy", 45], // ~lvl 10–11 (10 pts)
-			["strength", 35], ["vitality", 35],
-			["strength", 40], ["vitality", 40],
-			["strength", 45], ["vitality", 45],
-			["energy", 55], // ~lvl 18–19 (10 pts)
-			["strength", 50], ["vitality", 50],
+			["energy", 45], // ~lvl 10-11
+			["strength", 45], ["vitality", 40],
+			["strength", 55], ["vitality", 50], // ~lvl 25 — gear str
+			["energy", 55], // ~lvl 18-25
+			["strength", 65], ["vitality", 70],
+			["strength", 80], ["vitality", 90], // ~lvl 50
 			["vitality", "all"]
 		];
 	}

@@ -534,7 +534,16 @@ var Attack = {
 					Packet.flash(me.gid);
 				}
 			} else {
-				monsterList.shift();
+				// Shaman / high-scariness: try walk-in a few times, then drop (never rotate forever)
+				if (this.getScarinessLevel(target) > 7 && this.checkMonster(target) &&
+						getDistance(me, target) <= range + 25 && retry < 5) {
+					Pather.moveToUnit(target);
+					retry += 1;
+					monsterList.push(monsterList.shift());
+				} else {
+					monsterList.shift();
+					retry = 0;
+				}
 			}
 		}
 
@@ -699,7 +708,16 @@ var Attack = {
 					Packet.flash(me.gid);
 				}
 			} else {
-				monsterList.shift();
+				// Shaman / high-scariness: try walk-in a few times, then drop (never rotate forever)
+				if (target.x !== undefined && this.getScarinessLevel(target) > 7 && this.checkMonster(target) &&
+						getDistance(me, target) <= 55 && retry < 5) {
+					Pather.moveToUnit(target);
+					retry += 1;
+					monsterList.push(monsterList.shift());
+				} else {
+					monsterList.shift();
+					retry = 0;
+				}
 			}
 		}
 
@@ -924,33 +942,39 @@ var Attack = {
 			}
 		}
 
-		var ids = [58, 59, 60, 61, 62, 101, 102, 103, 104, 105, 278, 279, 280, 281, 282, 298, 299, 300, 645, 646, 647, 662, 663, 664, 667, 668, 669, 670, 675, 676];
+		var ids = [58, 59, 60, 61, 62, 101, 102, 103, 104, 105, 278, 279, 280, 281, 282, 298, 299, 300, 645, 646, 647, 662, 663, 664, 667, 668, 669, 670, 675, 676],
+			aShaman, bShaman, aNear, bNear, focusRange;
 
-		if (me.area !== 61 && ids.indexOf(unitA.classid) > -1 && ids.indexOf(unitB.classid) > -1) {
-			// Kill "scary" uniques first (like Bishibosh)
-			if ((unitA.spectype & 0x04) && (unitB.spectype & 0x04)) {
-				return getDistance(me, unitA) - getDistance(me, unitB);
-			}
+		// Shamans: only prioritize ones near us. Far shamans sorted first used to get
+		// shift()-dropped when out of clear range (packs keep reviving).
+		focusRange = 40;
+		aShaman = ids.indexOf(unitA.classid) > -1;
+		bShaman = ids.indexOf(unitB.classid) > -1;
+		aNear = getDistance(me, unitA) <= focusRange;
+		bNear = getDistance(me, unitB) <= focusRange;
 
-			if (unitA.spectype & 0x04) {
+		if (aShaman && aNear && !(bShaman && bNear)) {
+			return -1;
+		}
+
+		if (bShaman && bNear && !(aShaman && aNear)) {
+			return 1;
+		}
+
+		if (aShaman && aNear && bShaman && bNear) {
+			// Unique shamans (Bishibosh etc.) before normals
+			if ((unitA.spectype & 0x04) && !(unitB.spectype & 0x04)) {
 				return -1;
 			}
 
-			if (unitB.spectype & 0x04) {
+			if ((unitB.spectype & 0x04) && !(unitA.spectype & 0x04)) {
 				return 1;
 			}
 
 			return getDistance(me, unitA) - getDistance(me, unitB);
 		}
 
-		if (ids.indexOf(unitA.classid) > -1) {
-			return -1;
-		}
-
-		if (ids.indexOf(unitB.classid) > -1) {
-			return 1;
-		}
-
+		// Neither is a nearby shaman — normal boss / distance sort
 		if (Config.BossPriority) {
 			if ((unitA.spectype & 0x5) && (unitB.spectype & 0x5)) {
 				return getDistance(me, unitA) - getDistance(me, unitB);
@@ -1041,6 +1065,52 @@ var Attack = {
 		}
 
 		return monList;
+	},
+
+	// Densest visible cluster (loaded units only). Returns {unit, count} or false.
+	findDensePack: function (minSize, clusterRange) {
+		var list, i, j, count, bestUnit, bestCount;
+
+		if (minSize === undefined) {
+			minSize = 3;
+		}
+
+		if (clusterRange === undefined) {
+			clusterRange = 18;
+		}
+
+		list = this.buildMonsterList();
+
+		if (!list.length) {
+			return false;
+		}
+
+		bestCount = 0;
+		bestUnit = null;
+
+		for (i = 0; i < list.length; i += 1) {
+			count = 0;
+
+			for (j = 0; j < list.length; j += 1) {
+				if (getDistance(list[i].x, list[i].y, list[j].x, list[j].y) <= clusterRange) {
+					count += 1;
+				}
+			}
+
+			if (count > bestCount) {
+				bestCount = count;
+				bestUnit = list[i];
+			}
+		}
+
+		if (!bestUnit || bestCount < minSize) {
+			return false;
+		}
+
+		return {
+			unit: bestUnit,
+			count: bestCount
+		};
 	},
 
 	deploy: function (unit, distance, spread, range) {
@@ -1465,9 +1535,17 @@ AuraLoop: // Skip monsters with auras
 			maxres = 100;
 		}
 
-		// Static handler
+		// Static Field — PD2 floor 55/70/85; Config.CastStatic is stop-% (clamped up to floor)
 		if (val === 42 && this.getResist(unit, damageType) < 100) {
-			return (unit.hp * 100 / 128) > Config.CastStatic;
+			var thresh = 100;
+
+			if (typeof ClassAttack !== "undefined" && ClassAttack.getStaticThreshold) {
+				thresh = ClassAttack.getStaticThreshold();
+			} else if (Config.CastStatic !== false && Config.CastStatic < 100) {
+				thresh = Config.CastStatic;
+			}
+
+			return thresh < 100 && (unit.hp * 100 / (unit.hpmax || 128)) > thresh;
 		}
 
 		if (this.infinity && ["fire", "lightning", "cold"].indexOf(damageType) > -1 && unit.getState) { // baal in throne room doesn't have getState

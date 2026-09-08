@@ -1,3 +1,4 @@
-// Sorc only — Leaf (Tir+Ral) 2os staves. Not loaded for other classes.
+// Fire sorc only — Leaf (Tir+Ral) 2os staves until a better skill orb (tier>=50) exists.
+// Runtime stop: Runewords.hasBetterThanLeafOrb / wantBaseForRunes.
 
 ([Name] == ShortStaff || [Name] == LongStaff || [Name] == GnarledStaff || [Name] == BattleStaff || [Name] == WarStaff || [Name] == JoStaff || [Name] == CedarStaff) && [Flag] != Ethereal # [Sockets] == 2 # [MaxQuantity] == 1

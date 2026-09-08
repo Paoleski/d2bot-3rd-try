@@ -1,0 +1,8 @@
+// Spirit (Tal+Thul+Ort+Amn) — 4os sword bases for AutoGear.
+// Cold/light: pickit loaded early; recipes still mid @ lvl 18.
+// MiniShop: Runewords.wantSpiritShopBase — scanned on Repair only when Town.repair() already opened that NPC (never a dedicated Repair visit for bases).
+// PD2 casters do NOT make Spirit Monarch — use Splendor / Lidless / Moser's instead
+// (see leveling_rw_caster_shield.nip). Empty bases protected by Item.isProtectedRWBase.
+
+// Sword bases (Crystal / Broad / Long — common 4os)
+([Name] == CrystalSword || [Name] == BroadSword || [Name] == LongSword) && [Flag] != Ethereal && [quality] <= superior # [Sockets] == 4 # [MaxQuantity] == 1

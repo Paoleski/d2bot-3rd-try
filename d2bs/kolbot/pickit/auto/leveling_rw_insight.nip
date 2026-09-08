@@ -1,0 +1,9 @@
+// Insight (Ral+Tir+Tal+Sol) — 4os polearm bases for Act2 merc (AutoGear mid RW @ lvl 27+).
+// Runtime enforces MAX ONE empty base: keep best only; upgrade if ground/shop base scores higher.
+// Rank: eth Thresher/GT/CA > other eth elites > Bill/Partizan/Poleaxe > Bec/Battle Scythe; CV last (str).
+
+// Exceptional — Bill is the sweet spot (4os / merc str); eth preferred
+([Name] == Bill || [Name] == Partizan || [Name] == Poleaxe || [Name] == BecDeCorbin || [Name] == BattleScythe) && [quality] <= superior # [Sockets] == 4
+
+// Elite — eth preferred; Thresher/CrypticAxe/GiantThresher best; ColossusVoulge high str (still OK late)
+([Name] == Thresher || [Name] == CrypticAxe || [Name] == GreatPoleaxe || [Name] == GiantThresher || [Name] == ColossusVoulge) && [quality] <= superior # [Sockets] == 4

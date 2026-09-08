@@ -540,8 +540,9 @@ function LoadConfig() {
 	Config.Wereform = false; // 0 / false - don't shapeshift, 1 / "Werewolf" - change to werewolf, 2 / "Werebear" - change to werebear
 
 	// Class specific config
-	Config.CastStatic = 60; // Cast static until the target is at designated life percent. 100 = disabled.
-	Config.StaticList = []; // List of monster NAMES or CLASSIDS to static. Example: Config.StaticList = ["Andariel", 243];
+	// PD2 Static: 25% current HP (lightning) while above 55/70/85 (N/NM/H). Empty list = unique/bosses.
+	Config.CastStatic = 55; // stop-%; clamped up to PD2 floor. 100 = disabled.
+	Config.StaticList = []; // empty = Andy/Duriel/Meph/Diablo/Baal/Izual only
 
 	/* ========================================================================
 	 * PD2 Sorc builds — skill/stat only (switch with SORC_BUILD).
@@ -641,28 +642,25 @@ function LoadConfig() {
 			[383, 20, false]   // leftover → Lesser Hydra
 		];
 
-		// Shared leveling stats (all SORC_BUILD): +5 str / +5 vit alternate → str 50;
-		// ~lvl 10–11 and ~18–19: +10 energy each (base ene 35 → 45 → 55).
+		// Shared leveling stats: 55 str ~lvl 25, 80 str ~lvl 50; energy bumps early
 		Config.AutoStat.Build = [
-			["strength", 15], ["vitality", 15],
 			["strength", 20], ["vitality", 20],
-			["strength", 25], ["vitality", 25],
 			["strength", 30], ["vitality", 30],
-			["energy", 45], // ~lvl 10–11 (10 pts)
-			["strength", 35], ["vitality", 35],
-			["strength", 40], ["vitality", 40],
-			["strength", 45], ["vitality", 45],
-			["energy", 55], // ~lvl 18–19 (10 pts)
-			["strength", 50], ["vitality", 50],
+			["energy", 45], // ~lvl 10-11
+			["strength", 45], ["vitality", 40],
+			["strength", 55], ["vitality", 50], // ~lvl 25 — gear str
+			["energy", 55], // ~lvl 18-25
+			["strength", 65], ["vitality", 70],
+			["strength", 80], ["vitality", 90], // ~lvl 50
 			["vitality", "all"]
 		];
 
 	} else if (SORC_BUILD === "light") {
-		/* Lightning / Charged Bolt (screenshot)
-		 * 20 CB, 20 Lightning, 20 TK, 20 LM, 1+ TP, 1 Shiver, 1+ Warmth.
-		 * Static added for bosses. Vit rest, energy 0.
+		/* Lightning / Charged Bolt
+		 * Early: Warmth → CB dump (skip Static/TK) → Static@12 → TK@13 → CB dump → Teleport@18.
+		 * Then Shiver path, max CB / Lightning / TK / LM.
 		 * IDs: CB 38, Lightning 49, TK 43, LM 63, TP 54, Warmth 37, Shiver 50, Static 42
-		 * Early: AttackSkill = Fire Bolt (36) from staff soft; ClassAttack switches to CB when hard CB > 0.
+		 * Build[i][3] = min charlvl (optional). DumpSkill fills CB between gates.
 		 */
 		Config.AttackSkill[0] = -1;
 		Config.AttackSkill[1] = 36; // Fire Bolt until Charged Bolt is learned
@@ -676,30 +674,29 @@ function LoadConfig() {
 
 		Config.AutoSkill.DumpSkill = 38; // Charged Bolt while waiting on level gates
 		Config.AutoSkill.Build = [
-			[37, 1, true],     // Warmth
-			[38, 1, true],     // Charged Bolt
-			[42, 1, false],    // Static Field (don't delay TK/TP)
-			[43, 1, true],     // Telekinesis (Teleport prereq) — take ASAP (lvl 6)
-			[54, 1, true],     // Teleport — MAX priority at 18 only (skip until then)
-			[40, 1, false],    // Cold Enchant — Shiver Armor prereq (PD2)
-			[50, 1, false],    // Shiver Armor
-			[38, 20, false],   // max Charged Bolt
-			[49, 20, false],   // max Lightning
-			[43, 20, false],   // max Telekinesis
-			[63, 20, false]    // max Lightning Mastery
+			[37, 1, true],         // Warmth
+			[38, 1, true],         // Charged Bolt — then dump CB via DumpSkill
+			[42, 1, false, 12],    // Static Field @12
+			[43, 1, true, 13],     // Telekinesis @13 (Teleport prereq)
+			[54, 1, true],         // Teleport @18 (natural req)
+			[40, 1, false, 18],    // Cold Enchant — after Teleport
+			[50, 1, false, 18],    // Shiver Armor
+			[38, 20, false],       // max Charged Bolt
+			[49, 20, false],       // max Lightning
+			[43, 20, false],       // max Telekinesis
+			[63, 20, false]        // max Lightning Mastery
 		];
 
+		// Shared leveling stats: 55 str ~lvl 25, 80 str ~lvl 50; energy bumps early
 		Config.AutoStat.Build = [
-			["strength", 15], ["vitality", 15],
 			["strength", 20], ["vitality", 20],
-			["strength", 25], ["vitality", 25],
 			["strength", 30], ["vitality", 30],
-			["energy", 45], // ~lvl 10–11 (10 pts)
-			["strength", 35], ["vitality", 35],
-			["strength", 40], ["vitality", 40],
-			["strength", 45], ["vitality", 45],
-			["energy", 55], // ~lvl 18–19 (10 pts)
-			["strength", 50], ["vitality", 50],
+			["energy", 45], // ~lvl 10-11
+			["strength", 45], ["vitality", 40],
+			["strength", 55], ["vitality", 50], // ~lvl 25 — gear str
+			["energy", 55], // ~lvl 18-25
+			["strength", 65], ["vitality", 70],
+			["strength", 80], ["vitality", 90], // ~lvl 50
 			["vitality", "all"]
 		];
 
@@ -742,17 +739,16 @@ function LoadConfig() {
 			[39, 20, false]    // leftover → Ice Bolt (FO synergy)
 		];
 
+		// Shared leveling stats: 55 str ~lvl 25, 80 str ~lvl 50; energy bumps early
 		Config.AutoStat.Build = [
-			["strength", 15], ["vitality", 15],
 			["strength", 20], ["vitality", 20],
-			["strength", 25], ["vitality", 25],
 			["strength", 30], ["vitality", 30],
-			["energy", 45], // ~lvl 10–11 (10 pts)
-			["strength", 35], ["vitality", 35],
-			["strength", 40], ["vitality", 40],
-			["strength", 45], ["vitality", 45],
-			["energy", 55], // ~lvl 18–19 (10 pts)
-			["strength", 50], ["vitality", 50],
+			["energy", 45], // ~lvl 10-11
+			["strength", 45], ["vitality", 40],
+			["strength", 55], ["vitality", 50], // ~lvl 25 — gear str
+			["energy", 55], // ~lvl 18-25
+			["strength", 65], ["vitality", 70],
+			["strength", 80], ["vitality", 90], // ~lvl 50
 			["vitality", "all"]
 		];
 	}

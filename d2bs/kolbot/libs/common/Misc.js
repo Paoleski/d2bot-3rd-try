@@ -57,8 +57,8 @@ var Skill = {
 		case 245: // Tornado
 		case 370: // Gust (PD2)
 			return 5;
-		case 38: // Charged Bolt
-			return 6;
+		case 38: // Charged Bolt — short bolts early; close in until 15
+			return me.charlvl < 15 ? 3 : 6;
 		case 48: // Nova
 		case 151: // Whirlwind
 			return 7;
@@ -263,6 +263,44 @@ var Skill = {
 		return 0;
 	},
 
+	// TK only for: Pickit (gold/scrolls/keys/pots) and Duriel orifice (object 100).
+	// Never monsters, chests, shrines, seals, etc. Restores RMB after cast.
+	castTelekinesis: function (target) {
+		var prevRmb, restore, ok;
+
+		if (!target) {
+			return false;
+		}
+
+		// Never TK monsters (PD2 lightning + knockback = fake attack)
+		if (target.type === 1) {
+			return false;
+		}
+
+		if (!(me.getSkill(43, 1) || me.getSkill(43, 0) || me.getStat(97, 43))) {
+			return false;
+		}
+
+		prevRmb = me.getSkill(2);
+		ok = this.cast(43, 0, target);
+
+		if (prevRmb > 0 && prevRmb !== 43) {
+			restore = prevRmb;
+		} else if (Config.AttackSkill && Config.AttackSkill[1] > 0) {
+			restore = Config.AttackSkill[1];
+		} else if (Config.AttackSkill && Config.AttackSkill[3] > 0) {
+			restore = Config.AttackSkill[3];
+		} else {
+			restore = 0;
+		}
+
+		if (restore !== 43) {
+			this.setSkill(restore, 0);
+		}
+
+		return ok;
+	},
+
 	charges: [],
 
 	// Cast a skill on self, Unit or coords
@@ -391,7 +429,8 @@ MainLoop:
 				}
 			}
 
-			while (me.attacking) {
+			// Cap wait — me.attacking stuck true freezes both sorc and necro with no logs
+			for (i = 0; i < 100 && me.attacking; i += 1) {
 				delay(10);
 			}
 		}
@@ -540,8 +579,201 @@ var Item = {
 		return Config.AutoEquip && NTIP.GetTier(item) > 0;
 	},
 
+	// Higher tier than equipped (any body slot) — keep even if canEquip fails (str/lvl/dex)
+	isPendingPlayerUpgrade: function (item) {
+		var i, tier, bodyLoc, eq, eqTier;
+
+		if (!Config.AutoEquip || !item) {
+			return false;
+		}
+
+		tier = NTIP.GetTier(item);
+
+		if (tier <= 0) {
+			return false;
+		}
+
+		bodyLoc = this.getBodyLoc(item);
+
+		if (!bodyLoc) {
+			return false;
+		}
+
+		for (i = 0; i < bodyLoc.length; i += 1) {
+			eq = this.getEquippedItem(bodyLoc[i]);
+			eqTier = eq.tier;
+
+			if (eqTier < 0) {
+				eqTier = 0;
+			}
+
+			if (eq.classid === -1 || tier > eqTier) {
+				return true;
+			}
+		}
+
+		return false;
+	},
+
+	// Sorc/necro never wear axes (Military Pick, Crowbill, …) — leave on ground
+	isCasterJunkAxe: function (item) {
+		var code, name;
+
+		if (!item || (me.classid !== 1 && me.classid !== 2)) {
+			return false;
+		}
+
+		if (typeof NTIPAliasType !== "undefined" && NTIPAliasType.axe !== undefined &&
+				item.itemType === NTIPAliasType.axe) {
+			return true;
+		}
+
+		if (item.itemType === 28) { // axe (LoD / most PD2)
+			return true;
+		}
+
+		code = item.code ? String(item.code).toLowerCase() : "";
+
+		// Normal / excep / elite axe bases (incl. Military Pick → Crowbill → War Spike)
+		if (code === "hax" || code === "axe" || code === "2ax" || code === "mpi" || code === "wax" ||
+				code === "lax" || code === "bax" || code === "9ha" || code === "9ax" || code === "92a" ||
+				code === "9mp" || code === "9wa" || code === "9la" || code === "9ba" ||
+				code === "7ha" || code === "7ax" || code === "72a" || code === "7mp" ||
+				code === "7wa" || code === "7la" || code === "7ba") {
+			return true;
+		}
+
+		// classid range: normal axes 0–6, excep 93–99, elite 197–203 (LoD / NTIP aliases)
+		if ((item.classid >= 0 && item.classid <= 6) ||
+				(item.classid >= 93 && item.classid <= 99) ||
+				(item.classid >= 197 && item.classid <= 203)) {
+			return true;
+		}
+
+		name = item.name ? String(item.name).toLowerCase().replace(/ÿc[0-9a-z]/gi, "") : "";
+
+		if (name.indexOf("military pick") > -1 || name.indexOf("crowbill") > -1 ||
+				name.indexOf("war spike") > -1 || name.indexOf("hand axe") > -1 ||
+				name.indexOf("double axe") > -1 || name.indexOf("large axe") > -1 ||
+				name.indexOf("broad axe") > -1 || name.indexOf("battle axe") > -1 ||
+				name.indexOf("great axe") > -1 || name.indexOf("giant axe") > -1 ||
+				name.indexOf("hatchet") > -1 || name.indexOf("cleaver") > -1 ||
+				name.indexOf("tomahawk") > -1 || name.indexOf("small axe") > -1) {
+			return true;
+		}
+
+		return false;
+	},
+
+	// Barb-only helms (PD2 phlm = 72). Never for sorc/necro/merc unless Act5 barb.
+	isBarbHelm: function (item) {
+		var code;
+
+		if (!item) {
+			return false;
+		}
+
+		if (typeof NTIPAliasType !== "undefined" && NTIPAliasType.phlm !== undefined &&
+				item.itemType === NTIPAliasType.phlm) {
+			return true;
+		}
+
+		if (item.itemType === 72) {
+			return true;
+		}
+
+		code = item.code ? String(item.code).toLowerCase() : "";
+
+		return /^ba[1-5a-e]$/i.test(code);
+	},
+
 	isShieldItem: function (item) {
-		return !!(item && (item.itemType === 2 || item.itemType === 70));
+		// PD2 ItemTypes: ashd may be 70 (LoD) or 71 (shifted); head/voodoo is often 70 on PD2
+		return !!(item && (item.itemType === 2 || item.itemType === 70 || item.itemType === 71));
+	},
+
+	// Paladin-only shields (targe / sacred targe / …). Necro+sorc must never equip these.
+	isAuricShield: function (item) {
+		var t, code, alias;
+
+		if (!item) {
+			return false;
+		}
+
+		code = item.code ? String(item.code).toLowerCase() : "";
+
+		// Necro voodoo heads share offhand slot — never classify as auric
+		if (/^ne[1-9a-f]$/i.test(code)) {
+			return false;
+		}
+
+		if (typeof NTIPAliasType !== "undefined") {
+			if (NTIPAliasType.head !== undefined && item.itemType === NTIPAliasType.head) {
+				return false;
+			}
+
+			alias = NTIPAliasType.auricshields;
+
+			if (alias !== undefined && item.itemType === alias) {
+				return true;
+			}
+		}
+
+		// Classic / excep / elite paladin shield codes
+		if (/^pa[1-5a-e]$/i.test(code)) {
+			return true;
+		}
+
+		t = item.itemType;
+
+		// PD2 often shifts ashd to 71; LoD uses 70 for auric (heads are ne*)
+		if (t === 71) {
+			return true;
+		}
+
+		if (t === 70 && /^pa/i.test(code)) {
+			return true;
+		}
+
+		return false;
+	},
+
+	// PD2: NTIPAliasType.orb = 69 (LoD was 68); norb/neworbs = 239 (PD2 exalted line)
+	isOrbItem: function (item) {
+		var t, alias, code;
+
+		if (!item) {
+			return false;
+		}
+
+		t = item.itemType;
+
+		if (t === 68 || t === 69 || t === 239) {
+			return true;
+		}
+
+		if (typeof NTIPAliasType !== "undefined") {
+			alias = NTIPAliasType.orb;
+
+			if (alias !== undefined && t === alias) {
+				return true;
+			}
+
+			alias = NTIPAliasType.norb || NTIPAliasType.neworbs;
+
+			if (alias !== undefined && t === alias) {
+				return true;
+			}
+		}
+
+		code = item.code ? String(item.code).toLowerCase() : "";
+
+		// ob1–obf classic orbs; PD2 mythic/exalted/divine codes if present
+		if (/^ob[1-9a-f]$/.test(code) || code === "mfo" || code === "exo" || code === "divo") {
+			return true;
+		}
+
+		return false;
 	},
 
 	// Tiered shield kept for later while still on 2H staff (sorc staff→orb only)
@@ -628,12 +860,103 @@ var Item = {
 		return true;
 	},
 
+	// Sorc on 2H staff: keep best *useful* orb for switch (skills/FCR — not bare white)
+	isPendingOrb: function (item) {
+		var tier;
+
+		if (me.classid !== 1 || !Config.AutoEquip || !this.isOrbItem(item)) {
+			return false;
+		}
+
+		if (this.wantsShieldSlot()) {
+			return false; // already on orb / Spirit
+		}
+
+		tier = NTIP.GetTier(item) || 0;
+
+		// Tier 12+ = ColdSkillTab / skills / FCR lines — bare white was tier 6 junk
+		return tier >= 12;
+	},
+
+	isBestPendingOrb: function (item) {
+		var it, t, best = 0, bestGid = -1, mine;
+
+		if (!this.isPendingOrb(item)) {
+			return false;
+		}
+
+		mine = NTIP.GetTier(item);
+		it = me.getItem(-1, -1);
+
+		if (it) {
+			do {
+				if ((it.location === 3 || it.location === 7) && this.isPendingOrb(it)) {
+					t = NTIP.GetTier(it);
+
+					if (t > best || (t === best && it.gid > bestGid)) {
+						best = t;
+						bestGid = it.gid;
+					}
+				}
+			} while (it.getNext());
+		}
+
+		if (mine < best) {
+			return false;
+		}
+
+		if (mine > best) {
+			return true;
+		}
+
+		return item.gid === bestGid || bestGid === -1;
+	},
+
+	// 0 durability / empty stack (not indestructible). Ethereal gear cannot be NPC-repaired.
+	isBroken: function (item) {
+		var durability, maxDur, quantity;
+
+		if (!item || item.type !== 4) {
+			return false;
+		}
+
+		if (item.getStat(152)) { // Indestructible
+			return false;
+		}
+
+		switch (item.itemType) {
+		case 42: // Throwing knives
+		case 43: // Throwing axes
+		case 44: // Javelins
+		case 87: // Amazon javelins
+			quantity = item.getStat(70);
+
+			return typeof quantity === "number" && quantity <= 0;
+		default:
+			break;
+		}
+
+		maxDur = item.getStat(73);
+
+		if (typeof maxDur !== "number" || maxDur <= 0) {
+			return false;
+		}
+
+		durability = item.getStat(72);
+
+		return typeof durability === "number" && durability <= 0;
+	},
+
 	canEquip: function (item) {
 		if (item.type !== 4) { // Not an item
 			return false;
 		}
 
 		if (!item.getFlag(0x10)) { // Unid item
+			return false;
+		}
+
+		if (this.isBroken(item)) {
 			return false;
 		}
 
@@ -695,9 +1018,10 @@ var Item = {
 		if (item) {
 			do {
 				if (item.bodylocation === bodyLoc) {
+					// Broken eth (and any 0-dur) must lose the slot — NTIP tier alone kept wearing dead shields
 					return {
 						classid: item.classid,
-						tier: NTIP.GetTier(item)
+						tier: this.isBroken(item) ? -1 : NTIP.GetTier(item)
 					};
 				}
 			} while (item.getNext());
@@ -759,7 +1083,7 @@ var Item = {
 
 		// Sorc: only equip shield once on orb or endgame Spirit (not while 2H staff)
 		if (me.classid === 1) {
-			if (main.itemType === 68) {
+			if (this.isOrbItem(main)) {
 				return true;
 			}
 
@@ -781,12 +1105,57 @@ var Item = {
 		return !!(me.getSkill(73, 0) || me.getSkill(73, 1) || me.getStat(97, 73));
 	},
 
+	// Melee PS: FCR jewelry with no life/AR/res/skills/leech — never wear (base nec.nip still tiers FCR rings)
+	isMeleeJunkFcrJewelry: function (item) {
+		var fcr, hp, ar, str, dex, res, ll, necro, tab, pd;
+
+		if (!item || !this.wantsPoisonStrikeDagger()) {
+			return false;
+		}
+
+		// ring / amulet only
+		if (item.itemType !== 10 && item.itemType !== 12) {
+			return false;
+		}
+
+		fcr = item.getStat(105) || 0;
+
+		if (typeof item.getStatEx === "function") {
+			fcr = Math.max(fcr, item.getStatEx(105) || 0);
+		}
+
+		if (fcr < 10) {
+			return false;
+		}
+
+		hp = item.getStat(7) || 0;
+		ar = item.getStat(19) || 0;
+		str = item.getStat(0) || 0;
+		dex = item.getStat(2) || 0;
+		res = (item.getStat(39) || 0) + (item.getStat(41) || 0) + (item.getStat(43) || 0) + (item.getStat(45) || 0);
+		ll = item.getStat(60) || 0;
+		necro = item.getStat(83, 2) || 0;
+		tab = item.getStat(188, 17) || 0; // poisonandboneskilltab
+		pd = (item.getStat(97, 73) || 0) + (item.getStat(107, 73) || 0);
+
+		if (hp >= 15 || ar >= 40 || res >= 15 || (str + dex) >= 10 || ll >= 3) {
+			return false;
+		}
+
+		if (necro >= 1 || tab >= 1 || pd >= 1 || (item.getStat(127) || 0) >= 1) {
+			return false;
+		}
+
+		return true;
+	},
+
 	getBodyLoc: function (item) {
 		var bodyLoc;
 
 		switch (item.itemType) {
 		case 2: // Shield
-		case 70: // Auric Shields
+		case 70: // Auric Shields (LoD) OR voodoo heads (PD2 shifted) — both offhand
+		case 71: // Auric Shields (PD2 shifted)
 			bodyLoc = 5;
 
 			break;
@@ -820,13 +1189,13 @@ var Item = {
 
 			break;
 		case 37: // Helm
-		case 71: // Barb Helm
-		case 75: // Circlet
+		case 72: // Primal/barb helm (PD2 phlm); LoD used 71 for barb — PD2 71 is ashd (offhand above)
+		case 73: // Pelt (PD2)
+		case 75: // Circlet (alias may collide with rune — still try helm)
 			bodyLoc = 1;
 
 			break;
-		case 24: //
-		case 25: //
+		case 24: //		case 25: //
 		case 26: //
 		case 27: //
 		case 28: //
@@ -841,18 +1210,24 @@ var Item = {
 		case 42: //
 		case 43: //
 		case 44: //
-		case 67: // Handtohand (Assasin Claw)
-		case 68: //
-		case 69: //
-		case 72: //
+		case 67: // Handtohand (Assassin Claw)
+		case 68: // Orb (LoD) / h2h (PD2) — both weapons
+		case 69: // Orb (PD2) / head (LoD)
 		case 85: //
 		case 86: //
 		case 87: //
 		case 88: //
+		case 239: // PD2 neworbs
 			bodyLoc = 4;
 
 			break;
 		default:
+			// Classid orb fallback when itemType is exotic
+			if (this.isOrbItem(item)) {
+				bodyLoc = 4;
+				break;
+			}
+
 			return false;
 		}
 
@@ -861,6 +1236,148 @@ var Item = {
 		}
 
 		return bodyLoc;
+	},
+
+	// SoloPlay idea (empty base score -1) → PD2: never wear blanks reserved for Config.Runewords
+	// White/grey only (q 1–3). Magic/rare/set/unique cannot be runewords.
+	isRwBaseQuality: function (item) {
+		var q;
+
+		if (!item) {
+			return false;
+		}
+
+		q = item.quality;
+
+		return q === 1 || q === 2 || q === 3;
+	},
+
+	isProtectedRWBase: function (item) {
+		var i, rw, sockets, ethFlag, baseId, recipeLen, key, socked, bestIns, bestLore;
+
+		if (!Config.AutoGear || !Config.AutoGear.ProtectRWBases) {
+			return false;
+		}
+
+		if (!item || !this.isRwBaseQuality(item) || !Config.Runewords || !Config.Runewords.length) {
+			return false;
+		}
+
+		// Already socketed with runes/gems — not an empty RW base
+		socked = item.getItem();
+
+		if (socked) {
+			return false;
+		}
+
+		sockets = item.getStat(194) || 0;
+
+		// PD2: getStat(194) often 0 on field/shop bases — getStatEx sees real socket count
+		if (typeof item.getStatEx === "function") {
+			sockets = Math.max(sockets, item.getStatEx(194) || 0);
+		}
+
+		if (sockets < 1) {
+			return false;
+		}
+
+		for (i = 0; i < Config.Runewords.length; i += 1) {
+			rw = Config.Runewords[i];
+
+			if (!rw || !rw[0] || rw[0] === false) {
+				continue;
+			}
+
+			recipeLen = rw[0].length;
+
+			if (!recipeLen || sockets !== recipeLen) {
+				continue;
+			}
+
+			baseId = rw[1];
+
+			if (typeof baseId === "string") {
+				key = baseId.replace(/\s+/g, "").toLowerCase();
+
+				if (typeof NTIPAliasClassID !== "undefined" && NTIPAliasClassID.hasOwnProperty(key)) {
+					baseId = NTIPAliasClassID[key];
+				} else {
+					continue;
+				}
+			}
+
+			if (item.classid !== baseId) {
+				// Lore: accept any white/grey helm or circlet (PD2 classid / alias miss)
+				if (!(typeof Runewords !== "undefined" && Runewords.isLoreRecipe &&
+						Runewords.isLoreRecipe(rw[0]) && Runewords.isConfiguredLoreBase &&
+						Runewords.isConfiguredLoreBase(item))) {
+					continue;
+				}
+			}
+
+			ethFlag = rw[2] || 0;
+
+			if (ethFlag === 1 && !item.getFlag(0x400000)) {
+				continue;
+			}
+
+			if (ethFlag === 2 && item.getFlag(0x400000)) {
+				continue;
+			}
+
+			// Leaf bases: don't protect once a better skill orb exists
+			if (typeof Runewords !== "undefined" && Runewords.isLeafRecipe && Runewords.isLeafRecipe(rw[0]) &&
+					Runewords.hasBetterThanLeafOrb && Runewords.hasBetterThanLeafOrb()) {
+				continue;
+			}
+
+			// Stealth bases: don't protect extras once one Stealth is done
+			if (typeof Runewords !== "undefined" && Runewords.isStealthRecipe && Runewords.isStealthRecipe(rw[0]) &&
+					Runewords.hasCompletedArmorRuneword && Runewords.hasCompletedArmorRuneword()) {
+				continue;
+			}
+
+			// Lore bases: only protect the highest-def empty helm (max one)
+			if (typeof Runewords !== "undefined" && Runewords.isLoreRecipe &&
+					Runewords.isLoreRecipe(rw[0])) {
+				if (Runewords.hasCompletedLoreHelm && Runewords.hasCompletedLoreHelm()) {
+					continue;
+				}
+
+				bestLore = Runewords.getBestEmptyLoreBase && Runewords.getBestEmptyLoreBase();
+
+				if (bestLore && bestLore.gid !== item.gid &&
+						!(Runewords.wantLoreBase && Runewords.wantLoreBase(item))) {
+					continue;
+				}
+			}
+
+			// Spirit sword bases: don't protect extras once Spirit is done
+			if (typeof Runewords !== "undefined" && Runewords.isSpiritRecipe && Runewords.isSpiritRecipe(rw[0]) &&
+					Runewords.hasCompletedSpiritSword && Runewords.hasCompletedSpiritSword()) {
+				continue;
+			}
+
+			// Insight: only protect the best empty pole (max one base)
+			if (typeof Runewords !== "undefined" && Runewords.isInsightRecipe &&
+					Runewords.isInsightRecipe(rw[0])) {
+				if (Runewords.hasCompletedInsight && Runewords.hasCompletedInsight()) {
+					continue;
+				}
+
+				bestIns = Runewords.getBestEmptyInsightBase && Runewords.getBestEmptyInsightBase();
+
+				// Protect this item only if it's the best banked base, or an upgrade we want
+				if (bestIns && bestIns.gid !== item.gid &&
+						!(Runewords.wantInsightBase && Runewords.wantInsightBase(item))) {
+					continue;
+				}
+			}
+
+			return true;
+		}
+
+		return false;
 	},
 
 	autoEquipCheck: function (item) {
@@ -872,8 +1389,38 @@ var Item = {
 			tier = NTIP.GetTier(item),
 			bodyLoc = this.getBodyLoc(item);
 
+		// Broken / 0-dur — never keep for equip (esp. ethereal NPC can't repair)
+		if (this.isBroken(item)) {
+			return false;
+		}
+
+		// Empty Stealth/Lore/Leaf/Steel bases → stash for RW, never wear
+		if (this.isProtectedRWBase(item)) {
+			return false;
+		}
+
+		// Paladin shields (auric) — only paladin can wear
+		if (me.classid !== 3 && this.isAuricShield(item)) {
+			return false;
+		}
+
+		// Casters: never equip axes (Military Pick, War Axe, …)
+		if (this.isCasterJunkAxe(item)) {
+			return false;
+		}
+
+		// Barb helms — only barbarian wears these
+		if (me.classid !== 4 && this.isBarbHelm(item)) {
+			return false;
+		}
+
+		// Sorceress: never wand (staff/orb only) — blocks MiniShopBot Drognan wand buys
+		if (me.classid === 1 && item.itemType === 25) {
+			return false;
+		}
+
 		// Shields: only once we run an orb (or Spirit sword). Never with a 2H staff.
-		if (tier > 0 && bodyLoc && (item.itemType === 2 || item.itemType === 70)) {
+		if (tier > 0 && bodyLoc && this.isShieldItem(item)) {
 			if (!this.wantsShieldSlot()) {
 				return false;
 			}
@@ -883,6 +1430,22 @@ var Item = {
 		if (tier > 0 && this.wantsPoisonStrikeDagger() && bodyLoc && bodyLoc[0] === 4) {
 			if (item.itemType !== 32) {
 				return false;
+			}
+		}
+
+		// Poison Strike melee: never equip FCR-only rings/amulets
+		if (this.isMeleeJunkFcrJewelry(item)) {
+			return false;
+		}
+
+		// Sorc: allow orb to replace 2H staff when orb has real mods (same-stat orb > staff in nips)
+		if (tier > 0 && me.classid === 1 && this.isOrbItem(item) && this.hasTwoHandedEquipped()) {
+			eq = this.getEquippedItem(4);
+			eqTier = eq.tier < 0 ? 0 : eq.tier;
+
+			// Force off white/early staff only; Leaf (90) and high skill staff use normal tier compare
+			if (tier >= 10 && eqTier < 45 && (this.canEquip(item) || !item.getFlag(0x10))) {
+				return true;
 			}
 		}
 
@@ -921,22 +1484,147 @@ var Item = {
 		return false;
 	},
 
+	// MiniShopBot: don't spend gold on defense-formula starters (1.xxx) that only beat equipped by +1 AC
+	worthShopBuy: function (item) {
+		var i, tier, bodyLoc, eq, eqTier;
+
+		if (!Config.AutoEquip || !item) {
+			return false;
+		}
+
+		if (!this.autoEquipCheck(item)) {
+			return false;
+		}
+
+		tier = NTIP.GetTier(item);
+		bodyLoc = this.getBodyLoc(item);
+
+		if (!bodyLoc || tier <= 0) {
+			return false;
+		}
+
+		for (i = 0; i < bodyLoc.length; i += 1) {
+			eq = this.getEquippedItem(bodyLoc[i]);
+			eqTier = eq.tier;
+
+			if (eqTier < 0) {
+				eqTier = 0;
+			}
+
+			// Empty slot — buy to fill
+			if (eq.classid === -1) {
+				return true;
+			}
+
+			if (tier <= eqTier) {
+				continue;
+			}
+
+			// Both in starter band (1 + defense/1000) — skip marginal AC shop spam
+			if (tier < 2 && eqTier < 2) {
+				continue;
+			}
+
+			return true;
+		}
+
+		return false;
+	},
+
 	// returns true if the item should be kept+logged, false if not
 	autoEquip: function () {
 		if (!Config.AutoEquip) {
 			return true;
 		}
 
-		var i, j, tier, bodyLoc, tome, gid, eqTier,
-			items = me.findItems(-1, 0);
+		var i, j, tier, bodyLoc, tome, gid, eqTier, orbSwitch, worn, locs,
+			items;
+
+		// Ethereal gear can't be NPC-repaired — pull broken eth off the body so we can replace it
+		(function () {
+			var ethBroken = [],
+				u = me.getItem(-1, 1),
+				k, cur;
+
+			if (u) {
+				do {
+					if (u.getFlag(0x400000) && Item.isBroken(u)) {
+						ethBroken.push(u.gid);
+					}
+				} while (u.getNext());
+			}
+
+			for (k = 0; k < ethBroken.length; k += 1) {
+				cur = me.getItem(-1, -1, ethBroken[k]);
+
+				if (!cur || cur.mode !== 1) {
+					continue;
+				}
+
+				// Optional Ort/Ral while still equipped (cubeRepair only accepts mode 1)
+				if (Config.CubeRepair && typeof Town !== "undefined" && typeof Town.cubeRepairItem === "function") {
+					Town.cubeRepairItem(cur);
+					cur = me.getItem(-1, -1, ethBroken[k]);
+
+					if (cur && cur.mode === 1 && !Item.isBroken(cur)) {
+						continue;
+					}
+				}
+
+				if (!cur || cur.mode !== 1 || !Item.isBroken(cur)) {
+					continue;
+				}
+
+				print("ÿc1AutoEquipÿc0 :: unequip broken ethereal " + (cur.name || cur.classid));
+
+				if (cur.toCursor()) {
+					delay(me.ping * 2 + 200);
+
+					if (getCursorType() === 3) {
+						cur = getUnit(100);
+
+						if (cur && (!Storage.Inventory.CanFit(cur) || !Storage.Inventory.MoveTo(cur))) {
+							cur.drop();
+						}
+					}
+				}
+			}
+		}());
+
+		items = me.findItems(-1, 0);
 
 		if (!items) {
 			return false;
 		}
 
+		// Melee PS: pull FCR-only jewelry off the body so town can sell it
+		if (this.wantsPoisonStrikeDagger()) {
+			locs = [2, 6, 7]; // amulet, ring1, ring2
+
+			for (i = 0; i < locs.length; i += 1) {
+				worn = this.getEquippedItemUnit(locs[i]);
+
+				if (worn && this.isMeleeJunkFcrJewelry(worn)) {
+					print("ÿc8AutoEquipÿc0 :: unequip FCR junk jewelry (melee PS)");
+
+					if (worn.toCursor()) {
+						delay(me.ping * 2 + 200);
+
+						if (getCursorType() === 3) {
+							worn = getUnit(100);
+
+							if (worn && (!Storage.Inventory.CanFit(worn) || !Storage.Inventory.MoveTo(worn))) {
+								worn.drop();
+							}
+						}
+					}
+				}
+			}
+		}
+
 		function sortEq(a, b) {
-			var aShield = (a.itemType === 2 || a.itemType === 70) ? 1 : 0,
-				bShield = (b.itemType === 2 || b.itemType === 70) ? 1 : 0;
+			var aShield = Item.isShieldItem(a) ? 1 : 0,
+				bShield = Item.isShieldItem(b) ? 1 : 0;
 
 			// Weapons before shields so a 2H staff equips first
 			if (aShield !== bShield) {
@@ -956,9 +1644,9 @@ var Item = {
 
 		me.cancel();
 
-		// Remove items without tier
+		// Remove items without tier / broken (won't equip; avoid wasted tries)
 		for (i = 0; i < items.length; i += 1) {
-			if (NTIP.GetTier(items[i]) === 0) {
+			if (NTIP.GetTier(items[i]) === 0 || this.isBroken(items[i])) {
 				items.splice(i, 1);
 
 				i -= 1;
@@ -973,12 +1661,17 @@ var Item = {
 
 			if (tier > 0 && bodyLoc) {
 				for (j = 0; j < bodyLoc.length; j += 1) {
-					if ((items[0].itemType === 2 || items[0].itemType === 70) && !this.wantsShieldSlot()) {
+					if (this.isShieldItem(items[0]) && !this.wantsShieldSlot()) {
 						if (me.classid === 1) {
 							this.rememberPendingShield(items[0]);
 							print("ÿc2AutoEquipÿc0 :: skip equip shield — stash until orb/Spirit (sorc)");
 						}
 
+						break;
+					}
+
+					if (me.classid !== 3 && this.isAuricShield(items[0])) {
+						print("ÿc8AutoEquipÿc0 :: skip paladin shield (auric)");
 						break;
 					}
 
@@ -988,7 +1681,11 @@ var Item = {
 						eqTier = 0;
 					}
 
-					if ([3, 7].indexOf(items[0].location) > -1 && tier > eqTier && this.getEquippedItem(bodyLoc[j]).classid !== 174) {
+					// Orb replacing 2H staff: same gate as autoEquipCheck (tier≥10, staff < 45)
+					orbSwitch = me.classid === 1 && this.isOrbItem(items[0]) && this.hasTwoHandedEquipped() &&
+						tier >= 10 && eqTier < 45;
+
+					if ([3, 7].indexOf(items[0].location) > -1 && (tier > eqTier || orbSwitch) && this.getEquippedItem(bodyLoc[j]).classid !== 174) {
 						if (!items[0].getFlag(0x10)) { // unid
 							tome = me.findItem("ibk", 0, 3) || me.findItem(536, 0, 3);
 
@@ -1038,7 +1735,7 @@ var Item = {
 		// PD2 bodyloc can disagree with classic — also match by item type
 		switch (bodyLoc) {
 		case 1:
-			types = [37, 71, 75]; // helm / barb helm / circlet
+			types = [37, 71, 72, 75]; // helm / LoD barb / PD2 phlm / circlet
 			break;
 		case 3:
 			types = [3]; // armor
@@ -1157,39 +1854,119 @@ var Item = {
 
 	mercHasItemGid: function (gid) {
 		var merc = me.getMerc(),
-			item;
+			item, i;
 
 		if (!merc || !gid) {
 			return false;
 		}
 
-		item = merc.getItem(-1, -1, gid);
+		// Fresh merc unit — stale getMerc() misses just-equipped gear on PD2
+		for (i = 0; i < 3; i += 1) {
+			merc = me.getMerc();
 
-		if (item) {
-			return true;
-		}
+			if (!merc) {
+				return false;
+			}
 
-		item = merc.getItem();
+			item = merc.getItem(-1, -1, gid);
 
-		if (item) {
-			do {
-				if (item.gid === gid) {
-					return true;
-				}
-			} while (item.getNext());
-		}
+			if (item) {
+				return true;
+			}
 
-		item = me.getItem(-1, -1, gid);
+			item = merc.getItem();
 
-		// Must be merc-owned and NOT sitting in our inv/stash/cube/belt
-		if (item && this.itemOwnedByMerc(item, merc) && [3, 5, 6, 7].indexOf(item.location) === -1) {
-			return true;
+			if (item) {
+				do {
+					if (item.gid === gid) {
+						return true;
+					}
+				} while (item.getNext());
+			}
+
+			item = me.getItem(-1, -1, gid);
+
+			// Must be merc-owned and NOT sitting in our inv/stash/cube/belt
+			if (item && this.itemOwnedByMerc(item, merc) && [3, 5, 6, 7].indexOf(item.location) === -1) {
+				return true;
+			}
+
+			delay(30 + Math.floor(me.ping / 2));
 		}
 
 		return false;
 	},
 
-	// Strict: gid on merc, and not still in our bags / cursor
+	// Still in player bags (inv / belt / cube / stash)
+	itemInOurBags: function (gid) {
+		var item = me.getItem(-1, -1, gid);
+
+		return !!(item && [3, 5, 6, 7].indexOf(item.location) > -1);
+	},
+
+	// Post-equip truth — requires POSITIVE evidence on the merc (never "bags empty" alone).
+	mercEquipSuccess: function (gid, bodyLoc, expectClassid, expectType) {
+		var i, cursor, mine, eq, merc, item;
+
+		if (!gid) {
+			return false;
+		}
+
+		for (i = 0; i < 12; i += 1) {
+			cursor = getUnit(100);
+
+			if (cursor && cursor.gid === gid) {
+				delay(40 + me.ping);
+				continue;
+			}
+
+			if (this.mercHasItemGid(gid)) {
+				return true;
+			}
+
+			mine = me.getItem(-1, -1, gid);
+
+			if (mine && [3, 5, 6, 7].indexOf(mine.location) > -1) {
+				return false;
+			}
+
+			if (mine && this.itemOwnedByMerc(mine, me.getMerc())) {
+				return true;
+			}
+
+			eq = bodyLoc ? this.getMercItem(bodyLoc) : null;
+
+			if (eq && eq.gid === gid) {
+				return true;
+			}
+
+			// Same classid newly on weapon slot only if our gid left bags (upgrade path)
+			if (eq && eq.item && eq.gid > 0 && expectClassid && eq.classid === expectClassid &&
+					!mine && !this.itemInOurBags(gid) && bodyLoc === 4) {
+				return true;
+			}
+
+			merc = me.getMerc();
+
+			if (merc) {
+				item = merc.getItem();
+
+				if (item) {
+					do {
+						if (item.gid === gid) {
+							return true;
+						}
+					} while (item.getNext());
+				}
+			}
+
+			delay(50 + me.ping);
+		}
+
+		return this.mercHasItemGid(gid);
+	},
+
+	// Mid-equip / pre-check — never claim success just because the unit vanished.
 	mercReallyEquipped: function (gid, bodyLoc) {
 		var mine, cursor, merc;
 
@@ -1210,12 +1987,10 @@ var Item = {
 		mine = me.getItem(-1, -1, gid);
 		merc = me.getMerc();
 
-		// Still in our bags — not equipped
 		if (mine && [3, 5, 6, 7].indexOf(mine.location) > -1) {
 			return false;
 		}
 
-		// PD2: merc-owned gear can show mode 0 via me.getItem — don't treat as "in bags"
 		if (mine && merc && this.itemOwnedByMerc(mine, merc)) {
 			if (!bodyLoc || mine.bodylocation === bodyLoc || mine.bodylocation > 0) {
 				return true;
@@ -1225,9 +2000,8 @@ var Item = {
 		return false;
 	},
 
-	// Where did the candidate end up after an equip attempt (for fail logs)
 	mercEquipWhere: function (gid) {
-		var cursor, mine, merc;
+		var cursor, mine, merc, ground;
 
 		cursor = getUnit(100);
 
@@ -1248,6 +2022,16 @@ var Item = {
 
 		if (mine) {
 			return "loc=" + mine.location + " mode=" + mine.mode + " bl=" + mine.bodylocation;
+		}
+
+		ground = getUnit(4);
+
+		if (ground) {
+			do {
+				if (ground.mode === 3 && ground.gid === gid) {
+					return "ground";
+				}
+			} while (ground.getNext());
 		}
 
 		return "gone";
@@ -1348,7 +2132,7 @@ var Item = {
 	// Higher = better. Act2 desert: IAS / ED / melee first. Rogue: bow dmg + IAS.
 	mercScore: function (item) {
 		var q, def, dmg, res, ias, ed, ar, str, life, cb, ds, ow, sock, qty, maxStack,
-			desert, weapon, armorish;
+			desert, weapon, armorish, med;
 
 		if (!item) {
 			return -1;
@@ -1365,7 +2149,8 @@ var Item = {
 		q = item.quality || 0;
 		def = item.getStat(31) || 0;
 
-		if (!def && (item.itemType === 3 || item.itemType === 37 || item.itemType === 71 || item.itemType === 75)) {
+		if (!def && (item.itemType === 3 || item.itemType === 37 || item.itemType === 71 ||
+				item.itemType === 72 || item.itemType === 75)) {
 			def = getBaseStat("items", item.classid, "minac") || 0;
 		}
 
@@ -1381,8 +2166,15 @@ var Item = {
 		sock = item.getStat(194) || 0;
 		res = (item.getStat(39) || 0) + (item.getStat(41) || 0) + (item.getStat(43) || 0) + (item.getStat(45) || 0);
 		desert = this.isDesertMerc();
-		weapon = [27, 33, 34, 35, 44, 85].indexOf(item.itemType) > -1;
+		weapon = [27, 33, 34, 35, 85].indexOf(item.itemType) > -1;
 		armorish = [3, 37, 71, 75].indexOf(item.itemType) > -1;
+
+		// Insight / Meditation aura — floor so merc always prefers it over random spears
+		med = item.getStat(151, 120) || 0;
+
+		if (med > 0 && weapon) {
+			return 400000 + med * 2000 + dmg * 100 + ias * 50 + ed * 40;
+		}
 
 		if (desert) {
 			// Melee merc: IAS + ED + raw dmg dominate; heavy armor AC next; resists secondary
@@ -1728,7 +2520,9 @@ var Item = {
 			|| merc.classid === 564 || merc.classid === 565 || merc.classid === 359);
 
 		switch (item.itemType) {
-		case 71: // Barb helm — never on rogue / desert / iron wolf
+		case 71: // LoD barb helm OR PD2 auric — only Act5 can use as helm; auric blocked elsewhere
+			return barbMerc ? [1] : false;
+		case 72: // PD2 primal/barb helm (phlm)
 			return barbMerc ? [1] : false;
 		case 37: // Helm
 		case 75: // Circlet
@@ -1750,9 +2544,11 @@ var Item = {
 			return rogue ? [4] : false;
 		case 33: // Spear (incl. pikes)
 		case 34: // Polearm
-		case 44: // Javelin
-			// Act2 desert merc only — never swords/axes/etc.
+			// Act2 desert merc only — Insight / polearms (not javelins/glaives)
 			return this.isDesertMerc(merc) ? [4] : false;
+		case 44: // Javelin (Glaive etc.) — never for merc (junk vs spear/polearm)
+		case 88: // Amazon javelin
+			return false;
 		default:
 			return false;
 		}
@@ -1826,7 +2622,7 @@ var Item = {
 		}
 
 		this.closeMercEquipUI();
-		Town.openStash();
+		this.openMercInventory();
 		delay(150 + me.ping);
 
 		item = null;
@@ -1970,7 +2766,7 @@ var Item = {
 			this.stripMercAmmoIfConflicts(wantType);
 		}
 
-		// Always open stash + click merc — PD2 needs paperdoll even for helm/armor/weapon
+		// Always open inventory + click merc (no stash walk — equip at vendor)
 		this.openMercInventory();
 		delay(150 + me.ping);
 
@@ -2008,21 +2804,36 @@ var Item = {
 
 			delay(me.ping + 150);
 
-			// Classic LoD slots first: clickItem(4) → D2CLIENT_MercItemAction(0x61, loc)
-			// (raw packets first were leaving cursor stuck on this PD2 build)
-			if ([1, 3, 4].indexOf(bodyLoc) > -1 && me.itemoncursor) {
-				clickItem(4, bodyLoc);
-				delay(me.ping + 400);
+			// Classic LoD slots: clickItem(4) → MercItemAction. Weapon bodyLoc 4 is player-style;
+			// merc RH packet index is 2 — try both so spears aren't stuck on a dead click.
+			if (me.itemoncursor) {
+				if ([1, 3, 4].indexOf(bodyLoc) > -1) {
+					clickItem(4, bodyLoc);
+					delay(me.ping + 400);
 
-				if (this.mercEquipOk(gid, bodyLoc, wantType)) {
-					if (this.finishMercEquip(gid, bodyLoc)) {
-						this.closeMercEquipUI();
-						return true;
+					if (this.mercEquipOk(gid, bodyLoc, wantType)) {
+						if (this.finishMercEquip(gid, bodyLoc)) {
+							this.closeMercEquipUI();
+							return true;
+						}
+					}
+				}
+
+				// Desert/rogue weapon: also click merc RH (packet slot 2) if still on cursor
+				if (bodyLoc === 4 && me.itemoncursor && getUnit(100) && getUnit(100).gid === gid) {
+					clickItem(4, 2);
+					delay(me.ping + 400);
+
+					if (this.mercEquipOk(gid, bodyLoc, wantType)) {
+						if (this.finishMercEquip(gid, bodyLoc)) {
+							this.closeMercEquipUI();
+							return true;
+						}
 					}
 				}
 			}
 
-			// Packet MercItemAction (PD2 extras + classic fallback)
+			// Packet MercItemAction (PD2 extras + classic fallback) — includes slot 2 for weapons
 			if (me.itemoncursor) {
 				this.tryMercItemAction(gid, bodyLoc, wantType);
 			}
@@ -2055,93 +2866,264 @@ var Item = {
 			}
 
 			if (me.itemoncursor) {
-				this.parkCursorItem();
+				cursorItem = getUnit(100);
+
+				// Don't pull the newly equipped piece back into inventory / don't cancel (PD2 drop)
+				if (cursorItem && cursorItem.gid === gid && this.mercEquipSuccess(gid, bodyLoc)) {
+					print("ÿc8MercEquipÿc0 :: post-equip stale cursor — park, no cancel");
+					this.parkCursorItem();
+				} else {
+					this.parkCursorItem();
+				}
 			}
 
 			break;
 		}
 
+		// Park any leftover cursor BEFORE closeUI (closeUI must not cancel with cursor)
+		if (me.itemoncursor) {
+			this.parkCursorItem();
+		}
+
 		this.closeMercEquipUI();
-		// fail logged once by autoEquipMerc
+
+		if (this.mercEquipSuccess(gid, bodyLoc)) {
+			return true;
+		}
+
+		// Failed equip often left the spear on the ground (parkCursorItem click-on-char)
+		this.recoverMercItemFromGround(gid);
 
 		return false;
 	},
 
 	mercEquipOk: function (gid, bodyLoc, wantType) {
-		return this.mercReallyEquipped(gid, bodyLoc);
+		return this.mercEquipSuccess(gid, bodyLoc);
 	},
 
-	// On real success: park swapped-off gear only (different gid).
-	finishMercEquip: function (gid, bodyLoc) {
-		var cursor = getUnit(100);
+	// Pick up a merc candidate that was dropped during a failed park/equip
+	recoverMercItemFromGround: function (gid) {
+		var item, found, tick;
 
-		if (cursor && cursor.gid === gid) {
-			this.parkCursorItem();
+		if (!gid || !me.inTown) {
 			return false;
 		}
 
-		if (!this.mercReallyEquipped(gid, bodyLoc)) {
+		found = null;
+		item = getUnit(4, -1, -1, gid);
+
+		if (item && item.mode === 3 && item.gid === gid) {
+			found = copyUnit(item);
+		} else {
+			item = getUnit(4);
+
+			if (item) {
+				do {
+					if (item.mode === 3 && item.gid === gid) {
+						found = copyUnit(item);
+						break;
+					}
+				} while (item.getNext());
+			}
+		}
+
+		if (!found) {
+			return false;
+		}
+
+		item = found;
+		print("ÿc8MercEquipÿc0 :: recovering dropped item gid=" + gid + " from ground");
+
+		tick = getTickCount();
+
+		while (getTickCount() - tick < 3000) {
+			if (getDistance(me, item) > 4) {
+				Pather.moveToUnit(item);
+			}
+
+			Misc.click(0, 0, item);
+			delay(me.ping + 200);
+
+			if (this.itemInOurBags(gid) || me.getItem(-1, -1, gid)) {
+				return true;
+			}
+
+			if (me.itemoncursor) {
+				this.parkCursorItem();
+
+				if (this.itemInOurBags(gid)) {
+					return true;
+				}
+			}
+
+			item = getUnit(4, -1, -1, gid);
+
+			if (!item || item.mode !== 3) {
+				return this.itemInOurBags(gid);
+			}
+
+			delay(100);
+		}
+
+		return this.itemInOurBags(gid);
+	},
+
+	// On real success: park swapped-off gear only (different gid).
+	// Never MoveTo the item we just put on the merc (stale cursor.gid === gid was unequipping it).
+	finishMercEquip: function (gid, bodyLoc) {
+		var cursor, tick;
+
+		tick = getTickCount();
+
+		while (getTickCount() - tick < 800) {
+			if (this.mercEquipSuccess(gid, bodyLoc)) {
+				break;
+			}
+
+			delay(40 + me.ping);
+		}
+
+		cursor = getUnit(100);
+
+		if (cursor && cursor.gid === gid) {
+			// Still holding the candidate — equip did not take
+			if (this.itemInOurBags(gid) || !this.mercEquipSuccess(gid, bodyLoc)) {
+				this.parkCursorItem();
+
+				return false;
+			}
+
+			// Stale cursor after successful equip — do NOT cancel (drops on PD2)
+			print("ÿc8MercEquipÿc0 :: stale cursor gid=equipped — park instead of cancel");
+			this.parkCursorItem();
+		}
+
+		if (!this.mercEquipSuccess(gid, bodyLoc)) {
 			return false;
 		}
 
 		if (me.itemoncursor) {
-			this.parkCursorItem(); // old merc gear swapped off
+			cursor = getUnit(100);
+
+			// Only park OLD gear (different gid) — never cancel
+			if (cursor && cursor.gid !== gid) {
+				this.parkCursorItem();
+			} else if (cursor && cursor.gid === gid) {
+				this.parkCursorItem();
+			}
 		}
 
-		return true;
+		// Success = on merc; cursor park is best-effort (don't fail equip if inv full)
+		return this.mercEquipSuccess(gid, bodyLoc);
 	},
 
-	// Park whatever ended up on cursor after a merc swap (old gear)
+	// Park whatever ended up on cursor after a merc swap (old gear).
+	// Item is ALREADY on cursor — never toCursor/MoveTo (5×1s hang) and never me.cancel (PD2 drops).
 	parkCursorItem: function () {
-		var cursorItem, kind;
+		var cursorItem, kind, mercGear, spot, i, tick, placed;
 
 		if (!me.itemoncursor) {
 			return true;
 		}
 
-		// Potions: never drop via click-on-char
-		if (typeof Town !== "undefined" && typeof Town.returnCursorSafe === "function") {
-			cursorItem = getUnit(100);
-
-			if (cursorItem && Town.potionKind(cursorItem)) {
-				return Town.returnCursorSafe();
-			}
-		}
-
 		cursorItem = getUnit(100);
 
-		if (!cursorItem || typeof cursorItem.sizex !== "number") {
-			return false;
+		if (!cursorItem) {
+			return !me.itemoncursor;
 		}
 
 		kind = (typeof Town !== "undefined" && Town.potionKind) ? Town.potionKind(cursorItem) : false;
 
-		if (Storage.Inventory.CanFit(cursorItem) && Storage.Inventory.MoveTo(cursorItem)) {
-			return true;
-		}
-
-		// Never drop pots
 		if (kind) {
-			me.cancel();
-			delay(80 + me.ping);
+			if (typeof Town !== "undefined" && typeof Town.returnCursorSafe === "function") {
+				return Town.returnCursorSafe();
+			}
 
 			return !me.itemoncursor;
 		}
 
-		Misc.click(0, 0, me);
-		delay(me.ping + 200);
+		mercGear = [5, 6, 27, 35, 85, 33, 34, 44, 24, 25, 26, 30, 31, 32].indexOf(cursorItem.itemType) > -1;
 
-		if (me.itemoncursor) {
+		function tryPlace(container, loc) {
+			var p, n, t;
+
+			if (!container || typeof container.FindSpot !== "function") {
+				return false;
+			}
+
+			if (typeof container.CanFit === "function" && !container.CanFit(cursorItem)) {
+				return false;
+			}
+
+			p = container.FindSpot(cursorItem);
+
+			if (!p) {
+				return false;
+			}
+
+			for (n = 0; n < 3 && me.itemoncursor; n += 1) {
+				clickItem(0, p.y, p.x, loc);
+				t = getTickCount();
+
+				while (me.itemoncursor && getTickCount() - t < 600) {
+					delay(30 + me.ping);
+				}
+
+				if (!me.itemoncursor) {
+					print("ÿc2MercEquipÿc0 :: parked swap @ " + (loc === 3 ? "inv" : "stash") +
+						" " + (cursorItem.name || ("#" + cursorItem.classid)));
+
+					return true;
+				}
+			}
+
+			return false;
+		}
+
+		// Inv first — open inventory panel here if needed (no stash walk)
+		if (!getUIFlag(0x01) && !getUIFlag(0x19)) {
+			this.ensureInventoryPanel();
+			delay(150 + me.ping);
+		}
+
+		placed = tryPlace(Storage.Inventory, 3);
+
+		if (!placed && me.itemoncursor) {
+			this.ensureInventoryPanel();
+			delay(120 + me.ping);
 			cursorItem = getUnit(100);
 
-			if (cursorItem && !(typeof Town !== "undefined" && Town.potionKind && Town.potionKind(cursorItem))) {
-				cursorItem.drop();
-			} else {
-				me.cancel();
+			if (cursorItem && me.itemoncursor) {
+				placed = tryPlace(Storage.Inventory, 3);
 			}
 		}
 
-		return !me.itemoncursor;
+		if (!placed && me.itemoncursor) {
+			cursorItem = getUnit(100);
+
+			// Stash only as last resort when inv cannot fit the swapped weapon
+			if (cursorItem && typeof Town !== "undefined" && typeof Town.openStash === "function") {
+				Town.openStash();
+				delay(80 + me.ping);
+				placed = tryPlace(Storage.Stash, 7);
+			}
+		}
+
+		if (!me.itemoncursor) {
+			return true;
+		}
+
+		// Last resort for merc weapons: NEVER cancel/drop — leave on cursor and report
+		if (mercGear) {
+			print("ÿc8MercEquipÿc0 :: parkCursor stuck with " +
+				(cursorItem.name || ("#" + cursorItem.classid)) + " — not canceling (would drop)");
+
+			return false;
+		}
+
+		print("ÿc8MercEquipÿc0 :: parkCursor stuck (non-merc) — not dropping");
+
+		return false;
 	},
 
 	// Same path as D2CLIENT_MercItemAction(0x61, slot) — clickItem(4) only allows 1/3/4.
@@ -2272,38 +3254,173 @@ var Item = {
 		}
 	},
 
-	openMercInventory: function () {
-		var merc = me.getMerc();
+	// This d2bs often has no sendKey — try native, then ForceKeys helper tap, never cancel-drop.
+	tapKey: function (vk) {
+		var donePath, tick, raw;
 
-		while (getUIFlag(0x08) || getUIFlag(0x0c) || getUIFlag(0x0f)) {
-			me.cancel();
-			delay(100 + me.ping);
+		if (typeof sendKey === "function") {
+			sendKey(vk);
+			return true;
 		}
 
-		Town.openStash();
-		delay(150 + me.ping);
+		if (typeof keyDown === "function" && typeof keyUp === "function") {
+			keyDown(vk);
+			delay(30);
+			keyUp(vk);
+			return true;
+		}
+
+		if (typeof KeyDown === "function" && typeof KeyUp === "function") {
+			KeyDown(vk);
+			delay(30);
+			KeyUp(vk);
+			return true;
+		}
+
+		// ForceKeys helper: write data/pd2_forcekeys.key → helper SendInput/PostMessage
+		if (typeof FileTools === "undefined") {
+			return false;
+		}
+
+		try {
+			donePath = "data/pd2_forcekeys.key.done";
+
+			if (FileTools.exists(donePath)) {
+				FileTools.writeText(donePath, "");
+			}
+
+			FileTools.writeText("data/pd2_forcekeys.key", String(vk & 0xff));
+		} catch (eWrite) {
+			return false;
+		}
+
+		tick = getTickCount();
+
+		while (getTickCount() - tick < 1500) {
+			delay(40);
+
+			try {
+				if (FileTools.exists(donePath)) {
+					raw = String(FileTools.readText(donePath) || "");
+
+					if (raw.indexOf("OK") >= 0) {
+						return true;
+					}
+				}
+			} catch (eRead) {}
+		}
+
+		return false;
+	},
+
+	ensureInventoryPanel: function () {
+		var tick;
+
+		if (getUIFlag(0x01) || getUIFlag(0x19)) {
+			return true;
+		}
+
+		if (this.tapKey(0x49)) { // I
+			tick = getTickCount();
+
+			while (getTickCount() - tick < 1500) {
+				if (getUIFlag(0x01) || getUIFlag(0x19)) {
+					return true;
+				}
+
+				delay(40);
+			}
+
+			this.tapKey(0x49);
+			delay(200 + me.ping);
+
+			if (getUIFlag(0x01) || getUIFlag(0x19)) {
+				return true;
+			}
+		}
+
+		// openStash() used to me.cancel() — drops cursor items on PD2.
+		// Only walk to stash when hands are empty.
+		if (me.itemoncursor) {
+			print("ÿc8MercEquipÿc0 :: cannot open inv (no sendKey, item on cursor) — not opening stash");
+			return false;
+		}
+
+		if (typeof Town !== "undefined" && typeof Town.openStash === "function") {
+			return !!Town.openStash();
+		}
+
+		return !!(getUIFlag(0x01) || getUIFlag(0x19));
+	},
+
+	openMercInventory: function () {
+		var merc = me.getMerc(), i;
+
+		// Leave vendor/NPC only — never cancel while holding an item
+		for (i = 0; i < 5; i += 1) {
+			if (!(getUIFlag(0x08) || getUIFlag(0x0c) || getUIFlag(0x0f))) {
+				break;
+			}
+
+			if (me.itemoncursor) {
+				break;
+			}
+
+			me.cancel();
+			delay(80 + me.ping);
+		}
+
+		this.ensureInventoryPanel();
+
+		merc = me.getMerc();
 
 		if (merc) {
 			Misc.click(0, 0, merc);
 			delay(250 + me.ping);
 		}
 
-		return true;
+		return !!(merc || getUIFlag(0x01) || getUIFlag(0x19));
 	},
 
 	closeMercEquipUI: function () {
 		var i,
 			flags = [0x01, 0x02, 0x04, 0x08, 0x0c, 0x0f, 0x14, 0x16, 0x19, 0x1a];
 
+		// PD2: me.cancel() with item on cursor DROPS it (old bow after xbow swap)
+		for (i = 0; i < 3 && me.itemoncursor; i += 1) {
+			this.parkCursorItem();
+			delay(50 + me.ping);
+		}
+
+		if (me.itemoncursor) {
+			print("ÿc8MercEquipÿc0 :: closeUI aborted — cursor still held (skip cancel to avoid drop)");
+
+			return false;
+		}
+
 		for (i = 0; i < flags.length; i += 1) {
 			if (getUIFlag(flags[i])) {
 				me.cancel();
 				delay(150 + me.ping);
+
+				if (me.itemoncursor) {
+					this.parkCursorItem();
+
+					if (me.itemoncursor) {
+						print("ÿc8MercEquipÿc0 :: closeUI — cursor reappeared, stop canceling");
+
+						return false;
+					}
+				}
 			}
 		}
 
-		me.cancel();
-		delay(100 + me.ping);
+		if (!me.itemoncursor) {
+			me.cancel();
+			delay(100 + me.ping);
+		}
+
+		return !me.itemoncursor;
 	},
 
 	_mercFailGids: {},
@@ -2390,7 +3507,7 @@ var Item = {
 			return true;
 		}
 
-		// equipMerc → openStash → Town.move → goToTown; only run during town chores
+		// equipMerc opens inventory at vendor (no stash walk); only during town chores
 		if (!me.inTown) {
 			return false;
 		}
@@ -2401,7 +3518,7 @@ var Item = {
 		}
 
 		var merc = me.getMerc(),
-			i, j, bodyLoc, eq, items, cand, gid, still, slot;
+			i, j, bodyLoc, eq, items, cand, gid, slot;
 
 		if (!merc || merc.mode === 0 || merc.mode === 12) {
 			return false;
@@ -2480,24 +3597,38 @@ var Item = {
 						gid = cand.gid;
 						slot = bodyLoc[j];
 
-						if (this.equipMerc(cand, slot) && this.mercReallyEquipped(gid, slot)) {
-							still = me.getItem(-1, -1, gid);
+						if (this.equipMerc(cand, slot) || this.mercEquipSuccess(gid, slot)) {
+							delay(80 + me.ping);
 
-							// Double-check it left our bags (false "success" was spamming logs)
-							if (still && ([3, 5, 6, 7].indexOf(still.location) > -1 || still.mode === 0)) {
+							if (this.mercEquipSuccess(gid, slot)) {
+								this.clearMercFail(gid);
+								print("ÿc2MercEquipÿc0 :: equipped " + (cand.name || "?") + " -> slot " + slot);
+
+								try {
+									Misc.logItem("Merc Equipped", this.getMercItem(slot).item || me.getItem(-1, -1, gid));
+								} catch (eLog) {}
+							} else if (this.itemInOurBags(gid)) {
 								this.markMercFail(gid);
 
 								if (!this._mercFailLogged[gid]) {
 									this._mercFailLogged[gid] = true;
-									print("ÿc1MercEquipÿc0 :: skip slot " + slot + " " + (cand.name || "?") + " (not on merc)");
+									print("ÿc1MercEquipÿc0 :: skip slot " + slot + " " + (cand.name || "?") + " (still in bags)");
 								}
 							} else {
-								this.clearMercFail(gid);
-								print("ÿc2MercEquipÿc0 :: equipped " + (cand.name || "?") + " -> slot " + slot);
-								Misc.logItem("Merc Equipped", this.getMercItem(slot).item || me.getItem(-1, -1, gid));
+								// Vanished without merc evidence — recover drop, do not claim success
+								this.recoverMercItemFromGround(gid);
+								this.markMercFail(gid);
+
+								if (!this._mercFailLogged[gid]) {
+									this._mercFailLogged[gid] = true;
+									print("ÿc1MercEquipÿc0 :: equip failed slot " + slot + " " + (cand.name || ("#" + cand.classid)) +
+										" classid=" + cand.classid + " type=" + cand.itemType +
+										" where=" + this.mercEquipWhere(gid) +
+										" desert=" + this.isDesertMerc() + " rogue=" + this.isRogueMerc() +
+										" (no merc evidence)");
+								}
 							}
-						} else {
-							// Packet/UI glitch — retry next chores; do NOT treat as permanent sell bait
+						} else if (this.itemInOurBags(gid)) {
 							if (!this._mercFailLogged[gid]) {
 								this._mercFailLogged[gid] = true;
 								print("ÿc1MercEquipÿc0 :: equip failed slot " + slot + " " + (cand.name || ("#" + cand.classid)) +
@@ -2505,6 +3636,18 @@ var Item = {
 									" where=" + this.mercEquipWhere(gid) +
 									" desert=" + this.isDesertMerc() + " rogue=" + this.isRogueMerc() +
 									" (retry later, not selling yet)");
+							}
+						} else {
+							this.recoverMercItemFromGround(gid);
+							this.markMercFail(gid);
+
+							if (!this._mercFailLogged[gid]) {
+								this._mercFailLogged[gid] = true;
+								print("ÿc1MercEquipÿc0 :: equip failed slot " + slot + " " + (cand.name || ("#" + cand.classid)) +
+									" classid=" + cand.classid + " type=" + cand.itemType +
+									" where=" + this.mercEquipWhere(gid) +
+									" desert=" + this.isDesertMerc() + " rogue=" + this.isRogueMerc() +
+									" (gone — recovered if on ground)");
 							}
 						}
 
@@ -2639,8 +3782,12 @@ var Misc = {
 	},
 
 	// Open a chest Unit
-	openChest: function (unit) {
-		var i, tick, cairn;
+	// opts.noMove — only click if already in reach (pathing: never leave the route)
+	openChest: function (unit, opts) {
+		var i, tick, cairn, dist, noMove;
+
+		opts = opts || {};
+		noMove = !!opts.noMove;
 
 		// Skip invalid and Countess chests
 		if (!unit || unit.x === 12526 || unit.x === 12565) {
@@ -2659,6 +3806,41 @@ var Misc = {
 			return false;
 		}
 
+		dist = getDistance(me, unit);
+
+		// Pathing: only chests we are already walking past — no moveTo detours
+		if (noMove) {
+			if (dist > 5) {
+				return false;
+			}
+
+			sendPacket(1, 0x13, 4, unit.type, 4, unit.gid);
+			Misc.click(0, 0, unit);
+
+			try {
+				if (typeof unit.interact === "function") {
+					unit.interact();
+				}
+			} catch (eNear) {}
+
+			tick = getTickCount();
+
+			while (getTickCount() - tick < 800) {
+				if (unit.mode && !cairn) {
+					return true;
+				}
+
+				if (cairn && (me.getQuest(4, 4) || Pather.getPortal(38))) {
+					return true;
+				}
+
+				delay(10);
+			}
+
+			return !!cairn;
+		}
+
+		// Never TK chests — walk + click only (TK = pickit loot + Duriel orifice only)
 		for (i = 0; i < 3; i += 1) {
 			if (Pather.moveTo(unit.x + 1, unit.y + 2, 3) && getDistance(me, unit.x + 1, unit.y + 2) < 5) {
 				sendPacket(1, 0x13, 4, unit.type, 4, unit.gid);
@@ -2755,13 +3937,15 @@ var Misc = {
 		return true;
 	},
 
-	openChests: function (range) {
+	openChests: function (range, opts) {
 		var unit,
 			unitList = [],
 			containers = ["chest", "chest3", "armorstand", "weaponrack"];
 
+		opts = opts || {};
+
 		if (!range) {
-			range = 15;
+			range = opts.noMove ? 5 : 15;
 		}
 
 		// Testing all container code
@@ -2790,7 +3974,8 @@ var Misc = {
 
 			unit = unitList.shift();
 
-			if (unit && (Pather.canTeleport() || !checkCollision(me, unit, 0x4)) && this.openChest(unit)) {
+			if (unit && (opts.noMove || Pather.canTeleport() || !checkCollision(me, unit, 0x4)) &&
+					this.openChest(unit, opts)) {
 				Pickit.pickItems();
 			}
 		}
@@ -3683,7 +4868,8 @@ var Misc = {
 				return type;
 			}
 
-			if (type === "mp" && mpPct <= mpTrig) {
+			// Levels 1–7: sit on empty mana — no TP just to restock mp
+			if (type === "mp" && mpPct <= mpTrig && me.charlvl > 7) {
 				return type;
 			}
 		}
@@ -3722,8 +4908,13 @@ var Misc = {
 			}
 
 			if (!check && Config.OpenChests && Town.needKeys()) {
-				print("ÿc8TownCheckÿc0 :: need keys");
-				check = true;
+				// Just left chores with no keys → cool down (skip/buy fail), don't walk-loop
+				if (Town.lastFullChores && getTickCount() - Town.lastFullChores < 2 * 60 * 1000) {
+					Town._keysBrokeTick = getTickCount();
+				} else {
+					print("ÿc8TownCheckÿc0 :: need keys");
+					check = true;
+				}
 			}
 		} catch (e) {
 			check = false;

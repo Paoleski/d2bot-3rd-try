@@ -116,13 +116,13 @@ function Diablo() {
 			delay(classid === 394 ? 1000 : 500);
 
 			if (!seal.mode) {
-				if (classid === 394 && Attack.validSpot(seal.x + 15, seal.y)) { // de seis optimization
-					Pather.moveTo(seal.x + 15, seal.y);
+				// De Seis: never walk into nest — reclick only
+				if (classid === 394) {
+					delay(300);
 				} else {
 					Pather.moveTo(seal.x - 5, seal.y - 5);
+					delay(500);
 				}
-
-				delay(500);
 			} else {
 				return true;
 			}
@@ -173,11 +173,295 @@ function Diablo() {
 		}
 	};
 
-	this.getBoss = function (name) {
-		var i, boss,
-			glow = getUnit(2, 131);
+	this.getBoss = function (name, pullFight, holdX, holdY, baitX, baitY) {
+		var i, boss, dist, waitTicks, engageDist, glow, mon, best, bestD, d,
+			idle, farIdle, engaged, sawBoss, baitPulses, self = this;
 
-		for (i = 0; i < 16; i += 1) {
+		glow = getUnit(2, 131);
+		waitTicks = pullFight ? 72 : 16;
+		engageDist = pullFight ? 34 : 40;
+		idle = 0;
+		farIdle = 0;
+		engaged = false;
+		sawBoss = false;
+		baitPulses = 0;
+
+		function snapHold() {
+			if (holdX === undefined || holdY === undefined) {
+				return;
+			}
+
+			if (getDistance(me, holdX, holdY) > 5) {
+				if (typeof Pather.forceTeleportTo === "function" && Pather.canTeleport()) {
+					Pather.forceTeleportTo(holdX, holdY, 4);
+				} else {
+					Pather.teleport = true;
+					Pather._lastTeleTick = 0;
+					Pather.moveTo(holdX, holdY, 3);
+				}
+			}
+		}
+
+		function packNear(range) {
+			mon = getUnit(1);
+
+			if (mon) {
+				do {
+					if (Attack.checkMonster(mon) && getDistance(me, mon) <= range) {
+						return true;
+					}
+				} while (mon.getNext());
+			}
+
+			return false;
+		}
+
+		function holdCast(range) {
+			snapHold();
+			best = null;
+			bestD = 999;
+			mon = getUnit(1);
+
+			if (mon) {
+				do {
+					if (Attack.checkMonster(mon)) {
+						d = getDistance(me, mon);
+
+						if (d <= range && d < bestD) {
+							best = copyUnit(mon);
+							bestD = d;
+						}
+					}
+				} while (mon.getNext());
+			}
+
+			if (best) {
+				engaged = true;
+				ClassAttack.doAttack(best, false);
+			}
+
+			snapHold();
+		}
+
+		function pulseAggro() {
+			var bx, by;
+
+			bx = (baitX !== undefined) ? baitX : holdX;
+			by = (baitY !== undefined) ? baitY : (holdY - 8);
+
+			if (bx === undefined || by === undefined) {
+				return;
+			}
+
+			baitPulses += 1;
+			print("Seal pull — re-aggro pulse @ " + bx + "," + by);
+
+			if (typeof Pather.forceTeleportTo === "function" && Pather.canTeleport()) {
+				Pather.forceTeleportTo(bx, by, 4);
+			} else {
+				Pather.teleport = true;
+				Pather._lastTeleTick = 0;
+				Pather.moveTo(bx, by, 3);
+			}
+
+			delay(180 + me.ping);
+
+			if (me.getSkill(44, 1)) {
+				Skill.cast(44, 0);
+				delay(80);
+			}
+
+			if (Config.AttackSkill[1] > 0) {
+				Skill.cast(Config.AttackSkill[1], Skill.getHand(Config.AttackSkill[1]), bx, by - 4);
+			}
+
+			delay(120 + me.ping);
+			snapHold();
+		}
+
+		function tpToBoss(unit) {
+			var tx, ty;
+
+			if (!unit || !Attack.checkMonster(unit)) {
+				return false;
+			}
+
+			if (typeof ClassAttack !== "undefined") {
+				ClassAttack._sealHoldX = undefined;
+				ClassAttack._sealHoldY = undefined;
+			}
+
+			tx = Math.round(unit.x);
+			ty = Math.round(unit.y + 6);
+
+			if (!Attack.validSpot(tx, ty)) {
+				tx = Math.round(unit.x);
+				ty = Math.round(unit.y);
+			}
+
+			print("Seal pull — TP to boss @ " + tx + "," + ty);
+
+			if (typeof Pather.forceTeleportTo === "function" && Pather.canTeleport()) {
+				Pather.forceTeleportTo(tx, ty, 4);
+			} else {
+				Pather.teleport = true;
+				Pather._lastTeleTick = 0;
+				Pather.moveTo(tx, ty, 3);
+			}
+
+			delay(200 + me.ping);
+			holdX = me.x;
+			holdY = me.y;
+
+			if (typeof ClassAttack !== "undefined") {
+				ClassAttack._sealHoldX = holdX;
+				ClassAttack._sealHoldY = holdY;
+			}
+
+			if (me.getSkill(44, 1)) {
+				Skill.cast(44, 0);
+			}
+
+			engaged = true;
+			sawBoss = true;
+			idle = 0;
+			farIdle = 0;
+			baitPulses = 0;
+
+			return true;
+		}
+
+		if (pullFight) {
+			if (typeof ClassAttack !== "undefined") {
+				ClassAttack._sealHoldX = holdX;
+				ClassAttack._sealHoldY = holdY;
+			}
+
+			snapHold();
+			pulseAggro();
+
+			for (i = 0; i < waitTicks; i += 1) {
+				snapHold();
+				boss = getUnit(1, name);
+
+				if (boss && Attack.checkMonster(boss)) {
+					sawBoss = true;
+					dist = getDistance(me, boss);
+
+					if (dist <= engageDist || packNear(20)) {
+						engaged = true;
+						break;
+					}
+
+					holdCast(18);
+					idle += 1;
+
+					if (idle >= 6) {
+						if (baitPulses < 2) {
+							pulseAggro();
+						} else {
+							tpToBoss(boss);
+							break;
+						}
+
+						idle = 0;
+					}
+
+					delay(120);
+					continue;
+				}
+
+				if (packNear(18)) {
+					engaged = true;
+					holdCast(18);
+					idle = 0;
+				} else {
+					idle += 1;
+
+					if (idle >= 8) {
+						pulseAggro();
+						idle = 0;
+					}
+				}
+
+				delay(120);
+			}
+
+			this.chaosPreattack(name, 4);
+
+			for (i = 0; i < 240; i += 1) {
+				snapHold();
+				boss = getUnit(1, name);
+
+				if (boss && Attack.checkMonster(boss)) {
+					sawBoss = true;
+					dist = getDistance(me, boss);
+
+					if (dist <= 36) {
+						engaged = true;
+						farIdle = 0;
+
+						if (!ClassAttack.doAttack(boss, i % 15 === 0)) {
+							holdCast(16);
+						}
+
+						snapHold();
+						continue;
+					}
+
+					holdCast(16);
+					farIdle += 1;
+
+					if (farIdle >= 6) {
+						tpToBoss(boss);
+						farIdle = 0;
+					}
+
+					delay(80);
+					continue;
+				}
+
+				if (packNear(22)) {
+					engaged = true;
+					holdCast(20);
+					farIdle = 0;
+					continue;
+				}
+
+				if (engaged || sawBoss) {
+					snapHold();
+
+					if (typeof ClassAttack !== "undefined") {
+						ClassAttack._sealHoldX = undefined;
+						ClassAttack._sealHoldY = undefined;
+					}
+
+					return true;
+				}
+
+				farIdle += 1;
+
+				if (farIdle >= 8) {
+					pulseAggro();
+					farIdle = 0;
+				}
+
+				delay(100);
+			}
+
+			snapHold();
+			holdCast(18);
+			boss = getUnit(1, name);
+
+			if (typeof ClassAttack !== "undefined") {
+				ClassAttack._sealHoldX = undefined;
+				ClassAttack._sealHoldY = undefined;
+			}
+
+			return !(boss && Attack.checkMonster(boss));
+		}
+
+		for (i = 0; i < waitTicks; i += 1) {
 			boss = getUnit(1, name);
 
 			if (boss) {
@@ -214,20 +498,97 @@ function Diablo() {
 	};
 
 	this.seisSeal = function () {
+		var seal, pullX, pullY, baitX, baitY, i, savedTele, savedDelay, opened;
+
 		print("Seis layout " + this.seisLayout);
 		this.followPath(this.seisLayout === 1 ? this.starToSeisA : this.starToSeisB);
 
-		if (!this.openSeal(394)) {
+		savedTele = Pather.teleport;
+		savedDelay = (typeof Config !== "undefined") ? Config.TeleDelay : undefined;
+		Pather.teleport = true;
+
+		if (typeof Config !== "undefined") {
+			Config.TeleDelay = 0;
+		}
+
+		Pather._lastTeleTick = 0;
+		opened = false;
+
+		for (i = 0; i < 5; i += 1) {
+			Pather._lastTeleTick = 0;
+			Pather.moveToPreset(108, 2, 394, 4, 4);
+			seal = getUnit(2, 394);
+
+			if (!seal) {
+				delay(200);
+				continue;
+			}
+
+			if (seal.mode) {
+				opened = true;
+				break;
+			}
+
+			Misc.click(0, 0, seal);
+			delay(400 + me.ping);
+			seal = getUnit(2, 394);
+
+			if (seal && seal.mode) {
+				opened = true;
+				break;
+			}
+		}
+
+		seal = getUnit(2, 394);
+
+		if (seal) {
+			pullX = Math.round(seal.x);
+			pullY = Math.round(seal.y + 12);
+			baitX = Math.round(seal.x);
+			baitY = Math.round(seal.y + 4);
+
+			if (!Attack.validSpot(pullX, pullY)) {
+				pullX = Math.round(seal.x - 8);
+				pullY = Math.round(seal.y + 12);
+				baitX = Math.round(seal.x - 8);
+				baitY = Math.round(seal.y + 4);
+			}
+
+			if (!Attack.validSpot(pullX, pullY)) {
+				pullX = Math.round(seal.x + 8);
+				pullY = Math.round(seal.y + 14);
+				baitX = Math.round(seal.x + 8);
+				baitY = Math.round(seal.y + 6);
+			}
+		} else if (this.seisLayout === 1) {
+			pullX = 7780;
+			pullY = 5238;
+			baitX = 7780;
+			baitY = 5228;
+		} else {
+			pullX = 7800;
+			pullY = 5228;
+			baitX = 7800;
+			baitY = 5218;
+		}
+
+		Pather._lastTeleTick = 0;
+
+		if (!Pather.forceTeleportTo(pullX, pullY, 4)) {
+			Pather.moveTo(pullX, pullY, 3);
+		}
+
+		if (typeof Config !== "undefined" && savedDelay !== undefined) {
+			Config.TeleDelay = savedDelay;
+		}
+
+		Pather.teleport = savedTele;
+
+		if (!opened) {
 			throw new Error("Failed to open de Seis seal.");
 		}
 
-		if (this.seisLayout === 1) {
-			Pather.moveTo(7771, 5196);
-		} else {
-			Pather.moveTo(7798, 5186);
-		}
-
-		if (!this.getBoss(getLocaleString(2852))) {
+		if (!this.getBoss(getLocaleString(2852), true, pullX, pullY, baitX, baitY)) {
 			throw new Error("Failed to kill de Seis");
 		}
 
@@ -235,6 +596,8 @@ function Diablo() {
 	};
 
 	this.infectorSeal = function () {
+		var savedTele, pullX, pullY;
+
 		print("Inf layout " + this.infLayout);
 		this.followPath(this.infLayout === 1 ? this.starToInfA : this.starToInfB);
 
@@ -243,12 +606,19 @@ function Diablo() {
 		}
 
 		if (this.infLayout === 1) {
-			delay(1);
+			pullX = 7868;
+			pullY = 5295;
 		} else {
-			Pather.moveTo(7928, 5295); // temp
+			pullX = 7870;
+			pullY = 5286;
 		}
 
-		if (!this.getBoss(getLocaleString(2853))) {
+		savedTele = Pather.teleport;
+		Pather.teleport = true;
+		Pather.moveTo(pullX, pullY, 3);
+		Pather.teleport = savedTele;
+
+		if (!this.getBoss(getLocaleString(2853), true, pullX, pullY)) {
 			throw new Error("Failed to kill Infector");
 		}
 
@@ -416,10 +786,11 @@ function Diablo() {
 	this.entranceToStar = [7794, 5517, 7791, 5491, 7768, 5459, 7775, 5424, 7817, 5458, 7777, 5408, 7769, 5379, 7777, 5357, 7809, 5359, 7805, 5330, 7780, 5317, 7791, 5293];
 	this.starToVizA = [7759, 5295, 7734, 5295, 7716, 5295, 7718, 5276, 7697, 5292, 7678, 5293, 7665, 5276, 7662, 5314];
 	this.starToVizB = [7759, 5295, 7734, 5295, 7716, 5295, 7701, 5315, 7666, 5313, 7653, 5284];
-	this.starToSeisA = [7781, 5259, 7805, 5258, 7802, 5237, 7776, 5228, 7775, 5205, 7804, 5193, 7814, 5169, 7788, 5153];
-	this.starToSeisB = [7781, 5259, 7805, 5258, 7802, 5237, 7776, 5228, 7811, 5218, 7807, 5194, 7779, 5193, 7774, 5160, 7803, 5154];
-	this.starToInfA = [7809, 5268, 7834, 5306, 7852, 5280, 7852, 5310, 7869, 5294, 7895, 5295, 7919, 5290];
-	this.starToInfB = [7809, 5268, 7834, 5306, 7852, 5280, 7852, 5310, 7869, 5294, 7895, 5274, 7927, 5275, 7932, 5297, 7923, 5313];
+	// Seis: corridor mouth only — openSeal TPs to seal, pull holds south (never nest 5228/5218)
+	this.starToSeisA = [7781, 5259, 7805, 5258];
+	this.starToSeisB = [7781, 5259, 7805, 5258];
+	this.starToInfA = [7809, 5268, 7834, 5306, 7852, 5280, 7868, 5295];
+	this.starToInfB = [7809, 5268, 7834, 5306, 7852, 5280, 7870, 5286];
 	Pather._teleport = Pather.teleport;
 
 	// start

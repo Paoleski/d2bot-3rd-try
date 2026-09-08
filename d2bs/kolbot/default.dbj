@@ -20,6 +20,8 @@ include("common/Pickit.js");
 include("common/Pather.js");
 include("common/Precast.js");
 include("common/Prototypes.js");
+include("common/Pd2Stack.js");
+include("common/ConsoleLog.js");
 include("common/Runewords.js");
 include("common/Storage.js");
 include("common/Town.js");
@@ -31,6 +33,10 @@ function main() {
 	// wait until game is ready
 	while (!me.gameReady) {
 		delay(50);
+	}
+
+	if (typeof ConsoleLog !== "undefined") {
+		ConsoleLog.install();
 	}
 
 	if (!getScript("tools/heartbeat.js")) {

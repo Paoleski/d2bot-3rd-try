@@ -9,6 +9,43 @@ var ClassAttack = {
 	cursesSet: false,
 	curseState: [],
 
+	// Fallen / fetish / etc. shamans (same set as Attack.sortMonsters)
+	shamanIds: [58, 59, 60, 61, 62, 101, 102, 103, 104, 105, 278, 279, 280, 281, 282, 298, 299, 300, 645, 646, 647, 662, 663, 664, 667, 668, 669, 670, 675, 676],
+
+	isShaman: function (unit) {
+		return !!(unit && this.shamanIds.indexOf(unit.classid) > -1);
+	},
+
+	// Nearest living shaman within range (Act1 peel)
+	findPriorityShaman: function (range) {
+		var unit = getUnit(1), best = null, bestD = 999, d;
+
+		if (!unit) {
+			return null;
+		}
+
+		do {
+			try {
+				if (typeof unit.x !== "number" || !this.isShaman(unit)) {
+					continue;
+				}
+
+				if (!Attack.checkMonster(unit)) {
+					continue;
+				}
+
+				d = getDistance(me, unit);
+
+				if (d <= range && d < bestD) {
+					bestD = d;
+					best = copyUnit(unit);
+				}
+			} catch (eSh) {}
+		} while (unit.getNext());
+
+		return best;
+	},
+
 	// Skill known (hard points or soft). Skill 0 = always-on normal attack.
 	hasSkill: function (skillId) {
 		if (skillId === 0) {
@@ -146,12 +183,110 @@ var ClassAttack = {
 		this.cursesSet = true;
 	},
 
+	// Keep Config.Golem up — only when dead (not every swing / not mastery refill)
+	_golemRetryTick: 0,
+
+	ensureGolem: function () {
+		var monstersNear;
+
+		if (!Config.Golem || Config.Golem === "None" || Config.Golem === 0) {
+			return false;
+		}
+
+		if (typeof Precast !== "undefined" && Precast.hasGolem && Precast.hasGolem()) {
+			return true;
+		}
+
+		// Match Precast hard cooldown — mid-fight retries were stacking PD2 golems
+		if (this._golemRetryTick && getTickCount() - this._golemRetryTick < 15000) {
+			return false;
+		}
+
+		// Don't interrupt a melee swing when monsters are on top of us
+		monstersNear = getUnit(1);
+
+		if (monstersNear) {
+			do {
+				try {
+					if (typeof monstersNear.x !== "number") {
+						continue;
+					}
+
+					if (Attack.checkMonster(monstersNear) && getDistance(me, monstersNear) < 5) {
+						return false;
+					}
+				} catch (eNear) {}
+			} while (monstersNear.getNext());
+		}
+
+		this._golemRetryTick = getTickCount();
+
+		if (typeof Precast === "undefined" || !Precast.ensureNecroGolem) {
+			return false;
+		}
+
+		switch (Config.Golem) {
+		case 3:
+		case "Fire":
+			return Precast.ensureNecroGolem(94, 85, 75);
+		case 2:
+		case "Blood":
+			return Precast.ensureNecroGolem(85, 75);
+		case 1:
+		case "Clay":
+			return Precast.ensureNecroGolem(75);
+		default:
+			return false;
+		}
+	},
+
+	// Bone Armor only when missing — never mid-swing with pack in face
+	ensureBoneArmor: function () {
+		var monstersNear;
+
+		if (!this.hasSkill(68) || me.getState(14)) {
+			return true;
+		}
+
+		monstersNear = getUnit(1);
+
+		if (monstersNear) {
+			do {
+				try {
+					if (typeof monstersNear.x !== "number") {
+						continue;
+					}
+
+					if (Attack.checkMonster(monstersNear) && getDistance(me, monstersNear) < 5) {
+						return false;
+					}
+				} catch (eNear) {}
+			} while (monstersNear.getNext());
+		}
+
+		Skill.cast(68, 0);
+		delay(200 + me.ping);
+
+		return !!me.getState(14);
+	},
+
 	doAttack: function (unit, preattack) {
+		var shaman;
+
 		if (!this.cursesSet) {
 			this.initCurses();
 		}
 
 		this.syncAttackSkills();
+
+		// Act1: peel shamans before stabbing fallen (packs revive otherwise)
+		if (Config.NecroShamanFocus && me.act === 1 && unit && !this.isShaman(unit)) {
+			shaman = this.findPriorityShaman(35);
+
+			if (shaman) {
+				unit = shaman;
+			}
+		}
 
 		// Pre-dagger: raise skeletons from wand soft (skill 70) before swinging
 		if (Config.ActiveSummon && !this.hasDagger() && this.hasSkill(70)) {
@@ -316,7 +451,15 @@ var ClassAttack = {
 	afterAttack: function () {
 		Misc.unShift();
 		Precast.doPrecast(false);
-		this.raiseArmy();
+
+		// Refresh only when missing (golem dead / bone armor gone) — not every swing
+		this.ensureBoneArmor();
+
+		if (Config.ActiveSummon) {
+			this.ensureGolem();
+			this.raiseArmy();
+		}
+
 		this.novaTick = 0;
 	},
 

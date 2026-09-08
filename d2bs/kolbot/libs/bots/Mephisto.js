@@ -173,10 +173,59 @@ function Mephisto() {
 	}
 
 	if (Config.Mephisto.TakeRedPortal) {
-		Pather.moveTo(17590, 8068);
-		delay(1500);
-		Pather.moveTo(17601, 8070);
-		Pather.usePortal(null);
+		var i, redPortal;
+
+		// Never getPresetUnit(102) unless we're in Durance 3 — native crash if level unloaded
+		if (me.area !== 102) {
+			print("ÿc1Mephistoÿc0 :: not in Durance 3 for red portal (area=" + me.area + ")");
+			return true;
+		}
+
+		try {
+			Pather.moveTo(17590, 8068);
+			delay(500);
+			Pather.moveTo(17601, 8070);
+		} catch (eMephCoord) {}
+
+		for (i = 0; i < 20 && me.area === 102; i += 1) {
+			redPortal = getUnit(2, 342);
+
+			if (!redPortal) {
+				try {
+					redPortal = getPresetUnit(me.area, 2, 342);
+				} catch (eMephPreset) {
+					redPortal = null;
+				}
+			}
+
+			if (redPortal) {
+				break;
+			}
+
+			delay(me.ping * 2 + 250);
+		}
+
+		try {
+			if (me.area === 102) {
+				Pather.moveToPreset(me.area, 2, 342, 0, 0, false, false);
+			}
+		} catch (eMephPortal) {
+			Pather.moveTo(17590, 8068);
+			delay(500);
+			Pather.moveTo(17601, 8070);
+		}
+
+		for (i = 0; i < 12 && me.area === 102; i += 1) {
+			redPortal = getUnit(2, 342);
+
+			if (redPortal) {
+				Pather.usePortal(null, null, redPortal);
+			} else {
+				Pather.usePortal(103);
+			}
+
+			delay(me.ping * 2 + 400);
+		}
 	}
 
 	return true;

@@ -1,0 +1,4 @@
+// Poison Strike early RW — Strength (Amn+Tir) in 2os knives.
+// Stealth/Lore are caster-only; Steel is sword/axe (wrong for PS).
+
+([Name] == Dagger || [Name] == Dirk || [Name] == Kris || [Name] == Blade || [Name] == Poignard || [Name] == Rondel || [Name] == Cinquedeas) && [Flag] != Ethereal && [quality] <= superior # [Sockets] == 2 # [MaxQuantity] == 1

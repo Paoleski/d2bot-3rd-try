@@ -54,10 +54,10 @@ var NodeAction = {
 		}
 	},
 
-	// Open chests while pathing
+	// Open chests while pathing — only ones we walk past (no moveTo detours)
 	popChests: function () {
 		if (!!Config.OpenChests) {
-			Misc.openChests(20);
+			Misc.openChests(5, {noMove: true});
 		}
 	},
 
@@ -415,6 +415,33 @@ var Pather = {
 		PathDebug.removeHooks();
 
 		return getDistance(me, node.x, node.y) < 5;
+	},
+
+	/*
+		Instant teleport that ignores progressive TeleDelay (Chaos seal pulls, etc.).
+		Still waits in-game cast frames inside teleportTo.
+	*/
+	forceTeleportTo: function (x, y, maxRange) {
+		var savedDelay, ok;
+
+		if (!this.canTeleport()) {
+			return false;
+		}
+
+		savedDelay = (typeof Config !== "undefined") ? Config.TeleDelay : undefined;
+		this._lastTeleTick = 0;
+
+		if (typeof Config !== "undefined") {
+			Config.TeleDelay = 0;
+		}
+
+		ok = this.teleportTo(x, y, maxRange);
+
+		if (typeof Config !== "undefined" && savedDelay !== undefined) {
+			Config.TeleDelay = savedDelay;
+		}
+
+		return ok;
 	},
 
 	/*
@@ -864,7 +891,7 @@ ModeLoop:
 		clearPath - kill monsters while moving
 	*/
 	moveToExit: function (targetArea, use, clearPath) {
-		var i, j, area, exits, targetRoom, dest, currExit, tick,
+		var i, j, area, exits, targetRoom, dest, currExit, tick, foundExit,
 			areas = [];
 
 		if (targetArea instanceof Array) {
@@ -908,8 +935,12 @@ ModeLoop:
 			exits = area.exits;
 
 			if (!exits || !exits.length) {
+				print("ÿc8Pather.moveToExitÿc0 :: no exits listed in area " + me.area + " → " + areas[i]);
+
 				return false;
 			}
+
+			foundExit = false;
 
 			for (j = 0; j < exits.length; j += 1) {
 				currExit = {
@@ -920,47 +951,78 @@ ModeLoop:
 					tileid: exits[j].tileid
 				};
 
-				if (currExit.target === areas[i]) {
-					dest = this.getNearestWalkable(currExit.x, currExit.y, 5, 1);
+				if (currExit.target !== areas[i]) {
+					continue;
+				}
 
-					if (!dest) {
-						return false;
-					}
+				foundExit = true;
+				dest = this.getNearestWalkable(currExit.x, currExit.y, 5, 1);
 
-					if (!this.moveTo(dest[0], dest[1], 3, clearPath)) {
-						return false;
-					}
+				if (!dest) {
+					return false;
+				}
 
-					/* i < areas.length - 1 is for crossing multiple areas.
-						In that case we must use the exit before the last area.
-					*/
-					if (use || i < areas.length - 1) {
-						switch (currExit.type) {
-						case 1: // walk through
-							targetRoom = this.getNearestRoom(areas[i]);
+				if (!this.moveTo(dest[0], dest[1], 3, clearPath)) {
+					return false;
+				}
 
-							if (targetRoom) {
-								this.moveTo(targetRoom[0], targetRoom[1]);
-							} else {
-								// might need adjustments
-								return false;
-							}
+				/* i < areas.length - 1 is for crossing multiple areas.
+					In that case we must use the exit before the last area.
+				*/
+				if (use || i < areas.length - 1) {
+					switch (currExit.type) {
+					case 1: // walk through
+						targetRoom = this.getNearestRoom(areas[i]);
 
-							break;
-						case 2: // stairs / cave mouth
-							if (!this.openExit(areas[i]) && !this.useUnit(5, currExit.tileid, areas[i])) {
-								// PD2: exit tileid often missing as getUnit(5,id) — walk/click nearest warp
-								if (!this.useExitFallback(areas[i], currExit)) {
-									return false;
+						if (targetRoom) {
+							this.moveTo(targetRoom[0], targetRoom[1]);
+						} else {
+							// might need adjustments
+							return false;
+						}
+
+						break;
+					case 2: // stairs / cave mouth
+						if (!this.openExit(areas[i]) && !this.useUnit(5, currExit.tileid, areas[i])) {
+							// PD2 Flayer Jungle: fort(53) vs hole(54) — try sibling warp id before fallback
+							if ((me.area === 78 && (areas[i] === 86 || areas[i] === 88)) ||
+									((me.area === 86 || me.area === 88) && areas[i] === 78)) {
+								if (currExit.tileid === 53 && this.useUnit(5, 54, areas[i])) {
+									break;
+								}
+
+								if (currExit.tileid === 54 && this.useUnit(5, 53, areas[i])) {
+									break;
 								}
 							}
 
-							break;
-						}
-					}
+							// PD2 Act 1 caves: LvlWarp 0–5 (cliff/floor in, cave up/down out)
+							// getUnit(5, tileid) often fails — try siblings near this exit first
+							if (this.tryAct1CaveWarps(areas[i], currExit)) {
+								break;
+							}
 
-					break;
+							// PD2: exit tileid often missing as getUnit(5,id) — walk/click warp or coords
+							if (!this.useExitFallback(areas[i], currExit)) {
+								// Last resort: treat cave mouth as walk-through (UG Passage ↔ Dark Wood etc.)
+								if (!this.tryWalkThroughExit(areas[i], currExit)) {
+									return false;
+								}
+							}
+						}
+
+						break;
+					}
 				}
+
+				break;
+			}
+
+			// use=false used to return true even when no exit matched → stuck in place (Cathedral pack hunt)
+			if (!foundExit) {
+				print("ÿc8Pather.moveToExitÿc0 :: no exit " + me.area + " → " + areas[i] + " (exits=" + exits.length + ")");
+
+				return false;
 			}
 		}
 
@@ -1106,63 +1168,277 @@ ModeLoop:
 	},
 
 	/*
-		Pather.useExitFallback(targetArea, exitInfo);
-		When getUnit(5, tileid) fails (common on PD2 Flayer Jungle caves):
-		walk into exit coords, then click nearest type-5 warp.
+		Pather.isAct1CaveArea(area);
+		Act 1 wilderness + cave/crypt dungeon ids used by outdoor cave mouths.
 	*/
-	useExitFallback: function (targetArea, exitInfo) {
-		var i, unit, best, d, tick, preArea, coord;
+	isAct1CaveArea: function (area) {
+		return area >= 2 && area <= 39;
+	},
+
+	/*
+		Pather.tryAct1CaveWarps(targetArea, exitInfo);
+		PD2: Act 1 LvlWarp 0–5 often missing as getUnit(5, exit.tileid).
+		UG Passage has two Cave Ups (Stony + Dark Wood) — only click the one near this exit.
+	*/
+	tryAct1CaveWarps: function (targetArea, exitInfo) {
+		var i, unit, best, ids, ax, ay, tick, preArea, d;
+
+		if (!this.isAct1CaveArea(me.area) || !this.isAct1CaveArea(targetArea)) {
+			return false;
+		}
 
 		preArea = me.area;
+		ax = (exitInfo && exitInfo.x) ? exitInfo.x : me.x;
+		ay = (exitInfo && exitInfo.y) ? exitInfo.y : me.y;
+		ids = [0, 1, 2, 3, 4, 5];
+
+		if (exitInfo && exitInfo.tileid !== undefined && ids.indexOf(exitInfo.tileid) < 0) {
+			ids.unshift(exitInfo.tileid);
+		}
+
+		best = null;
+
+		for (i = 0; i < ids.length; i += 1) {
+			unit = getUnit(5, ids[i]);
+
+			if (!unit) {
+				continue;
+			}
+
+			do {
+				d = getDistance(unit.x, unit.y, ax, ay);
+
+				if (d < 15 && (!best || d < getDistance(best.x, best.y, ax, ay))) {
+					best = copyUnit(unit);
+				}
+			} while (unit.getNext());
+		}
+
+		if (!best) {
+			return false;
+		}
+
+		print("ÿc8Pather.tryAct1CaveWarpsÿc0 :: classid=" + best.classid + " @ " + best.x + "," + best.y + " → " + targetArea);
+
+		if (getDistance(me, best) > 5) {
+			this.moveToUnit(best);
+		}
+
+		Misc.click(0, 0, best);
+		tick = getTickCount();
+
+		while (getTickCount() - tick < 2500) {
+			if (me.area === targetArea) {
+				delay(100);
+
+				return true;
+			}
+
+			if (me.area !== preArea) {
+				print("ÿc8Pather.tryAct1CaveWarpsÿc0 :: wrong area " + me.area + " want " + targetArea);
+				Town.goToTown();
+
+				return false;
+			}
+
+			delay(50);
+		}
+
+		return me.area === targetArea;
+	},
+
+	/*
+		Pather.tryWalkThroughExit(targetArea, exitInfo);
+		Stand on cave mouth then path into destination room (type-1 style).
+		Fixes PD2 UG Passage / Dark Wood when warp units never appear.
+	*/
+	tryWalkThroughExit: function (targetArea, exitInfo) {
+		var room, preArea = me.area;
 
 		if (exitInfo && exitInfo.x && exitInfo.y) {
 			this.moveTo(exitInfo.x, exitInfo.y, 3);
+			Misc.click(0, 0, exitInfo.x, exitInfo.y);
+			delay(300 + me.ping);
 
+			if (me.area === targetArea) {
+				return true;
+			}
+		}
+
+		room = this.getNearestRoom(targetArea);
+
+		if (!room) {
+			return false;
+		}
+
+		print("ÿc8Pather.tryWalkThroughExitÿc0 :: " + preArea + " → " + targetArea + " via room");
+		this.moveTo(room[0], room[1], 3);
+
+		return me.area === targetArea;
+	},
+
+	/*
+		Pather.useExitFallback(targetArea, exitInfo);
+		When getUnit(5, tileid) fails (common on PD2 Flayer Jungle caves + Act 1 mouths):
+		click exit coords, try fort/hole / Act1 cave classids, then nearest type-5 warp.
+		Only succeed on targetArea — Flayer Jungle has Swampy Pit(86) + Flayer Dungeon(88).
+	*/
+	useExitFallback: function (targetArea, exitInfo) {
+		var i, j, unit, best, d, tick, preArea, coord, ids, anchorX, anchorY,
+			tryClickUnit, waitTarget, leaveWrong;
+
+		preArea = me.area;
+		anchorX = (exitInfo && exitInfo.x) ? exitInfo.x : me.x;
+		anchorY = (exitInfo && exitInfo.y) ? exitInfo.y : me.y;
+		ids = [];
+
+		if (exitInfo && exitInfo.tileid) {
+			ids.push(exitInfo.tileid);
+		}
+
+		// Act 3 jungle dungeon warps: fort + hole (map layout picks one)
+		if (preArea === 78 || targetArea === 78 || targetArea === 86 || targetArea === 88) {
+			if (ids.indexOf(53) < 0) {
+				ids.push(53);
+			}
+
+			if (ids.indexOf(54) < 0) {
+				ids.push(54);
+			}
+		}
+
+		// Act 1 wilderness ↔ cave mouths (UG Passage Level 1 → Dark Wood uses Cave Up id 4)
+		if (this.isAct1CaveArea(preArea) || this.isAct1CaveArea(targetArea)) {
+			for (i = 0; i <= 5; i += 1) {
+				if (ids.indexOf(i) < 0) {
+					ids.push(i);
+				}
+			}
+		}
+
+		waitTarget = function () {
 			tick = getTickCount();
 
-			while (getTickCount() - tick < 1500) {
+			while (getTickCount() - tick < 2500) {
 				if (me.area === targetArea) {
+					delay(100);
+
 					return true;
+				}
+
+				if (me.area !== preArea) {
+					return false; // wrong exit (e.g. Swampy instead of Flayer)
 				}
 
 				delay(50);
 			}
+
+			return me.area === targetArea;
+		};
+
+		leaveWrong = function () {
+			if (me.area === targetArea || me.area === preArea) {
+				return me.area === targetArea;
+			}
+
+			// Don't recurse through moveToExit — town and retry from WP
+			print("ÿc8Pather.useExitFallbackÿc0 :: wrong area " + me.area + " want " + targetArea + " — town");
+			Town.goToTown();
+
+			return false;
+		};
+
+		tryClickUnit = function (u) {
+			if (!u) {
+				return false;
+			}
+
+			if (getDistance(me, u) > 5) {
+				this.moveToUnit(u);
+			}
+
+			Misc.click(0, 0, u);
+
+			if (waitTarget()) {
+				return true;
+			}
+
+			return leaveWrong();
+		};
+
+		print("ÿc8Pather.useExitFallbackÿc0 :: area " + preArea + " → " + targetArea + " @ " + anchorX + "," + anchorY);
+
+		if (exitInfo && exitInfo.x && exitInfo.y) {
+			this.moveTo(anchorX, anchorY, 3);
+
+			for (i = 0; i < 4; i += 1) {
+				// PD2: warp often missing from getUnit — click the exit tile itself
+				Misc.click(0, 0, anchorX, anchorY);
+
+				if (waitTarget()) {
+					return true;
+				}
+
+				if (me.area !== preArea) {
+					leaveWrong();
+					return false;
+				}
+
+				this.moveTo(anchorX + rand(-1, 1), anchorY + rand(-1, 1), 2);
+			}
 		}
 
-		for (i = 0; i < 5; i += 1) {
+		for (i = 0; i < 6; i += 1) {
 			best = null;
-			unit = getUnit(5);
 
-			if (unit) {
-				do {
-					d = getDistance(me, unit);
+			for (j = 0; j < ids.length; j += 1) {
+				unit = getUnit(5, ids[j]);
 
-					if (d < 20 && (!best || d < getDistance(me, best))) {
-						best = copyUnit(unit);
-					}
-				} while (unit.getNext());
-			}
-
-			if (best) {
-				if (getDistance(me, best) > 5) {
-					this.moveToUnit(best);
+				if (!unit) {
+					unit = getUnit(2, ids[j]);
 				}
 
-				Misc.click(0, 0, best);
-				tick = getTickCount();
-
-				while (getTickCount() - tick < 2500) {
-					if (me.area === targetArea || me.area !== preArea) {
-						delay(100);
-
-						return me.area === targetArea || me.area !== preArea;
-					}
-
-					delay(50);
+				if (unit && getDistance(me, unit) < 30) {
+					best = copyUnit(unit);
+					break;
 				}
 			}
 
-			coord = CollMap.getRandCoordinate(me.x, -2, 2, me.y, -2, 2, 4);
+			if (!best) {
+				unit = getUnit(5);
+
+				if (unit) {
+					do {
+						d = getDistance(me, unit);
+
+						if (d < 25 && getDistance(unit.x, unit.y, anchorX, anchorY) < 20 &&
+								(!best || d < getDistance(me, best))) {
+							best = copyUnit(unit);
+						}
+					} while (unit.getNext());
+				}
+			}
+
+			if (tryClickUnit.call(this, best)) {
+				return true;
+			}
+
+			if (me.inTown || (me.area !== preArea && me.area !== targetArea)) {
+				return me.area === targetArea;
+			}
+
+			Misc.click(0, 0, anchorX, anchorY);
+
+			if (waitTarget()) {
+				return true;
+			}
+
+			if (me.area !== preArea) {
+				leaveWrong();
+				return false;
+			}
+
+			coord = CollMap.getRandCoordinate(anchorX, -2, 2, anchorY, -2, 2, 4);
 
 			if (coord) {
 				this.moveTo(coord.x, coord.y);
@@ -1183,7 +1459,7 @@ ModeLoop:
 		targetArea - area id of where the unit leads to
 	*/
 	useUnit: function (type, id, targetArea) {
-		var i, tick, unit, coord, scan,
+		var i, tick, unit, coord, scan, best, d,
 			preArea = me.area;
 
 		for (i = 0; i < 5; i += 1) {
@@ -1196,6 +1472,24 @@ ModeLoop:
 			delay(200);
 		}
 
+		// Prefer nearest match — Act 1 caves share Cave Up (id 4) on multiple exits
+		if (unit && typeof id === "number") {
+			best = copyUnit(unit);
+			scan = getUnit(type, id);
+
+			if (scan) {
+				do {
+					d = getDistance(me, scan);
+
+					if (d < getDistance(me, best)) {
+						best = copyUnit(scan);
+					}
+				} while (scan.getNext());
+			}
+
+			unit = best;
+		}
+
 		// PD2: stairs sometimes not returned by getUnit(type, id) — scan and match classid
 		if (!unit && typeof id === "number") {
 			scan = getUnit(type);
@@ -1203,8 +1497,9 @@ ModeLoop:
 			if (scan) {
 				do {
 					if (scan.classid === id) {
-						unit = copyUnit(scan);
-						break;
+						if (!unit || getDistance(me, scan) < getDistance(me, unit)) {
+							unit = copyUnit(scan);
+						}
 					}
 				} while (scan.getNext());
 			}
