@@ -1,0 +1,34 @@
+---
+description: Every char only casts its own configured attack skills — never hardcode a skill id in bot/attack scripts
+alwaysApply: true
+---
+
+# Own attacks only
+
+Bot scripts (`libs/bots/*.js`) and class attack files (`libs/common/Attacks/*.js`) must attack with **this char's configured skills**: `Config.AttackSkill[1..4]` (and `Config.LowManaSkill`). Never hardcode an attack skill id (e.g. `Skill.cast(44, 0)` Frost Nova, `Skill.cast(59, ...)` Blizzard) into pull/boss/aggro logic — a light sorc with 1 point in FN from leveling would otherwise spam FN forever.
+
+## Rules
+
+- Use the helpers: `this.castOwnAttack(x, y)` in `AutoSmurf.js` / `Diablo.js`, `ClassAttack.diabloPickSkill(unit)` for Diablo, `ClassAttack.doAttack(unit)` everywhere else.
+- Skill-id checks are only allowed for **utility** skills (Teleport 54, Static Field 42, Telekinesis 43, Battle Orders, etc.) and for **config-driven leveling upgrades** that rewrite `Config.AttackSkill[...]` (Ice Bolt → FN → FO only when the configured skill IS 36/39).
+- Never add "prefer skill X if learned" overrides in `doAttack` / `getBoss` / `chaosPreattack`. If a build wants FN on De Seis, it sets `Config.AttackSkill[2] = 44` in its config.
+- `me.getSkill(id, 1) > 0` means "has the skill", not "should use it". Don't gate attacks on it.
+
+## Bad vs good
+
+```javascript
+// BAD — hardcoded Frost Nova on every sorc
+if (me.getSkill(44, 1)) {
+	Skill.cast(44, 0);
+}
+
+// GOOD — whatever this build configured
+this.castOwnAttack(target.x, target.y);
+// or
+ClassAttack.doAttack(target, false);
+```
+
+## Checklist after editing a bot / attack file
+
+1. `rg "Skill\.cast\((4[0-9]|5[0-9]|6[0-4])," libs/bots libs/common/Attacks` — any hit must be a utility skill (42/43/54), not an attack.
+2. `rg "getSkill\(44"` — only allowed in leveling-upgrade blocks that check `Config.AttackSkill` first.

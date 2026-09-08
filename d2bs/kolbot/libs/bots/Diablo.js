@@ -131,6 +131,27 @@ function Diablo() {
 		return false;
 	};
 
+	// Cast THIS char's configured attack at a spot — never a hardcoded skill
+	this.castOwnAttack = function (x, y) {
+		var k, sk, list = [Config.AttackSkill[1], Config.AttackSkill[2]];
+
+		for (k = 0; k < list.length; k += 1) {
+			sk = list[k];
+
+			if (!sk || sk <= 0 || !Attack.canUseSkill(sk)) {
+				continue;
+			}
+
+			if (Skill.isTimed(sk) && me.getState(121)) {
+				continue;
+			}
+
+			return Skill.cast(sk, Skill.getHand(sk), x, y);
+		}
+
+		return false;
+	};
+
 	this.chaosPreattack = function (name, amount) {
 		var i, n, target, positions;
 
@@ -266,16 +287,7 @@ function Diablo() {
 			}
 
 			delay(180 + me.ping);
-
-			if (me.getSkill(44, 1)) {
-				Skill.cast(44, 0);
-				delay(80);
-			}
-
-			if (Config.AttackSkill[1] > 0) {
-				Skill.cast(Config.AttackSkill[1], Skill.getHand(Config.AttackSkill[1]), bx, by - 4);
-			}
-
+			self.castOwnAttack(bx, by - 4);
 			delay(120 + me.ping);
 			snapHold();
 		}
@@ -298,15 +310,8 @@ function Diablo() {
 			Pather.teleport = false;
 			Pather.moveTo(bx, by, 2);
 			Pather.teleport = savedTele;
-
-			if (me.getSkill(44, 1)) {
-				Skill.cast(44, 0);
-				delay(80);
-			}
-
-			if (Config.AttackSkill[1] > 0) {
-				Skill.cast(Config.AttackSkill[1], Skill.getHand(Config.AttackSkill[1]), bx, by - 8);
-			}
+			self.castOwnAttack(bx, by - 8);
+			delay(80);
 
 			for (j = 0; j < 18; j += 1) {
 				boss = getUnit(1, name);
@@ -370,8 +375,8 @@ function Diablo() {
 				ClassAttack._sealHoldY = holdY;
 			}
 
-			if (me.getSkill(44, 1)) {
-				Skill.cast(44, 0);
+			if (Attack.checkMonster(unit)) {
+				self.castOwnAttack(unit.x, unit.y);
 			}
 
 			engaged = true;

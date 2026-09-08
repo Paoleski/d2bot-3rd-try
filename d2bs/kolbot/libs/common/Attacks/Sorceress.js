@@ -184,8 +184,10 @@ var ClassAttack = {
 
 		this.sealPullStandOff(unit);
 
-		if (me.getSkill(44, 1) && Attack.checkMonster(unit) && getDistance(me, unit) <= 10) {
-			Skill.cast(44, 0);
+		// Own untimed skill only (doAttack already tried the timed one) — no hardcoded FN
+		if (Config.AttackSkill[2] > 0 && Attack.canUseSkill(Config.AttackSkill[2]) &&
+				Attack.checkMonster(unit) && getDistance(me, unit) <= this.castRangeFor(Config.AttackSkill[2], unit)) {
+			Skill.cast(Config.AttackSkill[2], Skill.getHand(Config.AttackSkill[2]), unit);
 		}
 
 		if (getDistance(me, unit) < 7) {
@@ -327,12 +329,7 @@ var ClassAttack = {
 			return untimed;
 		}
 
-		// Cold early: FN if configured skills missing but FN is learned
-		if (me.getSkill(44, 1) && Attack.checkResist(unit, 44) &&
-				(!me.getSkill(64, 0) || me.getSkill(64, 0) <= 0)) {
-			return 44;
-		}
-
+		// No hardcoded fallback skill — only this build's configured AttackSkills
 		if (timed > 0 && Attack.canUseSkill(timed) && Attack.checkResist(unit, timed)) {
 			return timed;
 		}
@@ -611,12 +608,7 @@ var ClassAttack = {
 			untimedSkill = -1;
 		}
 
-		// Diablo / Infector / De Seis: prefer Frost Nova as boss untimed
-		if (unit && (unit.classid === 243 || this.isSealPullBoss(unit)) && me.getSkill(44, 1)) {
-			if (untimedSkill < 0 || untimedSkill === Config.AttackSkill[2] || untimedSkill === Config.AttackSkill[4]) {
-				untimedSkill = 44;
-			}
-		}
+		// Diablo / Infector / De Seis: use this build's configured skills only — no hardcoded FN override
 
 		switch (this.doCast(unit, timedSkill, untimedSkill)) {
 		case 0: // Fail
