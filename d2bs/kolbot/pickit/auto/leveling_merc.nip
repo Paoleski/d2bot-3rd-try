@@ -3,6 +3,7 @@
 // (never sell-bait). Javelins/glaives are never kept.
 // Act1 Rogue: bow / crossbow. Act2 Desert: spear (incl. pike) / polearm.
 // Armor slots: life, all-res, IAS, FHR, ED, life leech (LL).
+// Ethereal OK — PD2 mercs take no eth durability loss.
 // Endgame merc.nip is NOT used on the AutoGear leveling path.
 
 // --- Act1 Rogue weapons ---
@@ -19,14 +20,14 @@
 
 // --- Armor / helm / gloves / boots / belt ---
 // Circlets omitted: low AC for merc; sorc uses #tier circlets in autoequip_sor.nip (no merc MaxQuantity hoard).
-[type] == armor && ([quality] == magic || [quality] == rare) && [Flag] != Ethereal # [maxhp] >= 10 || [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 15 || [ias] >= 10 || [fhr] >= 10 || [enhanceddamage] >= 10 || [lifeleech] >= 2 # [MaxQuantity] == 2
-[type] == helm && ([quality] == magic || [quality] == rare) && [Flag] != Ethereal # [maxhp] >= 10 || [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 15 || [ias] >= 10 || [fhr] >= 10 || [enhanceddamage] >= 10 || [lifeleech] >= 2 # [MaxQuantity] == 2
-[type] == gloves && ([quality] == magic || [quality] == rare) && [Flag] != Ethereal # [maxhp] >= 10 || [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 15 || [ias] >= 10 || [fhr] >= 10 || [enhanceddamage] >= 10 || [lifeleech] >= 2 # [MaxQuantity] == 1
-[type] == boots && ([quality] == magic || [quality] == rare) && [Flag] != Ethereal # [maxhp] >= 10 || [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 15 || [ias] >= 10 || [fhr] >= 10 || [enhanceddamage] >= 10 || [lifeleech] >= 2 # [MaxQuantity] == 1
-[type] == belt && ([quality] == magic || [quality] == rare) && [Flag] != Ethereal # [maxhp] >= 10 || [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 15 || [ias] >= 10 || [fhr] >= 10 || [enhanceddamage] >= 10 || [lifeleech] >= 2 # [MaxQuantity] == 1
+[type] == armor && ([quality] == magic || [quality] == rare) # [maxhp] >= 10 || [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 15 || [ias] >= 10 || [fhr] >= 10 || [enhanceddamage] >= 10 || [lifeleech] >= 2 # [MaxQuantity] == 2
+[type] == helm && ([quality] == magic || [quality] == rare) # [maxhp] >= 10 || [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 15 || [ias] >= 10 || [fhr] >= 10 || [enhanceddamage] >= 10 || [lifeleech] >= 2 # [MaxQuantity] == 2
+[type] == gloves && ([quality] == magic || [quality] == rare) # [maxhp] >= 10 || [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 15 || [ias] >= 10 || [fhr] >= 10 || [enhanceddamage] >= 10 || [lifeleech] >= 2 # [MaxQuantity] == 1
+[type] == boots && ([quality] == magic || [quality] == rare) # [maxhp] >= 10 || [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 15 || [ias] >= 10 || [fhr] >= 10 || [enhanceddamage] >= 10 || [lifeleech] >= 2 # [MaxQuantity] == 1
+[type] == belt && ([quality] == magic || [quality] == rare) # [maxhp] >= 10 || [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 15 || [ias] >= 10 || [fhr] >= 10 || [enhanceddamage] >= 10 || [lifeleech] >= 2 # [MaxQuantity] == 1
 
-[type] == armor && ([quality] == unique || [quality] == set) && [Flag] != Ethereal # # [MaxQuantity] == 1
-[type] == helm && ([quality] == unique || [quality] == set) && [Flag] != Ethereal # # [MaxQuantity] == 1
-[type] == gloves && ([quality] == unique || [quality] == set) && [Flag] != Ethereal # # [MaxQuantity] == 1
-[type] == boots && ([quality] == unique || [quality] == set) && [Flag] != Ethereal # # [MaxQuantity] == 1
-[type] == belt && ([quality] == unique || [quality] == set) && [Flag] != Ethereal # # [MaxQuantity] == 1
+[type] == armor && ([quality] == unique || [quality] == set) # # [MaxQuantity] == 1
+[type] == helm && ([quality] == unique || [quality] == set) # # [MaxQuantity] == 1
+[type] == gloves && ([quality] == unique || [quality] == set) # # [MaxQuantity] == 1
+[type] == boots && ([quality] == unique || [quality] == set) # # [MaxQuantity] == 1
+[type] == belt && ([quality] == unique || [quality] == set) # # [MaxQuantity] == 1

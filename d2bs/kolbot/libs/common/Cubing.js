@@ -914,7 +914,7 @@ IngredientLoop:
 		return false;
 	},
 
-	doCubing: function () {
+	doCubing: function (keepOpen) {
 		if (!Config.Cubing) {
 			return false;
 		}
@@ -995,7 +995,8 @@ IngredientLoop:
 			}
 		}
 
-		if (getUIFlag(0x1A) || getUIFlag(0x19)) {
+		// keepOpen: leave stash/cube for chores junk-jewels / stack pass
+		if (!keepOpen && (getUIFlag(0x1A) || getUIFlag(0x19))) {
 			delay(1000);
 
 			while (getUIFlag(0x1A) || getUIFlag(0x19)) {
@@ -1095,35 +1096,87 @@ IngredientLoop:
 
 	emptyCube: function () {
 		var cube = (typeof QuestItems !== "undefined" && QuestItems.getCube) ? QuestItems.getCube() : (me.getItem("box") || me.getItem(QuestItems.cube)),
-			items = me.findItems(-1, -1, 6),
-			code;
+			items, code, pass, name, left;
 
 		if (!cube) {
 			return false;
 		}
 
-		if (!items) {
-			return true;
-		}
-
-		while (items.length) {
-			code = items[0].code ? String(items[0].code).toLowerCase() : "";
-
-			// Quest cube results (hst / flail / etc.) → inventory first so placeStaff can cursor them
-			if (code === "hst" || code === "qf2" || code === "qf1" ||
-					items[0].classid === QuestItems.horadricStaff ||
-					items[0].classid === QuestItems.khalimWill ||
-					items[0].classid === QuestItems.khalimFlail) {
-				if (!Storage.Inventory.MoveTo(items[0]) && !Storage.Stash.MoveTo(items[0])) {
-					return false;
-				}
-			} else if (!Storage.Stash.MoveTo(items[0]) && !Storage.Inventory.MoveTo(items[0])) {
+		// PD2/D2BS: cube contents often invisible to findItems until the cube UI is open
+		if (!getUIFlag(0x1a)) {
+			if (!this.openCube()) {
 				return false;
 			}
+		}
 
-			items.shift();
+		for (pass = 0; pass < 8; pass += 1) {
+			items = me.findItems(-1, -1, 6);
+
+			if (!items || !items.length) {
+				return true;
+			}
+
+			while (items.length) {
+				code = items[0].code ? String(items[0].code).toLowerCase() : "";
+				name = items[0].name ? String(items[0].name).replace(/ÿc[0-9a-z]/gi, "").toLowerCase() : "";
+
+				// Quest cube results (hst / flail / etc.) → inventory first so placeStaff can cursor them
+				if (code === "hst" || code === "qf2" || code === "qf1" ||
+						items[0].classid === QuestItems.horadricStaff ||
+						items[0].classid === QuestItems.khalimWill ||
+						items[0].classid === QuestItems.khalimFlail) {
+					if (!Storage.Inventory.MoveTo(items[0]) && !Storage.Stash.MoveTo(items[0])) {
+						print("ÿc1Cubingÿc0 :: emptyCube can't move quest result " + (name || code || items[0].classid));
+						return false;
+					}
+				} else if (!Storage.Stash.MoveTo(items[0]) && !Storage.Inventory.MoveTo(items[0])) {
+					print("ÿc1Cubingÿc0 :: emptyCube can't move " + (name || code || items[0].classid) +
+						" (stash/inv full?)");
+					return false;
+				}
+
+				delay(30 + me.ping);
+				items = me.findItems(-1, -1, 6);
+
+				if (!items) {
+					items = [];
+				}
+			}
+		}
+
+		left = me.findItems(-1, -1, 6);
+
+		if (left && left.length) {
+			print("ÿc1Cubingÿc0 :: emptyCube still has " + left.length + " item(s) — abort");
+			return false;
 		}
 
 		return true;
+	},
+
+	// True when location 6 has no units (opens cube UI first so PD2 stacks are visible)
+	isCubeEmpty: function () {
+		var items;
+
+		if (!getUIFlag(0x1a) && !this.openCube()) {
+			return false;
+		}
+
+		items = me.findItems(-1, -1, 6);
+
+		return !items || !items.length;
+	},
+
+	// Open + empty + verify. Returns false if anything (e.g. jewf) remains.
+	ensureCubeEmpty: function () {
+		if (!this.openCube()) {
+			return false;
+		}
+
+		if (!this.emptyCube()) {
+			return false;
+		}
+
+		return this.isCubeEmpty();
 	}
 };

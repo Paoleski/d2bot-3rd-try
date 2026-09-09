@@ -196,6 +196,44 @@ function Baal() {
 		say(string);
 	};
 
+	// Worldstone Chamber: ignore Festering Appendages (562-566) — teleport onto Baal and burn him only
+	this.killBaal = function () {
+		var baal, prevTele = Config.TeleStomp, attackCount = 0, retry = 0;
+
+		Config.TeleStomp = true;
+
+		try {
+			while (attackCount < 300) {
+				baal = getUnit(1, 544);
+
+				if (!baal || !Attack.checkMonster(baal)) {
+					return true;
+				}
+
+				if (getDistance(me, baal) > 3) {
+					Pather.moveToUnit(baal);
+				}
+
+				if (!ClassAttack.doAttack(baal, attackCount % 15 === 0)) {
+					if (retry++ > 3) {
+						Pather.moveToUnit(baal);
+						retry = 0;
+					}
+				} else {
+					retry = 0;
+				}
+
+				attackCount += 1;
+			}
+		} finally {
+			Config.TeleStomp = prevTele;
+		}
+
+		baal = getUnit(1, 544);
+
+		return !baal || !Attack.checkMonster(baal);
+	};
+
 	Town.doChores();
 	Pather.useWaypoint(Config.RandomPrecast ? "random" : 129);
 	Precast.doPrecast(true);
@@ -241,12 +279,20 @@ function Baal() {
 
 	tick = getTickCount();
 
-	Pather.moveTo(15094, me.classid === 3 ? 5029 : 5038);
+	var closeX = 15094, closeY = me.classid === 3 ? 5029 : 5038,
+		farX = 15094, farY = 5060, // reuse far sweep point from clearThrone(); keep final wave out of Baal curse range
+		wavesSeen = {};
+
+	Pather.moveTo(closeX, closeY);
 
 MainLoop:
 	while (true) {
-		if (getDistance(me, 15094, me.classid === 3 ? 5029 : 5038) > 3) {
-			Pather.moveTo(15094, me.classid === 3 ? 5029 : 5038);
+		var finalWavePending = wavesSeen[1] && wavesSeen[2] && wavesSeen[3] && wavesSeen[4],
+			waitX = finalWavePending ? farX : closeX,
+			waitY = finalWavePending ? farY : closeY;
+
+		if (getDistance(me, waitX, waitY) > 3) {
+			Pather.moveTo(waitX, waitY);
 		}
 
 		if (!getUnit(1, 543)) {
@@ -256,6 +302,7 @@ MainLoop:
 		switch (this.checkThrone()) {
 		case 1:
 			Attack.clear(40);
+			wavesSeen[1] = true;
 
 			tick = getTickCount();
 
@@ -264,25 +311,28 @@ MainLoop:
 			break;
 		case 2:
 			Attack.clear(40);
+			wavesSeen[2] = true;
 
 			tick = getTickCount();
 
 			break;
 		case 4:
 			Attack.clear(40);
+			wavesSeen[4] = true;
 
 			tick = getTickCount();
 
 			break;
 		case 3:
 			Attack.clear(40);
+			wavesSeen[3] = true;
 			this.checkHydra();
 
 			tick = getTickCount();
 
 			break;
 		case 5:
-			Attack.clear(40);
+			Attack.clear(40); // anchored to far spot once waves 1-4 cleared
 
 			break MainLoop;
 		default:
@@ -326,7 +376,7 @@ MainLoop:
 		}
 
 		Pather.moveTo(15134, 5923);
-		Attack.kill(544); // Baal
+		this.killBaal();
 		Pickit.pickItems();
 	}
 

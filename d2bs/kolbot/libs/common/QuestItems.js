@@ -233,7 +233,8 @@ var QuestItems = {
 
 		// Prefer code — PD2 classids shift
 		if (code === "ice" || code === "tr2" || code === "xyz" || code === "ass" ||
-				code === "j34" || code === "g34" || code === "bbb") {
+				code === "j34" || code === "g34" || code === "bbb" ||
+				code === "mss" || code === "hfh") {
 			return true;
 		}
 

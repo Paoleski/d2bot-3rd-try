@@ -1,11 +1,7 @@
-// Sorceress LIGHT — same-stat orb > staff (1H + shield). No wands.
+// Sorceress LIGHT — skill identity for weapons; jewelry ranking is AutoGearScore (base nip).
+// Orb still preferred over same-skill staff via scorer skill weights + existing orb>staff gate.
 
-// FCR filler — orb +2 over same FCR staff
-[type] == staff && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 10 # [tier] == 16
-[type] == staff && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 20 # [tier] == 19
-[type] == orb && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 10 # [tier] == 18
-[type] == orb && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 20 # [tier] == 21
-
+// Weapon skill ladders (keep — named +skill beats generic scorer for early CB/LN orbs)
 [type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillchargedbolt] >= 1 # [tier] == 32
 [type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillchargedbolt] >= 2 # [tier] == 34
 [type] == staff && [quality] <= rare && [Flag] != Ethereal # [skillchargedbolt] >= 3 # [tier] == 36
@@ -33,12 +29,3 @@
 [type] == orb && [quality] <= rare && [Flag] != Ethereal # [sorceressskills] >= 2 # [tier] == 54
 
 [type] == sword && [flag] == runeword # [itemallskills] == 2 && [fcr] >= 25 # [tier] == 100
-
-// Amulets/rings — beat base autoequip_sor.nip coldskilltab ladders (tiers 16-26)
-[type] == amulet && [quality] == rare # [lightningskilltab] >= 1 && [maxhp]+[maxmana] >= 50 # [tier] == 27
-[type] == amulet && [quality] == rare # [lightningskilltab] >= 1 && [maxhp]+[maxmana] >= 90 # [tier] == 28
-[type] == amulet && [quality] == rare # [lightningskilltab] >= 2 # [tier] == 29
-[type] == amulet && [quality] == rare # [lightningskilltab] >= 1 && [sorceressskills] >= 1 # [tier] == 30
-[type] == amulet && [quality] == rare # [lightningskilltab] >= 2 && [maxhp]+[maxmana] >= 70 # [tier] == 31
-[type] == ring && [quality] == rare # [lightningskilltab] >= 1 # [tier] == 20
-[type] == ring && [quality] == rare # [fcr] >= 10 && [fireresist]+[lightresist]+[coldresist] >= 20 # [tier] == 19

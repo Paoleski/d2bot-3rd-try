@@ -1,4 +1,9 @@
-// Poison Strike early RW — Strength (Amn+Tir) in 2os knives.
-// Stealth/Lore are caster-only; Steel is sword/axe (wrong for PS).
+// Poison Strike merc sticks: Purity (Amn+Eth+Thul, 3os) > Strength (Amn+Tir, 2os).
+// Necro knives never get these — shop/drop +PS / IAS instead.
+// Nip MaxQuantity alone is weak (spear vs polearm lines; stash vs inv).
+// Pickit + cull: at most one best empty 3os; ignore all 2os/3os once Purity/Insight is done.
 
-([Name] == Dagger || [Name] == Dirk || [Name] == Kris || [Name] == Blade || [Name] == Poignard || [Name] == Rondel || [Name] == Cinquedeas) && [Flag] != Ethereal && [quality] <= superior # [Sockets] == 2 # [MaxQuantity] == 1
+[type] == spear && [Flag] != Ethereal && [quality] <= superior # [Sockets] == 3 # [MaxQuantity] == 1
+[type] == polearm && [Flag] != Ethereal && [quality] <= superior # [Sockets] == 3 # [MaxQuantity] == 1
+[type] == spear && [Flag] != Ethereal && [quality] <= superior # [Sockets] == 2 # [MaxQuantity] == 1
+[type] == polearm && [Flag] != Ethereal && [quality] <= superior # [Sockets] == 2 # [MaxQuantity] == 1

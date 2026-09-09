@@ -5,6 +5,23 @@
 */
 
 function Mephisto() {
+	// All Durance 3 monsters except Mephisto himself (classid 242) — clear the level
+	// from range before engaging him instead of walking straight in and waking him.
+	this.buildList = function () {
+		var monsterList = [],
+			monster = getUnit(1);
+
+		if (monster) {
+			do {
+				if (monster.classid !== 242 && Attack.checkMonster(monster)) {
+					monsterList.push(copyUnit(monster));
+				}
+			} while (monster.getNext());
+		}
+
+		return monsterList;
+	};
+
 	this.killMephisto = function () {
 		var i, angle, angles,
 			pos = {},
@@ -134,31 +151,78 @@ function Mephisto() {
 	Pather.useWaypoint(101);
 	Precast.doPrecast(true);
 
-	if (!Pather.moveToExit(102, true)) {
-		throw new Error("Failed to move to Durance Level 3");
+	// Light sorc: Lightning-only for approach + arrival clear + room sweep — restored
+	// in the finally right before the dedicated Mephisto fight starts.
+	var savedAtk = Attack.isLightSorc() ? Attack.preferLightningOnly("Meph") : null;
+
+	try {
+		// clearPath OFF — Attack.clear would pick Mephisto once we get near the throne.
+		if (!Pather.moveToExit(102, true, false)) {
+			throw new Error("Failed to move to Durance Level 3");
+		}
+
+		if (Config.Mephisto.KillCouncil) {
+			this.killCouncil();
+		}
+
+		if (Attack.isLightSorc()) {
+			var sweepSpots = [[17542, 8066], [17572, 8011], [17515, 8061], [17572, 8125], [17600, 8095]],
+				spotI;
+
+			// Phase 1: lateral room — real path node-by-node, Mephisto excluded
+			print("ÿc2Mephistoÿc0 :: lateral room — travelClearing (exclude Mephisto)");
+			Attack.travelClearing(17542, 8066, 242);
+
+			// Phase 2: mop up anything adjacent on throne-room arrival
+			print("ÿc2Mephistoÿc0 :: arrival clear (near trash only)");
+			Attack.clearList(this.buildList.bind(this), null, 20);
+
+			// Phase 3: ranged sweep of landmark spots — still exclude Mephisto
+			for (spotI = 0; spotI < sweepSpots.length; spotI += 1) {
+				print("ÿc2Mephistoÿc0 :: sweeping room " + (spotI + 1) + "/" + sweepSpots.length);
+
+				if (typeof Pather.forceTeleportTo === "function" && Pather.canTeleport()) {
+					if (!Pather.forceTeleportTo(sweepSpots[spotI][0], sweepSpots[spotI][1], 5)) {
+						Pather.moveTo(sweepSpots[spotI][0], sweepSpots[spotI][1], 5, false);
+					}
+				} else {
+					Pather.moveTo(sweepSpots[spotI][0], sweepSpots[spotI][1], 5, false);
+				}
+
+				delay(200 + me.ping);
+				Attack.clearList(this.buildList.bind(this), null, 20);
+			}
+
+			Attack.clearList(this.buildList.bind(this), null, 20);
+		}
+	} finally {
+		Attack.restoreAttackSkill(savedAtk);
 	}
 
-	if (Config.Mephisto.KillCouncil) {
-		this.killCouncil();
-	}
+	// Phase 4: telestomp Mephisto with Charged Bolt (Lightning was for clear-only)
+	Pather.moveTo(17566, 8069, 3, false);
 
-	Pather.moveTo(17566, 8069);
+	savedAtk = Attack.isLightSorc() ? Attack.preferChargedBolt("Meph") : null;
 
-	if (me.classid === 1) {
-		if (Config.Mephisto.MoatTrick) {
-			this.moat();
+	try {
+		if (me.classid === 1) {
+			if (Config.Mephisto.MoatTrick) {
+				this.moat();
 
-			Skill.usePvpRange = true;
+				Skill.usePvpRange = true;
 
-			Attack.kill(242); // Mephisto
+				Attack.kill(242); // Mephisto
 
-			Skill.usePvpRange = false;
+				Skill.usePvpRange = false;
+			} else {
+				//this.killMephisto();
+				Attack.kill(242); // Mephisto
+			}
 		} else {
-			//this.killMephisto();
 			Attack.kill(242); // Mephisto
 		}
-	} else {
-		Attack.kill(242); // Mephisto
+	} finally {
+		Attack.restoreAttackSkill(savedAtk);
 	}
 
 	Pickit.pickItems();

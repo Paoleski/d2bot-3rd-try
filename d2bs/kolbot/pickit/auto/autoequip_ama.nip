@@ -13,6 +13,7 @@
 //[type] == helm && [quality] < normal # # [tier] == 1
 //[type] == helm && [quality] == normal # # [tier] == 2
 //[type] == helm && [quality] == superior # # [tier] == 3
+[type] == helm && [quality] == rare # # [tier] == 5
 [type] == helm && [quality] == magic # [lightresist] >= 10 # [tier] == 4
 [type] == helm && [quality] == magic # [fireresist] >= 10 # [tier] == 5
 [type] == helm && [quality] == magic # [fireresist]+[lightresist] >= 15 # [tier] == 6
@@ -50,6 +51,7 @@
 [type] == armor && [quality] < normal # # [tier] == 1
 [type] == armor && [quality] == normal # # [tier] == 2
 [type] == armor && [quality] == superior # # [tier] == 3
+[type] == armor && [quality] == rare # # [tier] == 5
 
 [type] == armor && ([quality] == magic || [quality] == rare) # [enhanceddefense] == 0 && (([maxhp] > 0 && [strength] == 0) || ([maxhp] == 0 && [strength] > 0)) && [coldresist] + [fireresist] + [lightresist] < 20  # [tier] == 4
 [type] == armor && ([quality] == magic || [quality] == rare) # [enhanceddefense] == 0 && [maxhp] > 0 && [strength] > 0 && [coldresist] + [fireresist] + [lightresist] < 20  # [tier] == 5
@@ -129,6 +131,7 @@
 [type] == gloves && [quality] < normal # # [tier] == 1
 [type] == gloves && [quality] == normal # # [tier] == 2
 [type] == gloves && [quality] == superior # # [tier] == 3
+[type] == gloves && [quality] == rare # # [tier] == 5
 [type] == gloves && ([quality] == magic || [quality] == rare) # ([hpregen] + [maxmana] > 0 && [strength] + [dexterity] == 0) || ([hpregen] + [maxmana] == 0 && [strength] + [dexterity] > 0) && [coldresist] + [fireresist] + [lightresist] < 20 	# [tier] == 4
 [type] == gloves && ([quality] == magic || [quality] == rare) # [hpregen] + [maxmana] > 0 && [strength] + [dexterity] > 0 && [coldresist] + [fireresist] + [lightresist] + [poisonresist] < 20 														# [tier] == 5
 
@@ -175,6 +178,7 @@
 [type] == boots && [quality] < normal ## [tier] == 1
 [type] == boots && [quality] == normal ## [tier] == 2
 [type] == boots && [quality] == superior ## [tier] == 3
+[type] == boots && [quality] == rare # # [tier] == 5
 [type] == boots && [quality] == magic # [frw] == 0 && [maxmana] == 0 && [fireresist]+[lightresist]+[coldresist]+[poisonresist] == 0 # [tier] == 4
 [type] == boots && [quality] == rare # [frw] == 0 && [maxmana] == 0 && [fireresist]+[lightresist]+[coldresist]+[poisonresist] == 0 # [tier] == 5
 [type] == boots && [quality] == magic # [frw] == 0 && [fireresist]+[lightresist]+[coldresist] >= 5 && ([coldresist] >= 20) + ([fireresist] >= 20) + ([lightresist] >= 20) == 0 # [tier] == 6
@@ -216,6 +220,7 @@
 [name] == belt && [quality] < normal # # [tier] == 4
 [name] == belt && [quality] == normal # # [tier] == 5
 [name] == belt && [quality] == superior # # [tier] == 6
+[type] == belt && [quality] == rare # # [tier] == 5
 [type] == belt && ([quality] == magic || [quality] == rare) # [strength] == 0 && [maxhp] == 0 && [fireresist]+[lightresist]+[coldresist]+[poisonresist] == 0 # [tier] == 7
 [type] == belt && ([quality] == magic || [quality] == rare) # [strength] == 0 && [maxhp] > 0 && [fireresist]+[lightresist]+[coldresist]+[poisonresist] == 0 # [tier] == 8
 [type] == belt && ([quality] == magic || [quality] == rare) # [strength] == 0 && [maxhp] == 0 && [fireresist]+[lightresist]+[coldresist] >= 5 # [tier] == 9

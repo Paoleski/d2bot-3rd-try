@@ -22,8 +22,8 @@ alwaysApply: true
 1. Count `initNPC("Shop"` / `ensureShop(` / `ensureShopOpen(` reachable from the vendor block.
 2. Confirm `fillTome`, `buyPotions`, `identify`, `clearInventory`, `buyKeys`, `clearScrolls` are called with the keep-open flag from chores.
 3. Log should show **one** `choresVendor → …` Shop open, not `heal` + `fillTome` + `buyPotions` reopens.
-4. Never call `Town.buyPotions()` right after `doChores()` — chores already bought pots; a bare `buyPotions()` reopens Akara (even via `cullExcessPotions`).
-5. `cullExcessPotions` must only open shop when there is actual excess — never `ensureShopOpen` first.
+4. Never call `Town.buyPotions()` right after `doChores()` — chores already bought pots; a bare `buyPotions()` reopens Akara.
+5. Never sell potions — `cullExcessPotions` / `flushToxPots` drink excess; they must not call `ensureShopOpen` / `item.sell()`.
 
 ## Bad vs good
 

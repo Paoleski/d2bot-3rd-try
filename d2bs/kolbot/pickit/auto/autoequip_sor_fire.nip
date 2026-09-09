@@ -39,11 +39,4 @@
 // Spirit sword — enables shield slot (tier 100+)
 [type] == sword && [flag] == runeword # [itemallskills] == 2 && [fcr] >= 25 # [tier] == 100
 
-// Amulets/rings — beat base autoequip_sor.nip coldskilltab ladders (tiers 16-26)
-[type] == amulet && [quality] == rare # [fireskilltab] >= 1 && [maxhp]+[maxmana] >= 50 # [tier] == 27
-[type] == amulet && [quality] == rare # [fireskilltab] >= 1 && [maxhp]+[maxmana] >= 90 # [tier] == 28
-[type] == amulet && [quality] == rare # [fireskilltab] >= 2 # [tier] == 29
-[type] == amulet && [quality] == rare # [fireskilltab] >= 1 && [sorceressskills] >= 1 # [tier] == 30
-[type] == amulet && [quality] == rare # [fireskilltab] >= 2 && [maxhp]+[maxmana] >= 70 # [tier] == 31
-[type] == ring && [quality] == rare # [fireskilltab] >= 1 # [tier] == 20
-[type] == ring && [quality] == rare # [fcr] >= 10 && [fireresist]+[lightresist]+[coldresist] >= 20 # [tier] == 19
+// Jewelry ranking is AutoGearScore (build=fire weights fire tab / Fire Ball)

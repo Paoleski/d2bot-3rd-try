@@ -766,6 +766,18 @@ function Diablo() {
 		print("Seis layout " + this.seisLayout);
 		this.followPath(this.seisLayout === 1 ? this.starToSeisA : this.starToSeisB);
 
+		// Clear corridor to pull hold before opening seal (stay south of nest)
+		if (this.seisLayout === 1) {
+			pullX = 7771;
+			pullY = 5196;
+		} else {
+			pullX = 7798;
+			pullY = 5186;
+		}
+
+		Pather.moveTo(pullX, pullY, 3, true);
+		Attack.clear(30, 0, false, this.sort);
+
 		savedTele = Pather.teleport;
 		savedDelay = (typeof Config !== "undefined") ? Config.TeleDelay : undefined;
 		Pather.teleport = true;
@@ -1110,13 +1122,29 @@ function Diablo() {
 		Pather.useWaypoint(107);
 	}
 
-	if (!Pather.moveTo(7790, 5544)) {
+	// NM/Hell: clear River of Flame toward Chaos. Normal: tele straight to entrance.
+	if (me.diff > 0) {
+		if (!Pather.moveToExit(108, true, true)) {
+			throw new Error("Failed to clear River of Flame to Chaos Sanctuary");
+		}
+
+		Pather.moveTo(7790, 5544);
+	} else if (!Pather.moveTo(7790, 5544)) {
 		throw new Error("Failed to move to Chaos Sanctuary");
 	}
 
 	this.initLayout();
 
-	if (Config.Diablo.Entrance) {
+	var origAttackSkill1 = Config.AttackSkill[1],
+		origAttackSkill3 = Config.AttackSkill[3];
+
+	if (me.diff > 0 && Config.Diablo.ChaosAttackSkill > 0) {
+		Config.AttackSkill[1] = Config.Diablo.ChaosAttackSkill;
+		Config.AttackSkill[3] = Config.Diablo.ChaosAttackSkill;
+	}
+
+	// NM/Hell (or Entrance config): clear Chaos from entrance to star
+	if (Config.Diablo.Entrance || me.diff > 0) {
 		Attack.clear(30, 0, false, this.sort);
 		Pather.moveTo(7790, 5544);
 
@@ -1165,6 +1193,8 @@ function Diablo() {
 		say(Config.Diablo.DiabloMsg);
 	}
 
+	Config.AttackSkill[1] = origAttackSkill1;
+	Config.AttackSkill[3] = origAttackSkill3;
 	this.diabloPrep();
 	Attack.kill(243); // Diablo
 	Pickit.pickItems();

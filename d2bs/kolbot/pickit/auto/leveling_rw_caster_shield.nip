@@ -1,8 +1,9 @@
-// Caster mid shields (PD2) — Splendor bases + Lidless / Moser's picks.
+// Caster mid shields (PD2) — Rhyme (Shael+Eth) / Splendor bases + Lidless / Moser's picks.
 // Spirit Monarch is NOT used (poor PD2 mid). Spirit sword stays in leveling_rw_spirit.nip.
-// Empty 2os bases protected by Item.isProtectedRWBase when Splendor recipe is active.
+// Empty 2os bases protected by Item.isProtectedRWBase when Rhyme/Splendor recipe is active.
+// Rhyme/Splendor only craft while a 1H is equipped (Item.wantsShieldSlot).
 
-// Splendor (Eth+Lum) — 2os non-eth shields
+// Rhyme / Splendor — 2os non-eth shields
 ([Name] == Buckler || [Name] == SmallShield || [Name] == KiteShield || [Name] == SpikedShield || [Name] == BoneShield || [Name] == RoundShield || [Name] == GrimShield || [Name] == Luna || [Name] == Hyperion || [Name] == TrollNest) && [Flag] != Ethereal && [quality] <= superior # [Sockets] == 2 # [MaxQuantity] == 1
 
 // Lidless Wall / Moser's Blessed Circle — always pick for casters (tiered in autoequip_*)

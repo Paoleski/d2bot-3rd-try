@@ -201,18 +201,30 @@ var ClassAttack = {
 	_diabloBurstGid: 0,
 
 	/*
-		Normal Diablo lightning hurts if you sit on him forever.
+		Normal: stand-off after Static (mid-range AttackSkill).
+		NM/Hell: stay at 0 range on Diablo — his lightning hose misses when you hug him.
 		1) Close into melee and Static ×4 (must stay inside Static radius each cast)
-		2) Walk back off his face (NEVER teleport — merc must keep aggro/tank)
-		3) Spam this char's AttackSkill from stand-off — FN only while it's still the
-		   configured primary (cold early); once FO/FB/Lightning/etc. upgrades AttackSkill,
-		   that skill is used (FN only as untimed while FO is on skill delay)
+		2) Normal: walk back off his face (NEVER teleport — merc must keep aggro/tank)
+		   NM/Hell: stay on his feet and cast from 0 range
+		3) Spam this char's AttackSkill
 	*/
 	diabloStandOff: function (unit, minD, maxD) {
 		var i, offsets, ox, oy, tx, ty, d, best, bestD, savedTele, aim;
 
 		if (!unit || !Attack.checkMonster(unit)) {
 			return false;
+		}
+
+		// NM/Hell: hug Diablo (lightning dodge) — ignore stand-off band
+		if (me.diff > 0 && unit.classid === 243) {
+			if (getDistance(me, unit) > 2 || checkCollision(me, unit, 0x4)) {
+				savedTele = Pather.teleport;
+				Pather.teleport = false;
+				Pather.moveTo(unit.x, unit.y, 0);
+				Pather.teleport = savedTele;
+			}
+
+			return true;
 		}
 
 		minD = (minD === undefined) ? 4 : minD;
@@ -338,8 +350,13 @@ var ClassAttack = {
 	},
 
 	// Stand-off band for skill: FN close (4–6); longer skills ~6–12 off lightning face
+	// NM/Hell: hug Diablo (0 range) — lightning hose dodge
 	diabloSkillBand: function (skillId) {
 		var range, minD, maxD;
+
+		if (me.diff > 0) {
+			return {min: 0, max: 2};
+		}
 
 		range = this.castRangeFor(skillId) || Skill.getRange(skillId) || 10;
 
@@ -373,12 +390,12 @@ var ClassAttack = {
 
 		d = getDistance(me, unit);
 
-		// Too far for short skills (FN) — nudge in; never hug (<3)
+		// Too far for short skills (FN) — nudge in; never hug (<3) on Normal only
 		if (d > band.max + 1) {
 			this.diabloStandOff(unit, band.min, band.max);
 		}
 
-		if (d < 3) {
+		if (me.diff === 0 && d < 3) {
 			this.diabloStandOff(unit, band.min, band.max);
 		}
 
@@ -402,10 +419,15 @@ var ClassAttack = {
 			return false;
 		}
 
-		// Opener once per Diablo gid: melee Static ×4 → walk stand off → char attack
+		// Opener once per Diablo gid: melee Static ×4 → then AttackSkill
 		if (this._diabloBurstGid !== unit.gid) {
 			this._diabloBurstGid = unit.gid;
-			print("ÿc2ClassAttackÿc0 :: Diablo — melee Static×4 → walk stand off → AttackSkill");
+
+			if (me.diff > 0) {
+				print("ÿc2ClassAttackÿc0 :: Diablo — melee hug (lightning dodge) + Static×4 → AttackSkill");
+			} else {
+				print("ÿc2ClassAttackÿc0 :: Diablo — melee Static×4 → walk stand off → AttackSkill");
+			}
 
 			this.diabloMeleeStatic(unit, 4);
 
@@ -415,6 +437,8 @@ var ClassAttack = {
 				band = this.diabloSkillBand(skillId);
 				this.diabloStandOff(unit, band.min, band.max);
 				this.diabloCastAtStandOff(unit, skillId);
+			} else if (me.diff > 0) {
+				this.diabloStandOff(unit, 0, 2);
 			} else {
 				this.diabloStandOff(unit, 6, 10);
 			}
@@ -422,11 +446,13 @@ var ClassAttack = {
 			return true;
 		}
 
-		// After opener: keep stand-off, spam this build's boss skill (merc tanks)
+		// After opener: keep position, spam this build's boss skill
 		skillId = this.diabloPickSkill(unit);
 
 		if (skillId > 0) {
 			this.diabloCastAtStandOff(unit, skillId);
+		} else if (me.diff > 0) {
+			this.diabloStandOff(unit, 0, 2);
 		} else {
 			band = {min: 6, max: 10};
 			this.diabloStandOff(unit, band.min, band.max);
@@ -459,7 +485,9 @@ var ClassAttack = {
 
 		var index, staticRange, staticThresh, checkSkill,
 			timedSkill = -1,
-			untimedSkill = -1;
+			untimedSkill = -1,
+			timedImmune = false,
+			untimedImmune = false;
 
 		// Once Fire Ball is learned, prefer it over Fire Bolt
 		if (me.getSkill(47, 1)) {
@@ -553,10 +581,20 @@ var ClassAttack = {
 			checkSkill = Config.AttackSkill[index];
 		}
 
-		if (Attack.canUseSkill(checkSkill) && Attack.checkResist(unit, checkSkill) && ([56, 59, 64].indexOf(checkSkill) === -1 || Attack.validSpot(unit.x, unit.y))) {
-			timedSkill = checkSkill;
-		} else if (Config.AttackSkill[5] > 0 && Attack.canUseSkill(Config.AttackSkill[5]) && Attack.checkResist(unit, Config.AttackSkill[5]) && ([56, 59, 64].indexOf(Config.AttackSkill[5]) === -1 || Attack.validSpot(unit.x, unit.y))) {
-			timedSkill = Config.AttackSkill[5];
+		if (Attack.canUseSkill(checkSkill) && ([56, 59, 64].indexOf(checkSkill) === -1 || Attack.validSpot(unit.x, unit.y))) {
+			if (Attack.checkResist(unit, checkSkill)) {
+				timedSkill = checkSkill;
+			} else {
+				timedImmune = true; // owned skill exists but monster is immune to it
+			}
+		}
+
+		if (timedSkill < 0 && Config.AttackSkill[5] > 0 && Attack.canUseSkill(Config.AttackSkill[5]) && ([56, 59, 64].indexOf(Config.AttackSkill[5]) === -1 || Attack.validSpot(unit.x, unit.y))) {
+			if (Attack.checkResist(unit, Config.AttackSkill[5])) {
+				timedSkill = Config.AttackSkill[5];
+			} else {
+				timedImmune = true;
+			}
 		}
 
 		// Untimed / alternate
@@ -566,10 +604,20 @@ var ClassAttack = {
 			checkSkill = Config.AttackSkill[index + 1];
 		}
 
-		if (Attack.canUseSkill(checkSkill) && Attack.checkResist(unit, checkSkill) && ([56, 59, 64].indexOf(checkSkill) === -1 || Attack.validSpot(unit.x, unit.y))) {
-			untimedSkill = checkSkill;
-		} else if (Config.AttackSkill[6] > 0 && Attack.canUseSkill(Config.AttackSkill[6]) && Attack.checkResist(unit, Config.AttackSkill[6]) && ([56, 59, 64].indexOf(Config.AttackSkill[6]) === -1 || Attack.validSpot(unit.x, unit.y))) {
-			untimedSkill = Config.AttackSkill[6];
+		if (Attack.canUseSkill(checkSkill) && ([56, 59, 64].indexOf(checkSkill) === -1 || Attack.validSpot(unit.x, unit.y))) {
+			if (Attack.checkResist(unit, checkSkill)) {
+				untimedSkill = checkSkill;
+			} else {
+				untimedImmune = true;
+			}
+		}
+
+		if (untimedSkill < 0 && Config.AttackSkill[6] > 0 && Attack.canUseSkill(Config.AttackSkill[6]) && ([56, 59, 64].indexOf(Config.AttackSkill[6]) === -1 || Attack.validSpot(unit.x, unit.y))) {
+			if (Attack.checkResist(unit, Config.AttackSkill[6])) {
+				untimedSkill = Config.AttackSkill[6];
+			} else {
+				untimedImmune = true;
+			}
 		}
 
 		// Out of mana → normal attack on RMB (always through lvl 12; also via LowManaSkill config)
@@ -592,12 +640,17 @@ var ClassAttack = {
 			}
 		}
 
-		// No usable configured spell → soft/staff Fire Bolt, else normal attack on RMB
+		// No usable configured spell → soft/staff Fire Bolt, else normal attack on RMB.
+		// Never normal-attack (RMB) a target that's simply immune to our owned
+		// skills — leave both slots unset (doCast → 2 / TeleStomp gate) so the
+		// merc handles it instead.
+		// Exception: no merc yet (early leveling, pre-hire ~clvl 12) — nobody else
+		// can pick up the slack, so normal attack is still better than nothing.
 		if (timedSkill < 0 && untimedSkill < 0) {
 			if (Attack.canUseSkill(36) && Attack.checkResist(unit, 36)) {
 				timedSkill = 36;
 				untimedSkill = -1;
-			} else {
+			} else if ((!timedImmune && !untimedImmune) || !me.getMerc()) {
 				timedSkill = 0;
 				untimedSkill = -1;
 			}
@@ -673,8 +726,17 @@ var ClassAttack = {
 		if (timedSkill > -1 && (!me.getState(121) || !Skill.isTimed(timedSkill))) {
 			range = this.castRangeFor(timedSkill, unit);
 
-			// Diablo: keep breath distance except FN (cast then kite) / Static opener
-			if (unit && unit.classid === 243 && timedSkill !== 44 && timedSkill !== 42) {
+			// Diablo NM/Hell: hug at 0 range (lightning dodge) — do not kite away
+			if (unit && unit.classid === 243 && me.diff > 0) {
+				if (getDistance(me, unit) > 2 || checkCollision(me, unit, 0x4)) {
+					walk = true;
+
+					if (!Attack.getIntoPosition(unit, 0, 0x4, walk)) {
+						return 0;
+					}
+				}
+			// Diablo Normal: keep breath distance except FN (cast then kite) / Static opener
+			} else if (unit && unit.classid === 243 && timedSkill !== 44 && timedSkill !== 42) {
 				// Short skills (CB etc.) stand ~8; longer skills keep ~12
 				needRange = Math.max(range, range <= 7 ? 8 : 12);
 
@@ -722,8 +784,8 @@ var ClassAttack = {
 						return 0;
 					}
 
-					// Frost Nova on Diablo — back out immediately after
-					if (unit.classid === 243 && timedSkill === 44) {
+					// Frost Nova on Diablo — back out immediately after (Normal only; NM/Hell hugs)
+					if (unit.classid === 243 && timedSkill === 44 && me.diff === 0) {
 						this.diabloKiteAway(unit);
 					}
 
@@ -741,7 +803,15 @@ var ClassAttack = {
 		if (untimedSkill > -1) {
 			range = this.castRangeFor(untimedSkill, unit);
 
-			if (unit && unit.classid === 243 && untimedSkill !== 44 && untimedSkill !== 42) {
+			if (unit && unit.classid === 243 && me.diff > 0) {
+				if (getDistance(me, unit) > 2 || checkCollision(me, unit, 0x4)) {
+					walk = true;
+
+					if (!Attack.getIntoPosition(unit, 0, 0x4, walk)) {
+						return 0;
+					}
+				}
+			} else if (unit && unit.classid === 243 && untimedSkill !== 44 && untimedSkill !== 42) {
 				needRange = Math.max(range, range <= 7 ? 8 : 12);
 
 				if (getDistance(me, unit) < 8) {
@@ -783,7 +853,7 @@ var ClassAttack = {
 					return 0;
 				}
 
-				if (unit.classid === 243 && untimedSkill === 44) {
+				if (unit.classid === 243 && untimedSkill === 44 && me.diff === 0) {
 					this.diabloKiteAway(unit);
 				}
 

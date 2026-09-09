@@ -87,38 +87,42 @@ var Pickit = {
 
 	// PD2: prefer code/classid. Never trust itemType 75 alone — that's also LoD circlets (ci0–ci3).
 	isRuneItem: function (unit) {
-		var code, cid;
+		var code, cid, t;
 
 		if (!unit) {
 			return false;
 		}
 
 		code = unit.code ? String(unit.code).toLowerCase() : "";
+		t = unit.itemType;
 
-		// Circlet family shares type 75 with some PD2 rune layouts — never treat as runes
-		if (/^ci[0-3]$/i.test(code)) {
+		// Jewels share PD2 classid holes with Jah (658) — never treat as runes
+		if (code === "jew" || t === 58) {
 			return false;
 		}
 
-		if (/^r\d{2}s?$/i.test(code) || /^r\d{2}g$/i.test(code)) {
+		// Circlet family shares type 75 with some PD2 rune layouts — never treat as runes
+		if (/^ci[0-3]$/i.test(code) || t === 75) {
+			return false;
+		}
+
+		// Primary: rXX / rXXs / rXXg codes (PD2 singles + stacks + generics)
+		if (/^r\d{2}[sg]?$/i.test(code)) {
+			return true;
+		}
+
+		// Type fallbacks: LoD runes=74; PD2 stacks/generics. NOT bare classid ranges —
+		// 628–660 collides with jewels (Jah 658) and other non-runes.
+		if (t === 74 || t === 137 || t === 138 || t === 149 ||
+				(t >= 164 && t <= 196)) {
 			return true;
 		}
 
 		cid = unit.classid;
 
-		// Classic LoD rune classid range
+		// Stack classids only when type already looked rune-like above; keep LoD range
+		// as last resort for code-less units (still exclude jewel type).
 		if (cid >= 610 && cid <= 642) {
-			return true;
-		}
-
-		// PD2 singles 628–660, stacks 702–734
-		if ((cid >= 628 && cid <= 660) || (cid >= 702 && cid <= 734)) {
-			return true;
-		}
-
-		// Type fallbacks: LoD runes=74; PD2 stacks/generics. NOT 75 (circlets).
-		if ([74, 137, 138, 149].indexOf(unit.itemType) > -1 ||
-				(unit.itemType >= 164 && unit.itemType <= 196)) {
 			return true;
 		}
 
@@ -347,6 +351,39 @@ var Pickit = {
 			};
 		}
 
+		// Strength 2os spear/polearm: ignore nip keep once Purity is worn/makeable (or Insight done)
+		if (rval.result === 1 && typeof Runewords !== "undefined" &&
+				Runewords.purityOutranksStrength && Runewords.purityOutranksStrength() &&
+				(unit.itemType === 33 || unit.itemType === 34) && unit.quality <= 3 &&
+				!unit.getItem() && !unit.getFlag(0x4000000)) {
+			n = unit.getStat(194) || 0;
+
+			if (typeof unit.getStatEx === "function") {
+				n = Math.max(n, unit.getStatEx(194) || 0);
+			}
+
+			if (n === 2) {
+				rval = {
+					result: 0,
+					line: null
+				};
+			}
+		}
+
+		// Purity 3os spear/polearm: ignore nip if Purity/Insight done, or worse than banked
+		if (rval.result === 1 && typeof Runewords !== "undefined" &&
+				Runewords.isEmptyPurityBase && Runewords.isEmptyPurityBase(unit)) {
+			if ((Runewords.mercHasPurity && Runewords.mercHasPurity()) ||
+					(Runewords.hasCompletedInsight && Runewords.hasCompletedInsight()) ||
+					(Runewords.wantPurityBase && !Runewords.wantPurityBase(unit) &&
+						Runewords.getBestEmptyPurityBase && Runewords.getBestEmptyPurityBase())) {
+				rval = {
+					result: 0,
+					line: null
+				};
+			}
+		}
+
 		// Insight poles: ignore nip keep if we already have Insight, or base is worse than banked
 		if (rval.result === 1 && typeof Runewords !== "undefined" &&
 				Runewords.isConfiguredInsightBase && Runewords.isConfiguredInsightBase(unit)) {
@@ -366,6 +403,19 @@ var Pickit = {
 			if ((Runewords.hasCompletedLoreHelm && Runewords.hasCompletedLoreHelm()) ||
 					(Runewords.wantLoreBase && !Runewords.wantLoreBase(unit) &&
 						Runewords.getBestEmptyLoreBase && Runewords.getBestEmptyLoreBase())) {
+				rval = {
+					result: 0,
+					line: null
+				};
+			}
+		}
+
+		// Treachery armor: ignore nip keep if Treachery done, or base is worse than banked
+		if (rval.result === 1 && typeof Runewords !== "undefined" &&
+				Runewords.isConfiguredTreacheryBase && Runewords.isConfiguredTreacheryBase(unit)) {
+			if ((Runewords.hasCompletedTreacheryArmor && Runewords.hasCompletedTreacheryArmor()) ||
+					(Runewords.wantTreacheryBase && !Runewords.wantTreacheryBase(unit) &&
+						Runewords.getBestEmptyTreacheryBase && Runewords.getBestEmptyTreacheryBase())) {
 				rval = {
 					result: 0,
 					line: null
@@ -566,6 +616,11 @@ var Pickit = {
 			return false;
 		}
 
+		// Isenhart's etc. — early Normal only; skip once NM/Hell or lvl 30+
+		if (typeof Item !== "undefined" && typeof Item.isLowLvlSetJunk === "function" && Item.isLowLvlSetJunk(unit)) {
+			return false;
+		}
+
 		// Potions always — even if nip/check returned 0 (PD2 classid shifts break nip / old isc-id collision)
 		if (this.isPotion(unit) || this.isRejuv(unit)) {
 			return true;
@@ -675,7 +730,15 @@ var Pickit = {
 					((Runewords.wantLoreShopBase && Runewords.wantLoreShopBase(unit)) ||
 						(Runewords.wantStealthShopBase && Runewords.wantStealthShopBase(unit)) ||
 						(Runewords.wantSpiritShopBase && Runewords.wantSpiritShopBase(unit)) ||
+						(Runewords.wantTreacheryShopBase && Runewords.wantTreacheryShopBase(unit)) ||
 						(Runewords.wantBaseForRunes && Runewords.wantBaseForRunes(unit)))) {
+				return true;
+			}
+
+			// Set/unique/crafted from leveling.nip (often no #tier) — always pick to ID/keep.
+			// Without this, unid Gorefoot etc. die on the ground: autoEquipCheck is false
+			// (no tier line) and sell-value gate fails on low unid vendor price.
+			if (unit.quality === 5 || unit.quality === 7 || unit.quality === 8) {
 				return true;
 			}
 
@@ -755,6 +818,7 @@ var Pickit = {
 			if (typeof Runewords !== "undefined" &&
 					((Runewords.wantLoreShopBase && Runewords.wantLoreShopBase(unit)) ||
 						(Runewords.wantSpiritShopBase && Runewords.wantSpiritShopBase(unit)) ||
+						(Runewords.wantTreacheryShopBase && Runewords.wantTreacheryShopBase(unit)) ||
 						(Runewords.wantBaseForRunes && Runewords.wantBaseForRunes(unit)) ||
 						(Runewords.keepItem && Runewords.keepItem(unit)))) {
 				return true;
@@ -1105,7 +1169,8 @@ var Pickit = {
 			needMule = false,
 			pickList = [];
 
-		Town.clearBelt();
+		// Belt layout is fixed in town chores (refillBeltIfNeeded / clearBelt) —
+		// do NOT clearBelt here (full storage walk + delays after every Attack.clear)
 
 		if (me.dead) {
 			return false;
@@ -1132,9 +1197,15 @@ var Pickit = {
 
 			pickList.sort(this.sortItems);
 
-			// Check if the item unit is still valid and if it's on ground or being dropped
-			if (copyUnit(pickList[0]).x !== undefined && (pickList[0].mode === 3 || pickList[0].mode === 5) &&
-					(Pather.useTeleport || me.inTown || !checkCollision(me, pickList[0], 0x1))) { // Don't pick items behind walls/obstacles when walking
+			// Check if the item unit is still valid and if it's on ground or being dropped.
+			// NOTE: pickItems() only ever runs after combat has ended (callers gate it on
+			// attackCount > 0 post-clear), so there's no mid-fight detour risk here — a
+			// straight-line checkCollision() used to hard-skip anything behind a corner/doodad
+			// forever (pickItem() below already paths around obstacles via Pather.moveTo with
+			// retries, same as it does for far-away items). That silently left runes/items on
+			// the ground whenever the final combat position had LOS blocked to the drop tile.
+			// Let pickItem() attempt the real path instead; it fails gracefully if truly stuck.
+			if (copyUnit(pickList[0]).x !== undefined && (pickList[0].mode === 3 || pickList[0].mode === 5)) {
 				// Check if the item should be picked
 				status = this.checkItem(pickList[0]);
 
@@ -1143,12 +1214,19 @@ var Pickit = {
 				if ((status.result || this.isPotion(pickList[0]) || this.isRejuv(pickList[0]) ||
 						this.isJewel(pickList[0]) || this.isKeepJewelry(pickList[0]) || this.isWantedGem(pickList[0])) &&
 					this.canPick(pickList[0]) && this.wantToPick(pickList[0], status)) {
-					// Override canFit for scrolls, potions and gold
-					canFit = Storage.Inventory.CanFit(pickList[0]) || [4, 22, 76, 77, 78].indexOf(pickList[0].itemType) > -1 || this.isPotion(pickList[0]);
+					// Override canFit for scrolls, potions, gold, and rune-stack merges
+					canFit = Storage.Inventory.CanFit(pickList[0]) || [4, 22, 76, 77, 78].indexOf(pickList[0].itemType) > -1 ||
+						this.isPotion(pickList[0]) || this.canMergeRuneStack(pickList[0]);
 
 					// Try to make room with FieldID
 					if (!canFit && Config.FieldID && Town.fieldID()) {
-						canFit = Storage.Inventory.CanFit(pickList[0]) || [4, 22, 76, 77, 78].indexOf(pickList[0].itemType) > -1 || this.isPotion(pickList[0]);
+						canFit = Storage.Inventory.CanFit(pickList[0]) || [4, 22, 76, 77, 78].indexOf(pickList[0].itemType) > -1 ||
+							this.isPotion(pickList[0]) || this.canMergeRuneStack(pickList[0]);
+					}
+
+					// Try to make room by reorganizing existing inventory items (no travel, no loss)
+					if (!canFit && Config.ReorganizeInventory !== false) {
+						canFit = Storage.Inventory.MakeRoom(pickList[0]);
 					}
 
 					// Try to make room by selling items in town
@@ -1192,6 +1270,42 @@ var Pickit = {
 			}
 
 			pickList.shift();
+		}
+
+		// Just picked Strength base with Amn+Tir ready — make RW in town before merc autoequip
+		if (this._pendingStrengthTown) {
+			this._pendingStrengthTown = false;
+
+			if (!me.inTown && !(Pather.atLifeChicken && Pather.atLifeChicken())) {
+				print("ÿc4Pickitÿc0 :: Strength base + Amn/Tir ready — town to make RW");
+				Town.visitTown();
+			} else if (me.inTown && typeof Runewords !== "undefined" && Runewords.makeRunewords) {
+				Town.doChores();
+			}
+		}
+
+		// Just picked Spirit base with Tal+Thul+Ort+Amn ready — socket before continuing the run
+		if (this._pendingSpiritTown) {
+			this._pendingSpiritTown = false;
+
+			if (!me.inTown && !(Pather.atLifeChicken && Pather.atLifeChicken())) {
+				print("ÿc4Pickitÿc0 :: Spirit base + runes ready — town to make RW");
+				Town.visitTown();
+			} else if (me.inTown && typeof Runewords !== "undefined" && Runewords.makeRunewords) {
+				Town.doChores();
+			}
+		}
+
+		// Just picked Rhyme base with Shael+Eth ready (1H) — socket before continuing
+		if (this._pendingRhymeTown) {
+			this._pendingRhymeTown = false;
+
+			if (!me.inTown && !(Pather.atLifeChicken && Pather.atLifeChicken())) {
+				print("ÿc4Pickitÿc0 :: Rhyme base + Shael/Eth ready — town to make RW");
+				Town.visitTown();
+			} else if (me.inTown && typeof Runewords !== "undefined" && Runewords.makeRunewords) {
+				Town.doChores();
+			}
 		}
 
 		// Quit current game and transfer the items to mule
@@ -1436,6 +1550,10 @@ MainLoop:
 		}
 
 		if (stats.picked) {
+			if (typeof Storage !== "undefined" && typeof Storage.markDirty === "function") {
+				Storage.markDirty();
+			}
+
 			DataFile.updateStats("lastArea");
 
 			switch (status) {
@@ -1490,6 +1608,33 @@ MainLoop:
 				print("ÿc7Picked up " + stats.color + pickLabel(stats) + " ÿc0(ilvl " + stats.ilvl + ")" + " (Runewords)");
 				Misc.itemLogger("Kept", item, "Runewords");
 				Runewords.update(stats.classid, gid);
+
+				// Strength base + Amn/Tir already banked — town next so we socket before merc wears the empty stick
+				if (typeof Runewords !== "undefined" && Runewords.shouldHoldForStrengthMake) {
+					item = me.getItem(-1, -1, gid);
+
+					if (item && Runewords.shouldHoldForStrengthMake(item)) {
+						this._pendingStrengthTown = true;
+					}
+				}
+
+				// Spirit base + Tal+Thul+Ort+Amn ready — town next so we socket before continuing
+				if (typeof Runewords !== "undefined" && Runewords.shouldHoldForSpiritMake) {
+					item = me.getItem(-1, -1, gid);
+
+					if (item && Runewords.shouldHoldForSpiritMake(item)) {
+						this._pendingSpiritTown = true;
+					}
+				}
+
+				// Rhyme base + Shael+Eth ready while 1H — town next to socket
+				if (typeof Runewords !== "undefined" && Runewords.shouldHoldForRhymeMake) {
+					item = me.getItem(-1, -1, gid);
+
+					if (item && Runewords.shouldHoldForRhymeMake(item)) {
+						this._pendingRhymeTown = true;
+					}
+				}
 
 				break;
 			case 5: // Crafting System
@@ -1683,7 +1828,7 @@ MainLoop:
 				break; // inventory room check below
 			}
 
-			// TP scrolls only (tsc) — Normal: fill tome if room
+			// TP scrolls only (tsc) — Normal: fill tome if room (PD2 tomes hold 80)
 			if (code === "tsc" || unit.classid === 546) {
 				tome = me.getItem("tbk", 0) || me.getItem(535, 0);
 			} else {
@@ -1692,7 +1837,8 @@ MainLoop:
 
 			if (tome) {
 				do {
-					if (tome.location === 3 && tome.getStat(70) === 20) {
+					if (tome.location === 3 && String(tome.code || "").toLowerCase() === "tbk" &&
+							(tome.getStat(70) || 0) >= 80) {
 						return false; // Skip a scroll if its tome is full
 					}
 				} while (tome.getNext());
@@ -1877,6 +2023,18 @@ MainLoop:
 		return check === 4;
 	},
 
+	// PD2 rune stacks (itemType 138, e.g. DolRuneStack) merge into an existing same-rune
+	// inventory stack without needing a free grid cell. Storage.CanFit() only checks empty
+	// cells, so a full-looking inventory could wrongly block a pickup that's actually a
+	// free merge — leaving runes on the ground for no real reason.
+	canMergeRuneStack: function (unit) {
+		if (!unit || unit.itemType !== 138) {
+			return false;
+		}
+
+		return !!me.getItem(unit.classid, 3);
+	},
+
 	// Just sort by distance for general item pickup
 	sortItems: function (unitA, unitB) {
 		return getDistance(me, unitA) - getDistance(me, unitB);
@@ -1929,7 +2087,8 @@ MainLoop:
 				if ((status.result || this.isPotion(item) || this.isRejuv(item) ||
 						this.isJewel(item) || this.isKeepJewelry(item) || this.isWantedGem(item)) &&
 					this.canPick(item) && this.wantToPick(item, status) &&
-						(Storage.Inventory.CanFit(item) || [4, 22, 76, 77, 78].indexOf(item.itemType) > -1 || this.isPotion(item))) {
+						(Storage.Inventory.CanFit(item) || [4, 22, 76, 77, 78].indexOf(item.itemType) > -1 ||
+							this.isPotion(item) || this.canMergeRuneStack(item))) {
 					this.pickItem(item, status.result, status.line);
 				}
 			}

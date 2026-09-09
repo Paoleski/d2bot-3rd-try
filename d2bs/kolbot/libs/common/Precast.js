@@ -11,11 +11,12 @@ var Precast = new function () {
 	this.bestSlot = {};
 	this.coldEnchantTick = 0; // PD2 Cold Enchant ~300s
 	this.shiverArmorTick = 0; // PD2 Shiver Armor ~180s+ at low level
-	// Golem anti-spam (PD2 mastery = multi-golem; false "dead" reads cause stack spam)
+	// Golem anti-spam (PD2 multi-golem from hard levels; false "dead" reads cause stack spam)
 	this.golemCastTick = 0;
 	this.golemSeenTick = 0;
 	this.golemAliveUntil = 0; // sticky: treat as alive until this tick
 	this.golemMissStreak = 0;
+	this.golemLastKnownCount = 0; // last positive count (sticky shortfall vs flap)
 	this.GOLEM_CAST_COOLDOWN = 15000; // hard floor between casts
 	this.GOLEM_TRUST_MS = 45000; // after see/cast, trust alive this long even if APIs flap to 0
 
@@ -215,9 +216,15 @@ var Precast = new function () {
 
 			break;
 		case 2: // Necromancer
-			// Bone Armor: only when missing — ignore force (AutoSmurf doPrecast(true) spam)
-			if (me.getSkill(68, 1) && !me.getState(14)) {
-				this.precastSkill(68);
+			// Bone Armor: missing or ≤1/3 absorb left (ClassAttack.ensureBoneArmor also mid-run)
+			if (me.getSkill(68, 1)) {
+				var baCur = me.getStat(132) || 0,
+					baMax = me.getStat(133) || 0,
+					baNeed = !me.getState(14) || (baMax > 0 && baCur * 3 <= baMax);
+
+				if (baNeed) {
+					this.precastSkill(68);
+				}
 			}
 
 			switch (Config.Golem) {
@@ -415,14 +422,39 @@ var Precast = new function () {
 		return false;
 	};
 
-	// Optional: Config.MaxGolems > 1 to keep multiple (PD2 Golem Mastery slots).
-	// Default 1 = one golem; only resummon when detection says dead (not mastery refill).
-	this.desiredGolemCount = function () {
-		if (typeof Config !== "undefined" && Config.MaxGolems > 0) {
-			return Config.MaxGolems;
+	// Config.Golem → skill id (Clay 75 / Blood 85 / Fire 94)
+	this.configuredGolemSkill = function () {
+		if (typeof Config === "undefined" || !Config.Golem || Config.Golem === "None" || Config.Golem === 0) {
+			return 0;
 		}
 
-		return 1;
+		switch (Config.Golem) {
+		case 3:
+		case "Fire":
+			return 94;
+		case 2:
+		case "Blood":
+			return 85;
+		case 1:
+		case "Clay":
+			return 75;
+		default:
+			return 0;
+		}
+	};
+
+	// PD2: +1 golem per 5 hard points in Golem Mastery (79) — 5→2, 10→3, 15→4, 20→5.
+	// Config.MaxGolems caps the auto count (set 1 to force single).
+	this.desiredGolemCount = function () {
+		var hard = me.getSkill(79, 0) || 0, n;
+
+		n = 1 + Math.floor(hard / 5);
+
+		if (typeof Config !== "undefined" && Config.MaxGolems > 0) {
+			n = Math.min(n, Config.MaxGolems);
+		}
+
+		return Math.max(1, n);
 	};
 
 	// LoD/PD2 monstats: Clay=289 Blood=290 Iron=291 Fire=292 (NOT 290-293)
@@ -538,6 +570,7 @@ var Precast = new function () {
 			this.golemSeenTick = now;
 			this.golemAliveUntil = now + this.GOLEM_TRUST_MS;
 			this.golemMissStreak = 0;
+			this.golemLastKnownCount = n;
 
 			return n;
 		}
@@ -545,9 +578,10 @@ var Precast = new function () {
 		return 0;
 	};
 
-	// True if we should NOT cast — sticky latch beats flapping APIs
-	this.hasGolem = function () {
-		var now = getTickCount(), count, desired;
+	// True when we already have desired slots (or sticky/cooldown says don't cast yet).
+	// PD2: Golem Mastery hard/5 sets quota — top up extras after cooldown.
+	this.hasEnoughGolems = function () {
+		var now = getTickCount(), count, desired, assumed;
 
 		desired = this.desiredGolemCount();
 		count = this.countGolems();
@@ -556,25 +590,36 @@ var Precast = new function () {
 			return true;
 		}
 
-		// Below MaxGolems but already have ≥1 — allow another cast (no sticky)
+		// Known shortfall with at least one living golem — need another cast after cooldown
 		if (count > 0) {
 			return false;
 		}
 
-		// Zero reads: trust sticky window (prevents PD2 mastery stack spam)
+		// Zero reads: trust sticky window using last known count (not full desired)
 		if (this.golemAliveUntil && now < this.golemAliveUntil) {
 			this.golemMissStreak += 1;
+			assumed = this.golemLastKnownCount || 1;
 
-			// Many consecutive misses after cast trust → likely really dead
 			if (this.golemMissStreak >= 12 && this.golemCastTick &&
 					(now - this.golemCastTick) > this.GOLEM_TRUST_MS) {
 				this.golemAliveUntil = 0;
 				this.golemMissStreak = 0;
+				this.golemLastKnownCount = 0;
 
 				return false;
 			}
 
-			return true;
+			// Sticky: enough only if last seen count already met the mastery quota
+			if (assumed >= desired) {
+				return true;
+			}
+
+			// Shortfall while APIs flap — wait for cast cooldown, then top up
+			if (this.golemCastTick && (now - this.golemCastTick) < this.GOLEM_CAST_COOLDOWN) {
+				return true;
+			}
+
+			return false;
 		}
 
 		if (this.golemCastTick && (now - this.golemCastTick) < this.GOLEM_CAST_COOLDOWN) {
@@ -584,19 +629,22 @@ var Precast = new function () {
 		return false;
 	};
 
-	this.hasEnoughGolems = function () {
-		return this.hasGolem();
+	// Back-compat alias — "has golem(s) we need" (multi-aware)
+	this.hasGolem = function () {
+		return this.hasEnoughGolems();
 	};
 
-	// Summon only when no golem (or below MaxGolems); hard cooldown; at most one cast per call
+	// Summon until desired count (PD2 Golem Mastery slots); hard cooldown; one cast per call
 	this.ensureNecroGolem = function () {
-		var i, j, skillId, skills = [], now, before;
+		var i, j, skillId, skills = [], now, before, desired;
 
 		for (i = 0; i < arguments.length; i += 1) {
 			skills.push(arguments[i]);
 		}
 
-		if (this.hasGolem()) {
+		desired = this.desiredGolemCount();
+
+		if (this.hasEnoughGolems()) {
 			return true;
 		}
 
@@ -614,23 +662,24 @@ var Precast = new function () {
 			}
 
 			before = this.countGolems();
-			print("ÿc8Golemÿc0 :: summon skill " + skillId + " (seen=" + before + ")");
+			print("ÿc8Golemÿc0 :: summon skill " + skillId + " (" + before + "/" + desired + ")");
 			Skill.cast(skillId, 0);
 			this.golemCastTick = getTickCount();
 			this.golemAliveUntil = this.golemCastTick + this.GOLEM_TRUST_MS;
 			this.golemMissStreak = 0;
+			this.golemLastKnownCount = Math.max(this.golemLastKnownCount, before + 1);
 			delay(450 + me.ping);
 
 			for (j = 0; j < 8; j += 1) {
 				if (this.countGolems() > before) {
-					return true;
+					return this.countGolems() >= desired;
 				}
 
 				delay(120);
 			}
 
-			// Even if APIs still say 0, sticky latch blocks re-entry
-			return true;
+			// Sticky latch blocks immediate re-entry; next call tops up after cooldown if needed
+			return this.hasEnoughGolems();
 		}
 
 		return false;
@@ -651,7 +700,7 @@ var Precast = new function () {
 		case 75: // Clay Golem
 		case 85: // Blood Golem
 		case 94: // Fire Golem
-			// PD2: one cast via ensureNecroGolem — never mastery spam here
+			// PD2: ensureNecroGolem tops up to Golem Mastery slots (cooldown between casts)
 			return this.ensureNecroGolem(skillId);
 		case 221: // Raven
 			minion = 10;

@@ -31,6 +31,7 @@ var Runeword = {
 	Stealth: [634, 632], // Tal + Eth
 	Steel: [630, 628], // Tir + El
 	Strength: [638, 630], // Amn + Tir
+	Purity: [638, 632, 637], // Amn + Eth + Thul (PD2 — 3os spear/polearm merc stick)
 	Venom: [634, 641, 650], // Tal + Dol + Mal
 	Wealth: [647, 645, 630], // Lem + Ko + Tir
 	White: [641, 643], // Dol + Io
@@ -179,14 +180,18 @@ var Runewords = {
 	// Inv (3) + stash (7) + cube (6).
 	// openStashFirst=true walks to bank — only when caller needs stash pages visible.
 	listStorageItems: function (openStashFirst) {
-		var item, list = [];
-
 		if (openStashFirst === true && typeof Town !== "undefined" && typeof Town.openStash === "function") {
 			if (!getUIFlag(0x19)) {
 				Town.openStash();
 				delay(80 + me.ping);
 			}
 		}
+
+		return this.memo("storageList", this._listStorageItemsRaw);
+	},
+
+	_listStorageItemsRaw: function () {
+		var item, list = [];
 
 		item = me.getItem(-1, -1);
 
@@ -287,26 +292,36 @@ var Runewords = {
 		}
 
 		code = item.code ? String(item.code).toLowerCase() : "";
+		t = item.itemType;
+
+		if (code === "jew" || t === 58 || t === 75) {
+			return false;
+		}
 
 		if (/^r\d{2}[sg]?$/i.test(code)) {
 			return true;
 		}
 
-		t = item.itemType;
-
-		return t === 137 || t === 138 || t === 149 ||
+		return t === 74 || t === 137 || t === 138 || t === 149 ||
 			(t >= 164 && t <= 197);
 	},
 
 	// El=1 … Zod=33 from code / stack / type — never invent numbers for jewels
 	runeNumberFromItem: function (item) {
-		var code, m, id;
+		var code, m, id, t;
 
 		if (!item) {
 			return -1;
 		}
 
 		code = item.code ? String(item.code).toLowerCase() : "";
+		t = item.itemType;
+
+		// Jewels (code jew / type 58) sit on Jah's classid 658 — never a rune number
+		if (code === "jew" || t === 58) {
+			return -1;
+		}
+
 		m = code.match(/^r(\d{2})[sg]?$/i);
 
 		if (m) {
@@ -329,8 +344,8 @@ var Runewords = {
 		}
 
 		// talrunegeneric=170 … elrunegeneric=164
-		if (item.itemType >= 164 && item.itemType <= 196) {
-			return item.itemType - 163;
+		if (t >= 164 && t <= 196) {
+			return t - 163;
 		}
 
 		return -1;
@@ -754,27 +769,33 @@ var Runewords = {
 	},
 
 	_hasCompletedArmorRunewordRaw: function () {
-		var item = me.getItem(-1),
-			i;
+		var item = me.getItem(-1);
 
 		if (!item) {
 			return false;
 		}
 
 		do {
-			if (item.itemType === 3 && item.getFlag(0x4000000)) {
-				if (this.pickitEntries.length) {
-					if (NTIP.CheckItem(item, this.pickitEntries)) {
-						return true;
-					}
-				} else if ((item.getStat(105) || 0) >= 20 && (item.getStat(99) || 0) >= 20) {
-					// PD2 Stealth: +20 FCR / +20 FHR
-					return true;
-				}
+			if (this.itemLooksLikeStealthArmor(item)) {
+				return true;
 			}
 		} while (item.getNext());
 
 		return false;
+	},
+
+	// Stealth armor: +20 FCR / +20 FHR runeword body armor (PD2). Name match by stats since the
+	// nip #tier line can lag right after socketing (same class of bug as Spirit — see below).
+	itemLooksLikeStealthArmor: function (item) {
+		if (!item || item.itemType !== 3 || !item.getFlag(0x4000000)) {
+			return false;
+		}
+
+		if (this.pickitEntries.length && NTIP.CheckItem(item, this.pickitEntries)) {
+			return true;
+		}
+
+		return (item.getStat(105) || 0) >= 20 && (item.getStat(99) || 0) >= 20;
 	},
 
 	hasStealthRecipe: function () {
@@ -804,6 +825,1172 @@ var Runewords = {
 		return !!(recipe && recipe.length === 4 && Runeword.Insight &&
 			recipe[0] === Runeword.Insight[0] && recipe[1] === Runeword.Insight[1] &&
 			recipe[2] === Runeword.Insight[2] && recipe[3] === Runeword.Insight[3]);
+	},
+
+	isStrengthRecipe: function (recipe) {
+		return !!(recipe && recipe.length === 2 && Runeword.Strength &&
+			recipe[0] === Runeword.Strength[0] && recipe[1] === Runeword.Strength[1]);
+	},
+
+	hasStrengthRecipe: function () {
+		var i, rw;
+
+		if (!Runeword.Strength || !Config.Runewords || !Config.Runewords.length) {
+			return false;
+		}
+
+		for (i = 0; i < Config.Runewords.length; i += 1) {
+			rw = Config.Runewords[i];
+
+			if (rw && rw[0] && this.isStrengthRecipe(rw[0])) {
+				return true;
+			}
+		}
+
+		return false;
+	},
+
+	// Strength = Amn+Tir → 25% CB (+ ED / LL). Knife for PS necro or spear/polearm for Act2 merc.
+	itemLooksLikeStrength: function (item) {
+		if (!item || !item.getFlag(0x4000000)) {
+			return false;
+		}
+
+		// Crushing Blow 25 is Strength's signature (Steel is IAS, Insight is Meditation)
+		return (item.getStat(136) || 0) >= 25;
+	},
+
+	mercHasStrength: function () {
+		var item;
+
+		if (typeof Item !== "undefined" && Item.getMercItem) {
+			item = Item.getMercItem(4).item;
+
+			if (item && this.itemLooksLikeStrength(item)) {
+				return true;
+			}
+		}
+
+		return false;
+	},
+
+	// Pull merc's empty 2os spear/polearm into inventory so getBase / socket can use it
+	peelMercForStrength: function () {
+		var eq, item, socks;
+
+		if (!this.hasStrengthRecipe() || !this.haveRunes(Runeword.Strength, false)) {
+			return false;
+		}
+
+		if (this.mercHasStrength()) {
+			return false;
+		}
+
+		// Don't peel if merc already has Insight (4os) — that outranks Strength
+		if (this.hasCompletedInsight && this.hasCompletedInsight()) {
+			return false;
+		}
+
+		if (typeof Item === "undefined" || !Item.getMercItem || !Item.unequipMercSlot) {
+			return false;
+		}
+
+		eq = Item.getMercItem(4);
+
+		if (!eq || !eq.item) {
+			return false;
+		}
+
+		item = eq.item;
+
+		// Spear (33) or polearm (34) only — not javelin
+		if (item.itemType !== 33 && item.itemType !== 34) {
+			return false;
+		}
+
+		if (item.getFlag(0x4000000) || item.getFlag(0x400000)) {
+			return false; // already RW or eth (we use NonEth Strength)
+		}
+
+		if (typeof Item.isRwBaseQuality === "function" && !Item.isRwBaseQuality(item)) {
+			return false;
+		}
+
+		if (item.getItem()) {
+			return false; // something already socketed
+		}
+
+		socks = item.getStat(194) || 0;
+
+		if (typeof item.getStatEx === "function") {
+			socks = Math.max(socks, item.getStatEx(194) || 0);
+		}
+
+		if (socks !== 2) {
+			return false;
+		}
+
+		print("ÿc4RWÿc0 :: peeling merc 2os spear/polearm for Strength (Amn+Tir)");
+		Item.unequipMercSlot(4, false);
+		this.invalidateCache();
+		delay(150 + me.ping);
+
+		return true;
+	},
+
+	// True if merc weapon is empty 2os spear/polearm we can peel for Strength (no unequip yet)
+	mercHasPeelableStrengthBase: function () {
+		var eq, item, socks;
+
+		if (this.mercHasStrength() || (this.hasCompletedInsight && this.hasCompletedInsight())) {
+			return false;
+		}
+
+		if (typeof Item === "undefined" || !Item.getMercItem) {
+			return false;
+		}
+
+		eq = Item.getMercItem(4);
+
+		if (!eq || !eq.item) {
+			return false;
+		}
+
+		item = eq.item;
+
+		if (item.itemType !== 33 && item.itemType !== 34) {
+			return false;
+		}
+
+		if (item.getFlag(0x4000000) || item.getFlag(0x400000) || item.getItem()) {
+			return false;
+		}
+
+		if (typeof Item.isRwBaseQuality === "function" && !Item.isRwBaseQuality(item)) {
+			return false;
+		}
+
+		socks = item.getStat(194) || 0;
+
+		if (typeof item.getStatEx === "function") {
+			socks = Math.max(socks, item.getStatEx(194) || 0);
+		}
+
+		return socks === 2;
+	},
+
+	// Chores should open stash to make Strength when Amn+Tir + empty 2os base (incl. on merc)
+	needsStrengthMakeVisit: function () {
+		var have, peel, base, ready;
+
+		if (!Config.MakeRunewords || !this.hasStrengthRecipe()) {
+			return false;
+		}
+
+		if (this.mercHasStrength() || (this.hasCompletedInsight && this.hasCompletedInsight()) ||
+				(this.purityOutranksStrength && this.purityOutranksStrength())) {
+			return false;
+		}
+
+		have = this.haveRunes(Runeword.Strength, false);
+		peel = this.mercHasPeelableStrengthBase();
+		base = this.getBestEmptyStrengthBaseNoPeel && this.getBestEmptyStrengthBaseNoPeel();
+		ready = !!(have && (peel || base));
+
+		// Once per game: if we have a spear banked but still not visiting, dump why
+		if (!ready && !this._strengthVisitDiagnosed && !this._strengthDiagnosed) {
+			this._strengthVisitDiagnosed = true;
+			this._strengthDiagnosed = true;
+			print("ÿc1RWÿc0 :: Strength needsVisit=false — haveAmnTir=" + have +
+				" peelMerc=" + peel + " emptyBase=" + !!base +
+				" (stash will not open for Strength alone)");
+			this.diagnoseStrengthRunes();
+			this.diagnoseStrengthBases();
+		}
+
+		return ready;
+	},
+
+	// Empty 2os Strength base + Amn/Tir ready — don't put bare spear on merc first
+	// (knives never — Strength is merc-only for PS)
+	shouldHoldForStrengthMake: function (unit) {
+		var socks;
+
+		if (!unit || !Config.MakeRunewords || !this.hasStrengthRecipe()) {
+			return false;
+		}
+
+		if (!this.haveRunes(Runeword.Strength, false)) {
+			return false;
+		}
+
+		if (this.purityOutranksStrength && this.purityOutranksStrength()) {
+			return false;
+		}
+
+		if (unit.itemType !== 33 && unit.itemType !== 34) {
+			return false;
+		}
+
+		if (unit.getFlag(0x4000000) || unit.getFlag(0x400000) || unit.getItem()) {
+			return false;
+		}
+
+		if (typeof Item !== "undefined" && Item.isRwBaseQuality && !Item.isRwBaseQuality(unit)) {
+			return false;
+		}
+
+		socks = unit.getStat(194) || 0;
+
+		if (typeof unit.getStatEx === "function") {
+			socks = Math.max(socks, unit.getStatEx(194) || 0);
+		}
+
+		return socks === 2;
+	},
+
+	getBestEmptyStrengthBaseNoPeel: function () {
+		var item, socks, score, best = null, bestScore = -1;
+
+		item = me.getItem(-1, -1);
+
+		if (!item) {
+			return null;
+		}
+
+		do {
+			try {
+				if (item.location !== 3 && item.location !== 7) {
+					continue;
+				}
+
+				// Merc Strength only — never necro knives
+				if (item.itemType !== 33 && item.itemType !== 34) {
+					continue;
+				}
+
+				if (typeof Item !== "undefined" && Item.isRwBaseQuality && !Item.isRwBaseQuality(item)) {
+					continue;
+				}
+
+				if (item.getFlag(0x4000000) || item.getFlag(0x400000) || item.getItem()) {
+					continue;
+				}
+
+				socks = item.getStat(194) || 0;
+
+				if (typeof item.getStatEx === "function") {
+					socks = Math.max(socks, item.getStatEx(194) || 0);
+				}
+
+				if (socks !== 2) {
+					continue;
+				}
+
+				score = 50000 + (item.getStat(31) || 0);
+
+				if (score > bestScore) {
+					bestScore = score;
+					best = copyUnit(item);
+				}
+			} catch (eStr2) {}
+		} while (item.getNext());
+
+		return best;
+	},
+
+	// Best empty 2os Strength base in inv/stash (knife / spear / polearm). Peels merc first.
+	getBestEmptyStrengthBase: function () {
+		this.peelMercForStrength();
+
+		return this.getBestEmptyStrengthBaseNoPeel();
+	},
+
+	// --- Purity (Amn+Eth+Thul, 3os) — PD2 merc stick that outranks Strength ---
+
+	isPurityRecipe: function (recipe) {
+		return !!(recipe && recipe.length === 3 && Runeword.Purity &&
+			recipe[0] === Runeword.Purity[0] && recipe[1] === Runeword.Purity[1] &&
+			recipe[2] === Runeword.Purity[2]);
+	},
+
+	hasPurityRecipe: function () {
+		var i, rw;
+
+		if (!Runeword.Purity || !Config.Runewords || !Config.Runewords.length) {
+			return false;
+		}
+
+		for (i = 0; i < Config.Runewords.length; i += 1) {
+			rw = Config.Runewords[i];
+
+			if (rw && rw[0] && this.isPurityRecipe(rw[0])) {
+				return true;
+			}
+		}
+
+		return false;
+	},
+
+	// Purity: Prayer aura when equipped (skill 99) — or RW spear/polearm with 45 IAS
+	itemLooksLikePurity: function (item) {
+		if (!item || !item.getFlag(0x4000000)) {
+			return false;
+		}
+
+		if (item.itemType !== 33 && item.itemType !== 34) {
+			return false;
+		}
+
+		if ((item.getStat(151, 99) || 0) > 0) {
+			return true;
+		}
+
+		return (item.getStat(93) || 0) >= 45; // IAS
+	},
+
+	mercHasPurity: function () {
+		var item;
+
+		if (typeof Item !== "undefined" && Item.getMercItem) {
+			item = Item.getMercItem(4).item;
+
+			if (item && this.itemLooksLikePurity(item)) {
+				return true;
+			}
+		}
+
+		return false;
+	},
+
+	// True when Purity is worn OR makeable — Strength 2os bases should not be kept/made
+	purityOutranksStrength: function () {
+		// Worn Purity / Insight always obsolete Strength — even if recipe list drifted
+		if (this.mercHasPurity && this.mercHasPurity()) {
+			return true;
+		}
+
+		if (this.hasCompletedInsight && this.hasCompletedInsight()) {
+			return true;
+		}
+
+		if (!this.hasPurityRecipe || !this.hasPurityRecipe()) {
+			return false;
+		}
+
+		if (me.charlvl < 25) {
+			return false;
+		}
+
+		return !!(this.haveRunes(Runeword.Purity, false) && this.getBestEmptyPurityBaseNoPeel());
+	},
+
+	// Empty white/grey NonEth 3os spear/polearm — Purity base candidate
+	isEmptyPurityBase: function (unit) {
+		var socks;
+
+		if (!unit || (unit.itemType !== 33 && unit.itemType !== 34)) {
+			return false;
+		}
+
+		if (typeof Item !== "undefined" && Item.isRwBaseQuality && !Item.isRwBaseQuality(unit)) {
+			return false;
+		}
+
+		if (unit.getFlag(0x4000000) || unit.getFlag(0x400000) || unit.getItem()) {
+			return false;
+		}
+
+		socks = unit.getStat(194) || 0;
+
+		if (typeof unit.getStatEx === "function") {
+			socks = Math.max(socks, unit.getStatEx(194) || 0);
+		}
+
+		return socks === 3;
+	},
+
+	purityBaseScore: function (unit) {
+		if (!this.isEmptyPurityBase(unit)) {
+			return -1;
+		}
+
+		// Prefer higher max dmg; polearm slightly over spear for merc swing
+		return 60000 + (unit.getStat(31) || 0) + (unit.itemType === 34 ? 500 : 0);
+	},
+
+	getBestEmptyPurityBaseNoPeel: function (excludeGid) {
+		var item, score, best = null, bestScore = -1;
+
+		item = me.getItem(-1, -1);
+
+		if (!item) {
+			return null;
+		}
+
+		do {
+			try {
+				if (item.location !== 3 && item.location !== 7) {
+					continue;
+				}
+
+				if (excludeGid && item.gid === excludeGid) {
+					continue;
+				}
+
+				score = this.purityBaseScore(item);
+
+				if (score > bestScore) {
+					bestScore = score;
+					best = copyUnit(item);
+				}
+			} catch (ePur) {}
+		} while (item.getNext());
+
+		return best;
+	},
+
+	getBestEmptyPurityBase: function (excludeGid) {
+		return this.getBestEmptyPurityBaseNoPeel(excludeGid);
+	},
+
+	listEmptyPurityBases: function () {
+		var item, score, list = [];
+
+		item = me.getItem(-1, -1);
+
+		if (!item) {
+			return list;
+		}
+
+		do {
+			try {
+				if (item.location !== 3 && item.location !== 7) {
+					continue;
+				}
+
+				score = this.purityBaseScore(item);
+
+				if (score < 0) {
+					continue;
+				}
+
+				list.push({item: copyUnit(item), gid: item.gid, score: score});
+			} catch (eList) {}
+		} while (item.getNext());
+
+		list.sort(function (a, b) {
+			return b.score - a.score;
+		});
+
+		return list;
+	},
+
+	// Keep / pick only if first empty 3os OR strictly better than banked — never after Purity/Insight
+	wantPurityBase: function (unit) {
+		var best, score;
+
+		if (!unit || !this.isEmptyPurityBase(unit)) {
+			return false;
+		}
+
+		if ((this.mercHasPurity && this.mercHasPurity()) ||
+				(this.hasCompletedInsight && this.hasCompletedInsight())) {
+			return false;
+		}
+
+		if (this.hasPurityRecipe && !this.hasPurityRecipe()) {
+			return false;
+		}
+
+		score = this.purityBaseScore(unit);
+
+		if (score < 0) {
+			return false;
+		}
+
+		best = this.getBestEmptyPurityBase(unit.gid);
+
+		if (!best) {
+			return true;
+		}
+
+		return score > this.purityBaseScore(best);
+	},
+
+	// Drop/sell extra empty 3os — keep at most one (best). If Purity/Insight done, dump all.
+	cullWorsePurityBases: function () {
+		var list, i, item, n = 0, start = 1, done;
+
+		done = (this.mercHasPurity && this.mercHasPurity()) ||
+			(this.hasCompletedInsight && this.hasCompletedInsight());
+		list = this.listEmptyPurityBases();
+
+		if (!list.length || (!done && list.length <= 1)) {
+			return 0;
+		}
+
+		if (done) {
+			start = 0;
+			print("ÿc8RWÿc0 :: culling " + list.length + " empty 3os Purity base(s) (Purity/Insight done)");
+		} else {
+			this.dbg("ÿc2Runewordsÿc0 :: Purity — keeping best base score=" + list[0].score +
+				" (" + (list[0].item.name || list[0].item.classid) + "), culling " + (list.length - 1));
+		}
+
+		for (i = start; i < list.length; i += 1) {
+			item = me.getItem(-1, -1, list[i].gid);
+
+			if (!item) {
+				continue;
+			}
+
+			print("ÿc8RWÿc0 :: culling 3os Purity base " +
+				((item.name || item.classid || "?").toString().replace(/ÿc[0-9a-z]/gi, "").split("\n")[0]));
+
+			if (item.location === 3 && typeof Town !== "undefined" && Town.sellInventoryItem &&
+					Town.isShopOpen && Town.isShopOpen()) {
+				if (Town.sellInventoryItem(item)) {
+					n += 1;
+					continue;
+				}
+			}
+
+			if (me.inTown) {
+				try {
+					item.drop();
+					n += 1;
+				} catch (eDropPur) {}
+			}
+		}
+
+		if (n > 0) {
+			this.invalidateCache();
+		}
+
+		return n;
+	},
+
+	needsPurityMakeVisit: function () {
+		if (!Config.MakeRunewords || !this.hasPurityRecipe() || me.charlvl < 25) {
+			return false;
+		}
+
+		if (this.mercHasPurity() || (this.hasCompletedInsight && this.hasCompletedInsight())) {
+			return false;
+		}
+
+		if (!this.haveRunes(Runeword.Purity, false)) {
+			return false;
+		}
+
+		return !!this.getBestEmptyPurityBaseNoPeel();
+	},
+
+	shouldHoldForPurityMake: function (unit) {
+		if (!unit || !Config.MakeRunewords || !this.hasPurityRecipe() || me.charlvl < 25) {
+			return false;
+		}
+
+		if (!this.haveRunes(Runeword.Purity, false)) {
+			return false;
+		}
+
+		return !!(this.wantPurityBase && this.wantPurityBase(unit));
+	},
+
+	// --- Treachery (Shael+Thul+Lem, 3os) — PS mid armor, defense > 120 ---
+
+	isTreacheryRecipe: function (recipe) {
+		return !!(recipe && recipe.length === 3 && Runeword.Treachery &&
+			recipe[0] === Runeword.Treachery[0] && recipe[1] === Runeword.Treachery[1] &&
+			recipe[2] === Runeword.Treachery[2]);
+	},
+
+	hasTreacheryRecipe: function () {
+		var i, rw;
+
+		if (!Runeword.Treachery || !Config.Runewords || !Config.Runewords.length) {
+			return false;
+		}
+
+		for (i = 0; i < Config.Runewords.length; i += 1) {
+			rw = Config.Runewords[i];
+
+			if (rw && rw[0] && this.isTreacheryRecipe(rw[0])) {
+				return true;
+			}
+		}
+
+		return false;
+	},
+
+	// Treachery: 45 IAS + 30 cold resist on body armor (RW flag)
+	itemLooksLikeTreachery: function (item) {
+		var dmg;
+
+		if (!item || item.itemType !== 3 || !item.getFlag(0x4000000)) {
+			return false;
+		}
+
+		// Same PD2 itemType-collision guard as isConfiguredTreacheryBase — never
+		// count a scythe/polearm that slipped through as a completed Treachery armor.
+		dmg = (getBaseStat("items", item.classid, "mindam") || 0) +
+			(getBaseStat("items", item.classid, "maxdam") || 0) +
+			(getBaseStat("items", item.classid, "2handmindam") || 0) +
+			(getBaseStat("items", item.classid, "2handmaxdam") || 0);
+
+		if (dmg > 0) {
+			return false;
+		}
+
+		if (this.pickitEntries.length && NTIP.CheckItem(item, this.pickitEntries)) {
+			return true;
+		}
+
+		return (item.getStat(93) || 0) >= 45 && (item.getStat(43) || 0) >= 30;
+	},
+
+	hasCompletedTreacheryArmor: function () {
+		return this.memo("doneTreachery", this._hasCompletedTreacheryArmorRaw);
+	},
+
+	_hasCompletedTreacheryArmorRaw: function () {
+		var item = me.getItem(-1);
+
+		if (!item) {
+			return false;
+		}
+
+		do {
+			if (this.itemLooksLikeTreachery(item)) {
+				return true;
+			}
+		} while (item.getNext());
+
+		return false;
+	},
+
+	treacheryBaseDef: function (unit) {
+		var def;
+
+		if (!unit) {
+			return 0;
+		}
+
+		def = unit.getStat(31) || 0;
+
+		if (typeof unit.getStatEx === "function") {
+			def = Math.max(def, unit.getStatEx(31) || 0);
+		}
+
+		return def;
+	},
+
+	// Empty 3os NonEth body armor with defense > 120
+	isConfiguredTreacheryBase: function (unit) {
+		var socks, dmg;
+
+		if (!unit || !this.hasTreacheryRecipe()) {
+			return false;
+		}
+
+		if (unit.itemType !== 3) {
+			return false;
+		}
+
+		// PD2 itemType can misreport/collide (documented elsewhere: orb=69, head=70/71).
+		// Never trust itemType alone for "this is armor" — a scythe/polearm base has
+		// real weapon damage in the item table even if .itemType lies and says 3 (torso).
+		dmg = (getBaseStat("items", unit.classid, "mindam") || 0) +
+			(getBaseStat("items", unit.classid, "maxdam") || 0) +
+			(getBaseStat("items", unit.classid, "2handmindam") || 0) +
+			(getBaseStat("items", unit.classid, "2handmaxdam") || 0);
+
+		if (dmg > 0) {
+			print("ÿc1RWÿc0 :: Treachery — rejected classid=" + unit.classid +
+				" itemType=3 but has weapon damage (" + dmg + ") — PD2 itemType collision, not armor");
+			return false;
+		}
+
+		if (typeof Item !== "undefined" && Item.isRwBaseQuality && !Item.isRwBaseQuality(unit)) {
+			return false;
+		}
+
+		if (unit.getFlag(0x4000000) || unit.getFlag(0x400000) || unit.getItem()) {
+			return false;
+		}
+
+		socks = unit.getStat(194) || 0;
+
+		if (typeof unit.getStatEx === "function") {
+			socks = Math.max(socks, unit.getStatEx(194) || 0);
+		}
+
+		if (socks !== 3) {
+			return false;
+		}
+
+		return this.treacheryBaseDef(unit) > 120;
+	},
+
+	getBestEmptyTreacheryBase: function (excludeGid) {
+		var item, def, best = null, bestDef = -1;
+
+		item = me.getItem(-1, -1);
+
+		if (!item) {
+			return null;
+		}
+
+		do {
+			try {
+				if (item.location !== 3 && item.location !== 7) {
+					continue;
+				}
+
+				if (excludeGid && item.gid === excludeGid) {
+					continue;
+				}
+
+				if (!this.isConfiguredTreacheryBase(item)) {
+					continue;
+				}
+
+				def = this.treacheryBaseDef(item);
+
+				if (def > bestDef) {
+					bestDef = def;
+					best = copyUnit(item);
+				}
+			} catch (eTr) {}
+		} while (item.getNext());
+
+		return best;
+	},
+
+	hasEmptyTreacheryBase: function () {
+		return !!this.getBestEmptyTreacheryBase();
+	},
+
+	// First empty base, or strictly higher defense than banked
+	wantTreacheryBase: function (unit) {
+		var best, def;
+
+		if (!unit || !Config.MakeRunewords || !this.isConfiguredTreacheryBase(unit)) {
+			return false;
+		}
+
+		if (this.hasCompletedTreacheryArmor()) {
+			return false;
+		}
+
+		def = this.treacheryBaseDef(unit);
+		best = this.getBestEmptyTreacheryBase(unit.gid);
+
+		if (!best) {
+			return true;
+		}
+
+		return def > this.treacheryBaseDef(best);
+	},
+
+	// MiniShop: Shael+Thul+Lem ready, need 3os armor def>120 (or upgrade)
+	wantTreacheryShopBase: function (unit) {
+		if (!Config.MakeRunewords || !unit || me.charlvl < 35) {
+			return false;
+		}
+
+		if (!this.hasTreacheryRecipe() || this.hasCompletedTreacheryArmor()) {
+			return false;
+		}
+
+		if (!this.haveRunes(Runeword.Treachery, false)) {
+			return false;
+		}
+
+		return this.wantTreacheryBase(unit);
+	},
+
+	needsTreacheryMakeVisit: function () {
+		if (!Config.MakeRunewords || !this.hasTreacheryRecipe() || me.charlvl < 43) {
+			return false;
+		}
+
+		if (this.hasCompletedTreacheryArmor()) {
+			return false;
+		}
+
+		if (!this.haveRunes(Runeword.Treachery, false)) {
+			return false;
+		}
+
+		return !!this.getBestEmptyTreacheryBase();
+	},
+
+	shouldHoldForTreacheryMake: function (unit) {
+		if (!unit || !Config.MakeRunewords || !this.hasTreacheryRecipe() || me.charlvl < 35) {
+			return false;
+		}
+
+		if (this.hasCompletedTreacheryArmor()) {
+			return false;
+		}
+
+		if (!this.isConfiguredTreacheryBase(unit)) {
+			return false;
+		}
+
+		// Keep best empty base even before Lem (bank early); require runes only for shop hunt
+		return this.wantTreacheryBase(unit) ||
+			(this.getBestEmptyTreacheryBase() && this.getBestEmptyTreacheryBase().gid === unit.gid);
+	},
+
+	cullWorseTreacheryBases: function () {
+		var item, best, n = 0, gids = [], i, cur;
+
+		if (!this.hasTreacheryRecipe() || this.hasCompletedTreacheryArmor()) {
+			return 0;
+		}
+
+		best = this.getBestEmptyTreacheryBase();
+
+		if (!best) {
+			return 0;
+		}
+
+		item = me.getItem(-1, -1);
+
+		if (!item) {
+			return 0;
+		}
+
+		do {
+			if (item.location !== 3 && item.location !== 7) {
+				continue;
+			}
+
+			if (item.gid === best.gid) {
+				continue;
+			}
+
+			if (this.isConfiguredTreacheryBase(item)) {
+				gids.push(item.gid);
+			}
+		} while (item.getNext());
+
+		for (i = 0; i < gids.length; i += 1) {
+			cur = me.getItem(-1, -1, gids[i]);
+
+			if (!cur) {
+				continue;
+			}
+
+			print("ÿc8RWÿc0 :: culling worse Treachery base def=" + this.treacheryBaseDef(cur) +
+				" (keeping " + this.treacheryBaseDef(best) + ")");
+
+			if (cur.location === 3 && typeof Town !== "undefined" && Town.sellInventoryItem &&
+					Town.isShopOpen && Town.isShopOpen()) {
+				if (Town.sellInventoryItem(cur)) {
+					n += 1;
+					continue;
+				}
+			}
+
+			if (me.inTown) {
+				try {
+					cur.drop();
+					n += 1;
+				} catch (eDrop) {}
+			}
+		}
+
+		if (n) {
+			this.invalidateCache();
+		}
+
+		return n;
+	},
+
+	// Drop/sell empty 2os Strength bases once Purity is makeable or worn
+	cullObsoleteStrengthBases: function () {
+		var item, socks, n = 0, gids = [], i, cur;
+
+		if (!this.purityOutranksStrength()) {
+			return 0;
+		}
+
+		item = me.getItem(-1, -1);
+
+		if (!item) {
+			return 0;
+		}
+
+		do {
+			if (item.location !== 3 && item.location !== 7) {
+				continue;
+			}
+
+			if (item.itemType !== 33 && item.itemType !== 34) {
+				continue;
+			}
+
+			if (item.getFlag(0x4000000) || item.getFlag(0x400000) || item.getItem()) {
+				continue;
+			}
+
+			if (typeof Item !== "undefined" && Item.isRwBaseQuality && !Item.isRwBaseQuality(item)) {
+				continue;
+			}
+
+			socks = item.getStat(194) || 0;
+
+			if (typeof item.getStatEx === "function") {
+				socks = Math.max(socks, item.getStatEx(194) || 0);
+			}
+
+			if (socks === 2) {
+				gids.push(item.gid);
+			}
+		} while (item.getNext());
+
+		for (i = 0; i < gids.length; i += 1) {
+			cur = me.getItem(-1, -1, gids[i]);
+
+			if (!cur) {
+				continue;
+			}
+
+			print("ÿc8RWÿc0 :: culling 2os Strength base (Purity preferred) " +
+				((cur.name || cur.classid || "?").toString().replace(/ÿc[0-9a-z]/gi, "").split("\n")[0]));
+
+			if (cur.location === 3 && typeof Town !== "undefined" && Town.sellInventoryItem &&
+					Town.isShopOpen && Town.isShopOpen()) {
+				if (Town.sellInventoryItem(cur)) {
+					n += 1;
+					continue;
+				}
+			}
+
+			if (me.inTown) {
+				try {
+					cur.drop();
+					n += 1;
+				} catch (eDrop2) {}
+			}
+		}
+
+		if (n > 0) {
+			this.invalidateCache();
+		}
+
+		return n;
+	},
+
+	// Debug: Amn+Tir piles and why Strength matching fails
+	diagnoseStrengthRunes: function () {
+		var items, i, it, code, need, missing = [], label, locs = {3: 0, 6: 0, 7: 0},
+			runeN = 0, num, owned = [], item, ghost, name;
+
+		items = this.listStorageItems(false);
+		need = Runeword.Strength ? Runeword.Strength.slice() : [638, 630];
+
+		print("ÿc4RWÿc0 :: Strength runes — storageItems=" + items.length +
+			" stashOpen=" + !!getUIFlag(0x19) +
+			" need Amn(638)+Tir(630) haveRunes=" + this.haveRunes(need, false));
+
+		for (i = 0; i < items.length; i += 1) {
+			it = items[i];
+
+			if (it.location === 3 || it.location === 6 || it.location === 7) {
+				locs[it.location] += 1;
+			}
+
+			num = this.runeNumberFromItem(it);
+
+			if (num < 1 && !this.runeMatchesClassid(it, 638) && !this.runeMatchesClassid(it, 630)) {
+				continue;
+			}
+
+			runeN += 1;
+			code = it.code ? String(it.code).toLowerCase() : "?";
+			label = this.runeLogLabel(it);
+
+			if (owned.indexOf(label.split("+")[0].toLowerCase()) === -1) {
+				owned.push(label.split("+")[0].toLowerCase());
+			}
+
+			print("ÿc4RWÿc0 :: Strength rune cand #" + runeN + " " + label +
+				" id=" + it.classid + " code=" + code +
+				" type=" + it.itemType + " qty=" + this.runeQty(it) +
+				" stack=" + this.isPd2RuneStack(it) +
+				" sock=" + this.canSocketRune(it) +
+				" loc=" + it.location + " @" + it.x + "," + it.y +
+				" valid=" + this.validItem(it) +
+				" matchAmn=" + this.runeMatchesClassid(it, 638) +
+				" matchTir=" + this.runeMatchesClassid(it, 630) +
+				" runeNum=" + num);
+		}
+
+		print("ÿc4RWÿc0 :: Strength runes — owned=[" + owned.join(",") +
+			"] loc counts inv=" + locs[3] + " cube=" + locs[6] +
+			" stash=" + locs[7] + " runeCands=" + runeN);
+
+		for (i = 0; i < need.length; i += 1) {
+			if (!this.haveRunes([need[i]], false)) {
+				missing.push(need[i] === 638 ? "Amn" : (need[i] === 630 ? "Tir" : String(need[i])));
+			}
+		}
+
+		if (missing.length) {
+			print("ÿc1RWÿc0 :: Strength runes — MISSING " + missing.join("+") +
+				" (not found as single/stack in inv/stash/cube)");
+		} else {
+			print("ÿc2RWÿc0 :: Strength runes — Amn+Tir both found");
+		}
+
+		// Ghost hunt: Tir sometimes mis-typed — dump ANY id 630/701 or name/code hint
+		item = me.getItem(-1, -1);
+		ghost = 0;
+
+		if (item) {
+			do {
+				code = item.code ? String(item.code).toLowerCase() : "";
+				name = ((item.name || "") + " " + (item.fname || "")).toLowerCase().replace(/ÿc[0-9a-z]/gi, "");
+
+				if (item.classid === 630 || item.classid === 701 || code === "r03" || code === "r03s" ||
+						name.indexOf("tir") !== -1) {
+					ghost += 1;
+					print("ÿc8RWÿc0 :: Strength Tir-ghost #" + ghost +
+						" id=" + item.classid + " code=" + code + " type=" + item.itemType +
+						" loc=" + item.location + " mode=" + item.mode +
+						" @" + item.x + "," + item.y +
+						" looksRune=" + this.looksLikeRune(item) +
+						" runeNum=" + this.runeNumberFromItem(item) +
+						" matchTir=" + this.runeMatchesClassid(item, 630) +
+						" name=" + name.replace(/\s+/g, " ").substring(0, 40));
+				}
+			} while (item.getNext());
+		}
+
+		if (!ghost) {
+			print("ÿc1RWÿc0 :: Strength Tir-ghost — none (no id 630/701, code r03, or name tir anywhere)");
+		}
+	},
+
+	// Debug: every spear/polearm in inv/stash/merc and why Strength base scan rejects it
+	diagnoseStrengthBases: function () {
+		var item, n = 0, name, socks, best, mercEq, mercItem, why, have, peel,
+			recipe = this.hasStrengthRecipe(),
+			done = this.mercHasStrength(),
+			insight = !!(this.hasCompletedInsight && this.hasCompletedInsight());
+
+		have = this.haveRunes(Runeword.Strength, false);
+		peel = this.mercHasPeelableStrengthBase();
+		best = this.getBestEmptyStrengthBaseNoPeel();
+
+		print("ÿc4RWÿc0 :: Strength diagnose — recipe=" + recipe +
+			" mercStr=" + done + " insightDone=" + insight +
+			" haveAmnTir=" + have + " peelMerc=" + peel +
+			" emptyBase=" + !!best +
+			" charlvl=" + me.charlvl +
+			(best ? (" best=" + (best.name || best.classid) + " gid=" + best.gid +
+				" type=" + best.itemType + " id=" + best.classid) : ""));
+
+		if (typeof Item !== "undefined" && Item.getMercItem) {
+			mercEq = Item.getMercItem(4);
+			mercItem = mercEq && mercEq.item;
+
+			if (mercItem) {
+				socks = mercItem.getStat(194) || 0;
+
+				if (typeof mercItem.getStatEx === "function") {
+					socks = Math.max(socks, mercItem.getStatEx(194) || 0);
+				}
+
+				print("ÿc4RWÿc0 :: Strength merc weapon " +
+					((mercItem.name || "?").toString().replace(/ÿc[0-9a-z]/gi, "").split("\n")[0]) +
+					" id=" + mercItem.classid + " type=" + mercItem.itemType +
+					" q=" + mercItem.quality + " sock=" + socks +
+					(mercItem.getItem() ? " SOCKED" : " empty") +
+					(mercItem.getFlag(0x400000) ? " eth" : "") +
+					(mercItem.getFlag(0x4000000) ? " RW" : "") +
+					" looksStr=" + this.itemLooksLikeStrength(mercItem));
+			} else {
+				print("ÿc4RWÿc0 :: Strength merc weapon — none");
+			}
+		}
+
+		item = me.getItem(-1, -1);
+
+		if (!item) {
+			print("ÿc1RWÿc0 :: Strength diagnose — no items on character");
+			return;
+		}
+
+		do {
+			// Spears (33) / polearms (34) in inv/stash — also log other weapon types that look like spears by name
+			if (item.location !== 3 && item.location !== 7) {
+				continue;
+			}
+
+			name = ((item.name || "") + " " + (item.fname || "")).toLowerCase().replace(/ÿc[0-9a-z]/gi, "");
+
+			if (item.itemType !== 33 && item.itemType !== 34 &&
+					name.indexOf("spear") === -1 && name.indexOf("pike") === -1 &&
+					name.indexOf("trident") === -1 && name.indexOf("scythe") === -1 &&
+					name.indexOf("pole") === -1 && name.indexOf("voulge") === -1 &&
+					name.indexOf("halberd") === -1 && name.indexOf("bardiche") === -1) {
+				continue;
+			}
+
+			n += 1;
+			socks = item.getStat(194) || 0;
+
+			if (typeof item.getStatEx === "function") {
+				socks = Math.max(socks, item.getStatEx(194) || 0);
+			}
+
+			why = [];
+
+			if (item.itemType !== 33 && item.itemType !== 34) {
+				why.push("badType");
+			}
+
+			if (typeof Item !== "undefined" && Item.isRwBaseQuality && !Item.isRwBaseQuality(item)) {
+				why.push("badQuality");
+			}
+
+			if (item.getFlag(0x4000000)) {
+				why.push("alreadyRW");
+			}
+
+			if (item.getFlag(0x400000)) {
+				why.push("eth(NonEth)");
+			}
+
+			if (item.getItem()) {
+				why.push("socketed");
+			}
+
+			if (socks !== 2) {
+				why.push("sock=" + socks + "(need2)");
+			}
+
+			print("ÿc4RWÿc0 :: Strength cand #" + n + " " +
+				((item.name || "?").toString().replace(/ÿc[0-9a-z]/gi, "").split("\n")[0]) +
+				" id=" + item.classid + " type=" + item.itemType +
+				" q=" + item.quality + " sock=" + socks +
+				" loc=" + item.location +
+				(item.getItem() ? " SOCKED" : " empty") +
+				(item.getFlag(0x400000) ? " eth" : "") +
+				(item.getFlag(0x4000000) ? " RW" : "") +
+				(why.length ? (" REJECT:" + why.join(",")) : " OK"));
+		} while (item.getNext());
+
+		if (n === 0) {
+			print("ÿc1RWÿc0 :: Strength diagnose — no spear/polearm in inv/stash at all");
+		}
 	},
 
 	hasInsightRecipe: function () {
@@ -1130,6 +2317,35 @@ var Runewords = {
 				continue;
 			}
 
+			if (this.isSpiritRecipe(rw[0]) && this.hasCompletedSpiritSword()) {
+				continue;
+			}
+
+			// Strength already on merc, Insight done, or Purity preferred/ready
+			if (this.isStrengthRecipe(rw[0])) {
+				if (this.mercHasStrength() || (this.hasCompletedInsight && this.hasCompletedInsight()) ||
+						(this.purityOutranksStrength && this.purityOutranksStrength())) {
+					continue;
+				}
+			}
+
+			// Purity already on merc (or Insight outranks it)
+			if (this.isPurityRecipe(rw[0])) {
+				if (this.mercHasPurity() || (this.hasCompletedInsight && this.hasCompletedInsight())) {
+					continue;
+				}
+			}
+
+			if (this.isTreacheryRecipe(rw[0]) && this.hasCompletedTreacheryArmor()) {
+				continue;
+			}
+
+			if (this.isRhymeRecipe(rw[0])) {
+				if (this.hasCompletedRhymeShield() || !this.wantsRhymeShieldSlot()) {
+					continue;
+				}
+			}
+
 			return true;
 		}
 
@@ -1370,7 +2586,11 @@ var Runewords = {
 
 	// Empty 2os Breast/Light Plate already banked for Stealth
 	hasEmptyStealthBase: function () {
-		var item = me.getItem(-1, -1);
+		return this.memo("emptyStealth", this._hasEmptyStealthBaseRaw);
+	},
+
+	_hasEmptyStealthBaseRaw: function () {
+		var item = me.getItem(-1, -1), socks;
 
 		if (!item) {
 			return false;
@@ -1378,8 +2598,16 @@ var Runewords = {
 
 		do {
 			if ((item.classid === 334 || item.classid === 341) && item.quality <= 3 &&
-					!item.getFlag(0x400000) && (item.getStat(194) || 0) === 2 && !item.getItem()) {
-				return true;
+					!item.getFlag(0x400000) && !item.getItem()) {
+				socks = item.getStat(194) || 0;
+
+				if (typeof item.getStatEx === "function") {
+					socks = Math.max(socks, item.getStatEx(194) || 0);
+				}
+
+				if (socks === 2) {
+					return true;
+				}
 			}
 		} while (item.getNext());
 
@@ -1398,20 +2626,25 @@ var Runewords = {
 		}
 
 		do {
-			// Helm or circlet Lore
-			if ((item.itemType === 37 || item.itemType === 75) && item.getFlag(0x4000000)) {
-				if (this.pickitEntries.length && NTIP.CheckItem(item, this.pickitEntries)) {
-					return true;
-				}
-
-				// Lore always grants +25 light res — works even when KeepRunewords/nip miss circlets
-				if ((item.getStat(39) || 0) >= 25) {
-					return true;
-				}
+			if (this.itemLooksLikeLoreHelm(item)) {
+				return true;
 			}
 		} while (item.getNext());
 
 		return false;
+	},
+
+	// Lore helm/circlet: always grants +25 light resist — works even when KeepRunewords/nip miss circlets.
+	itemLooksLikeLoreHelm: function (item) {
+		if (!item || (item.itemType !== 37 && item.itemType !== 75) || !item.getFlag(0x4000000)) {
+			return false;
+		}
+
+		if (this.pickitEntries.length && NTIP.CheckItem(item, this.pickitEntries)) {
+			return true;
+		}
+
+		return (item.getStat(39) || 0) >= 25;
 	},
 
 	// After make: wear finished Lore (or any tiered RW) from stash/inv before chores continues
@@ -1426,6 +2659,20 @@ var Runewords = {
 		live = me.getItem(-1, -1, gid) || unit;
 
 		if (!live || live.mode === 1) {
+			return false;
+		}
+
+		// Purity / Strength / Insight spears & polearms are Act2 merc sticks — never player equip
+		if (this.isMercOnlyWeapon(live)) {
+			print("ÿc4RWÿc0 :: merc-only " + (madeName || this.runeLogLabel(live)) +
+				" — skipping player equip");
+
+			if (typeof Item.autoEquipMerc === "function") {
+				Item.autoEquipMerc(true);
+				this.invalidateCache();
+				return true;
+			}
+
 			return false;
 		}
 
@@ -1444,9 +2691,23 @@ var Runewords = {
 		tier = NTIP.GetTier(live) || 0;
 
 		// Lore circlet/helm with no #tier line yet — still better than empty starter helms
-		if (tier < 1 && (live.itemType === 37 || live.itemType === 75) &&
-				live.getFlag(0x4000000) && (live.getStat(39) || 0) >= 25) {
+		if (tier < 1 && this.itemLooksLikeLoreHelm(live)) {
 			tier = 80;
+		}
+
+		// Stealth armor with no #tier line yet (same nip-miss risk right after socket)
+		if (tier < 1 && this.itemLooksLikeStealthArmor(live)) {
+			tier = 85;
+		}
+
+		// Treachery — mid PS armor (IAS/coldres identity if nip misses)
+		if (this.itemLooksLikeTreachery && this.itemLooksLikeTreachery(live)) {
+			tier = Math.max(tier, 150);
+		}
+
+		// Spirit sword — identity mid weapon (nip can miss FHR/stat lag right after socket)
+		if (this.itemLooksLikeSpiritSword(live)) {
+			tier = Math.max(tier, 100);
 		}
 
 		if (tier < 1) {
@@ -1464,13 +2725,121 @@ var Runewords = {
 				print("ÿc2RWÿc0 :: equipping " + (madeName || live.name || "?") +
 					" (tier " + tier + " > " + eqTier + ")");
 
-				if (Item.equip(live, bodyLoc[j])) {
+				if (Item.equip(live, bodyLoc[j], {
+						why: "runeword higher tier",
+						reason: "runeword higher tier on tierlist (" + tier + " > " + eqTier + ")",
+						tier: tier,
+						replacedTier: eqTier,
+						replacedName: (Item.getEquippedItemUnit(bodyLoc[j]) ?
+							String(Item.getEquippedItemUnit(bodyLoc[j]).name || "").replace(/ÿc[0-9a-z]/gi, "") : "")
+					})) {
 					Misc.logItem("Equipped", me.getItem(-1, -1, gid) || live);
 					this.invalidateCache();
 					return true;
 				}
 			}
 		}
+
+		return false;
+	},
+
+	// Finished merc sticks — never try to put these on the necro/sorc body
+	isMercOnlyWeapon: function (item) {
+		if (!item || !item.getFlag(0x4000000)) {
+			return false;
+		}
+
+		// Spears / polearms: Purity, Strength, Insight (PS merc progression)
+		if (item.itemType === 33 || item.itemType === 34) {
+			if (this.itemLooksLikePurity && this.itemLooksLikePurity(item)) {
+				return true;
+			}
+
+			if (this.itemLooksLikeStrength && this.itemLooksLikeStrength(item)) {
+				return true;
+			}
+
+			// Insight Meditation aura
+			if ((item.getStat(151, 120) || 0) > 0) {
+				return true;
+			}
+
+			// Any completed spear/polearm RW on a PS build is merc bait
+			if (typeof Item !== "undefined" && Item.isPoisonStrikeBuild && Item.isPoisonStrikeBuild()) {
+				return true;
+			}
+		}
+
+		return false;
+	},
+
+	// Retry equip for any completed Stealth/Lore/Spirit sitting unequipped in inv/stash.
+	// equipMadeItem() above is a single best-effort attempt right at craft time — once the recipe
+	// reads "done" (hasCompletedSpiritSword/hasCompletedLoreHelm/hasCompletedArmorRuneword),
+	// makeRunewords() never looks at that item again. If the one-shot attempt missed (str/dex/lvl
+	// not met yet, stat lag right after socket, or the equip logic itself just got fixed after the
+	// item was already made) it would be stranded in the stash forever without this retry.
+	equipStrandedRunewords: function () {
+		if (!Config.AutoEquip || typeof Item === "undefined") {
+			return false;
+		}
+
+		var item, candidates = [], i, equippedAny = false;
+
+		item = me.getItem(-1);
+
+		if (!item) {
+			return false;
+		}
+
+		do {
+			if (item.mode !== 1) {
+				if (this.itemLooksLikeSpiritSword(item)) {
+					candidates.push({ gid: item.gid, label: "Spirit" });
+				} else if (this.itemLooksLikeTreachery && this.itemLooksLikeTreachery(item)) {
+					candidates.push({ gid: item.gid, label: "Treachery" });
+				} else if (this.itemLooksLikeStealthArmor(item)) {
+					candidates.push({ gid: item.gid, label: "Stealth" });
+				} else if (this.itemLooksLikeLoreHelm(item)) {
+					candidates.push({ gid: item.gid, label: "Lore" });
+				}
+			}
+		} while (item.getNext());
+
+		// Equip attempts move/replace gear — collect gids first, then re-fetch live refs to act on.
+		for (i = 0; i < candidates.length; i += 1) {
+			item = me.getItem(-1, -1, candidates[i].gid);
+
+			if (item && item.mode !== 1 && this.equipMadeItem(item, candidates[i].label)) {
+				equippedAny = true;
+			}
+		}
+
+		return equippedAny;
+	},
+
+	// True when a completed Stealth/Lore/Spirit is sitting unequipped in the stash — nothing else
+	// asks for a stash visit once the recipe shows "done", so this stray would never get worn.
+	needsRunewordEquipVisit: function () {
+		if (!Config.AutoEquip || typeof Item === "undefined") {
+			return false;
+		}
+
+		var item = me.getItem(-1);
+
+		if (!item) {
+			return false;
+		}
+
+		do {
+			if (item.mode !== 1 && item.location === 7 &&
+					(this.itemLooksLikeSpiritSword(item) ||
+						(this.itemLooksLikeTreachery && this.itemLooksLikeTreachery(item)) ||
+						this.itemLooksLikeStealthArmor(item) ||
+						this.itemLooksLikeLoreHelm(item))) {
+				return true;
+			}
+		} while (item.getNext());
 
 		return false;
 	},
@@ -1563,10 +2932,7 @@ var Runewords = {
 			return false;
 		}
 
-		if (!this.hasStealthRecipe()) {
-			return false;
-		}
-
+		// Cheap rejects before recipe / storage scans
 		if ((unit.classid !== 334 && unit.classid !== 341) || unit.quality > 3 || unit.getFlag(0x400000)) {
 			return false;
 		}
@@ -1577,7 +2943,15 @@ var Runewords = {
 
 		sockets = unit.getStat(194) || 0;
 
+		if (typeof unit.getStatEx === "function") {
+			sockets = Math.max(sockets, unit.getStatEx(194) || 0);
+		}
+
 		if (sockets !== 2) {
+			return false;
+		}
+
+		if (!this.hasStealthRecipe()) {
 			return false;
 		}
 
@@ -1664,23 +3038,49 @@ var Runewords = {
 		}
 
 		do {
-			// Sword Spirit: +2 all skills + 25+ FCR
-			if (item.itemType === 30 && item.getFlag(0x4000000)) {
-				if (this.pickitEntries.length) {
-					if (NTIP.CheckItem(item, this.pickitEntries)) {
-						return true;
-					}
-				} else if ((item.getStat(127) || 0) >= 2 && (item.getStat(105) || 0) >= 25) {
-					return true;
-				}
+			if (this.itemLooksLikeSpiritSword(item)) {
+				return true;
 			}
 		} while (item.getNext());
 
 		return false;
 	},
 
+	// Spirit sword: +2 all skills + 25+ FCR, or fname still says Spirit (stats can lag right after make)
+	itemLooksLikeSpiritSword: function (item) {
+		var skills, fcr, name;
+
+		if (!item || item.itemType !== 30 || !item.getFlag(0x4000000)) {
+			return false;
+		}
+
+		if (this.pickitEntries.length && NTIP.CheckItem(item, this.pickitEntries)) {
+			return true;
+		}
+
+		skills = item.getStat(127) || 0;
+		fcr = item.getStat(105) || 0;
+
+		if (typeof item.getStatEx === "function") {
+			skills = Math.max(skills, item.getStatEx(127) || 0);
+			fcr = Math.max(fcr, item.getStatEx(105) || 0);
+		}
+
+		if (skills >= 2 && fcr >= 25) {
+			return true;
+		}
+
+		name = ((item.fname || "") + " " + (item.name || "")).toLowerCase().replace(/ÿc[0-9a-z]/gi, "");
+
+		return name.indexOf("spirit") !== -1;
+	},
+
 	hasEmptySpiritBase: function () {
-		var item = me.getItem(-1, -1), i, rw, socks;
+		return this.memo("emptySpirit", this._hasEmptySpiritBaseRaw);
+	},
+
+	_hasEmptySpiritBaseRaw: function () {
+		var item = me.getItem(-1, -1), i, rw, socks, baseId;
 
 		if (!item) {
 			return false;
@@ -1706,7 +3106,17 @@ var Runewords = {
 				for (i = 0; i < Config.Runewords.length; i += 1) {
 					rw = Config.Runewords[i];
 
-					if (rw && this.isSpiritRecipe(rw[0]) && item.classid === rw[1]) {
+					if (!rw || !this.isSpiritRecipe(rw[0])) {
+						continue;
+					}
+
+					baseId = this.resolveBaseClassid(rw[1]);
+
+					if (baseId < 0 && typeof rw[1] === "number") {
+						baseId = rw[1];
+					}
+
+					if (baseId >= 0 && item.classid === baseId) {
 						return true;
 					}
 				}
@@ -1750,6 +3160,271 @@ var Runewords = {
 		return false;
 	},
 
+	// Chores should open stash to make Spirit when Tal+Thul+Ort+Amn + empty 4os sword ready
+	needsSpiritMakeVisit: function () {
+		if (!Config.MakeRunewords || !this.hasSpiritRecipe || !this.hasSpiritRecipe()) {
+			return false;
+		}
+
+		if (typeof Item !== "undefined" && Item.isPoisonStrikeBuild && Item.isPoisonStrikeBuild()) {
+			return false;
+		}
+
+		if (me.charlvl < 18) {
+			return false;
+		}
+
+		if (this.hasCompletedSpiritSword && this.hasCompletedSpiritSword()) {
+			return false;
+		}
+
+		if (!this.haveRunes(Runeword.Spirit, false)) {
+			return false;
+		}
+
+		return !!(this.hasEmptySpiritBase && this.hasEmptySpiritBase());
+	},
+
+	// Empty 4os Spirit sword + runes ready — town next so we socket before selling/idling
+	shouldHoldForSpiritMake: function (unit) {
+		var socks;
+
+		if (!unit || !Config.MakeRunewords || !this.hasSpiritRecipe || !this.hasSpiritRecipe()) {
+			return false;
+		}
+
+		if (typeof Item !== "undefined" && Item.isPoisonStrikeBuild && Item.isPoisonStrikeBuild()) {
+			return false;
+		}
+
+		if (me.charlvl < 18 || unit.itemType !== 30) {
+			return false;
+		}
+
+		if (unit.getFlag(0x4000000) || unit.getFlag(0x400000) || unit.getItem()) {
+			return false;
+		}
+
+		if (typeof Item !== "undefined" && Item.isRwBaseQuality && !Item.isRwBaseQuality(unit)) {
+			return false;
+		}
+
+		socks = unit.getStat(194) || 0;
+
+		if (typeof unit.getStatEx === "function") {
+			socks = Math.max(socks, unit.getStatEx(194) || 0);
+		}
+
+		if (socks !== 4) {
+			return false;
+		}
+
+		if (!this.isConfiguredSpiritBase(unit)) {
+			return false;
+		}
+
+		return this.haveRunes(Runeword.Spirit, false);
+	},
+
+	hasRhymeRecipe: function () {
+		var i, rw;
+
+		if (!Runeword.Rhyme || !Config.Runewords || !Config.Runewords.length) {
+			return false;
+		}
+
+		for (i = 0; i < Config.Runewords.length; i += 1) {
+			rw = Config.Runewords[i];
+
+			if (rw && this.isRhymeRecipe(rw[0])) {
+				return true;
+			}
+		}
+
+		return false;
+	},
+
+	isRhymeRecipe: function (recipe) {
+		return !!(recipe && Runeword.Rhyme && recipe.length === 2 &&
+			recipe[0] === Runeword.Rhyme[0] && recipe[1] === Runeword.Rhyme[1]);
+	},
+
+	// 1H only — never make Rhyme while on a 2H staff
+	wantsRhymeShieldSlot: function () {
+		if (typeof Item !== "undefined" && Item.wantsShieldSlot) {
+			return !!Item.wantsShieldSlot();
+		}
+
+		return false;
+	},
+
+	hasCompletedRhymeShield: function () {
+		return this.memo("doneRhyme", this._hasCompletedRhymeShieldRaw);
+	},
+
+	_hasCompletedRhymeShieldRaw: function () {
+		var item = me.getItem(-1);
+
+		if (!item) {
+			return false;
+		}
+
+		do {
+			// Rhyme: shield RW with Cannot Be Frozen
+			if ((item.itemType === 2 || item.itemType === 70) && item.getFlag(0x4000000)) {
+				if (this.pickitEntries.length) {
+					if (NTIP.CheckItem(item, this.pickitEntries) && (item.getStat(153) || 0) >= 1) {
+						return true;
+					}
+				} else if ((item.getStat(153) || 0) >= 1) {
+					return true;
+				}
+			}
+		} while (item.getNext());
+
+		return false;
+	},
+
+	hasEmptyRhymeBase: function () {
+		return this.memo("emptyRhyme", this._hasEmptyRhymeBaseRaw);
+	},
+
+	_hasEmptyRhymeBaseRaw: function () {
+		var item = me.getItem(-1, -1), i, rw, socks, baseId;
+
+		if (!item) {
+			return false;
+		}
+
+		do {
+			if ((item.itemType === 2 || item.itemType === 70) &&
+					(typeof Item === "undefined" || Item.isRwBaseQuality(item)) &&
+					!item.getFlag(0x400000) && !item.getItem()) {
+				socks = item.getStat(194) || 0;
+
+				if (typeof item.getStatEx === "function") {
+					socks = Math.max(socks, item.getStatEx(194) || 0);
+				}
+
+				if (socks !== 2) {
+					continue;
+				}
+
+				if (!Config.Runewords || !Config.Runewords.length) {
+					return true;
+				}
+
+				for (i = 0; i < Config.Runewords.length; i += 1) {
+					rw = Config.Runewords[i];
+
+					if (!rw || !this.isRhymeRecipe(rw[0])) {
+						continue;
+					}
+
+					baseId = this.resolveBaseClassid(rw[1]);
+
+					if (baseId < 0 && typeof rw[1] === "number") {
+						baseId = rw[1];
+					}
+
+					if (baseId >= 0 && item.classid === baseId) {
+						return true;
+					}
+				}
+			}
+		} while (item.getNext());
+
+		return false;
+	},
+
+	isConfiguredRhymeBase: function (unit) {
+		var i, rw, baseId;
+
+		if (!unit || !Runeword.Rhyme || !Config.Runewords || !Config.Runewords.length) {
+			return false;
+		}
+
+		for (i = 0; i < Config.Runewords.length; i += 1) {
+			rw = Config.Runewords[i];
+
+			if (!rw || !this.isRhymeRecipe(rw[0])) {
+				continue;
+			}
+
+			baseId = this.resolveBaseClassid(rw[1]);
+
+			if (baseId < 0 && typeof rw[1] === "number") {
+				baseId = rw[1];
+			}
+
+			if (baseId >= 0 && unit.classid === baseId) {
+				return true;
+			}
+		}
+
+		return false;
+	},
+
+	needsRhymeMakeVisit: function () {
+		if (!Config.MakeRunewords || !this.hasRhymeRecipe()) {
+			return false;
+		}
+
+		if (!this.wantsRhymeShieldSlot()) {
+			return false;
+		}
+
+		if (this.hasCompletedRhymeShield()) {
+			return false;
+		}
+
+		if (!this.haveRunes(Runeword.Rhyme, false)) {
+			return false;
+		}
+
+		return !!this.hasEmptyRhymeBase();
+	},
+
+	shouldHoldForRhymeMake: function (unit) {
+		var socks;
+
+		if (!unit || !Config.MakeRunewords || !this.hasRhymeRecipe()) {
+			return false;
+		}
+
+		if (!this.wantsRhymeShieldSlot()) {
+			return false;
+		}
+
+		if (unit.itemType !== 2 && unit.itemType !== 70) {
+			return false;
+		}
+
+		if (unit.getFlag(0x4000000) || unit.getFlag(0x400000) || unit.getItem()) {
+			return false;
+		}
+
+		if (typeof Item !== "undefined" && Item.isRwBaseQuality && !Item.isRwBaseQuality(unit)) {
+			return false;
+		}
+
+		socks = unit.getStat(194) || 0;
+
+		if (typeof unit.getStatEx === "function") {
+			socks = Math.max(socks, unit.getStatEx(194) || 0);
+		}
+
+		if (socks !== 2) {
+			return false;
+		}
+
+		if (!this.isConfiguredRhymeBase(unit)) {
+			return false;
+		}
+
+		return this.haveRunes(Runeword.Rhyme, false);
+	},
+
 	// MiniShopBot: 4os Crystal/Broad/Long — same gate style as Stealth/Lore
 	wantSpiritShopBase: function (unit) {
 		var sockets;
@@ -1758,10 +3433,12 @@ var Runewords = {
 			return false;
 		}
 
-		if (!this.hasSpiritRecipe()) {
+		// Poison Strike necro never wants Spirit sword (dagger forever)
+		if (typeof Item !== "undefined" && Item.isPoisonStrikeBuild && Item.isPoisonStrikeBuild()) {
 			return false;
 		}
 
+		// Cheap rejects before recipe / storage scans
 		if (unit.itemType !== 30 || unit.getFlag(0x400000)) {
 			return false;
 		}
@@ -1786,6 +3463,10 @@ var Runewords = {
 			return false;
 		}
 
+		if (!this.hasSpiritRecipe()) {
+			return false;
+		}
+
 		if (!this.isConfiguredSpiritBase(unit)) {
 			return false;
 		}
@@ -1799,7 +3480,7 @@ var Runewords = {
 
 	// True if unit is an empty socket base we still need for a configured RW we have runes for
 	wantBaseForRunes: function (unit) {
-		var i, rw, sockets, ethFlag;
+		var i, rw, sockets, ethFlag, baseId;
 
 		if (!unit || unit.getItem()) {
 			return false;
@@ -1823,6 +3504,11 @@ var Runewords = {
 
 		// Don't hoard more Stealth bases once one is done
 		if (unit.itemType === 3 && this.hasCompletedArmorRuneword()) {
+			return false;
+		}
+
+		// Don't hoard more Treachery bases once one is done
+		if (unit.itemType === 3 && this.hasCompletedTreacheryArmor && this.hasCompletedTreacheryArmor()) {
 			return false;
 		}
 
@@ -1869,6 +3555,69 @@ var Runewords = {
 				continue;
 			}
 
+	// Strength (Amn+Tir): spear / polearm only (merc) — never knives; skip if Purity preferred
+			if (this.isStrengthRecipe(rw[0])) {
+				if (this.purityOutranksStrength && this.purityOutranksStrength()) {
+					continue;
+				}
+
+				if (sockets !== 2) {
+					continue;
+				}
+
+				if (unit.itemType !== 33 && unit.itemType !== 34) {
+					continue;
+				}
+
+				if (unit.getFlag(0x400000)) {
+					continue; // NonEth recipes
+				}
+
+				if (this.mercHasStrength()) {
+					continue;
+				}
+
+				if (this.haveRunes(rw[0])) {
+					return true;
+				}
+
+				continue;
+			}
+
+			// Purity (Amn+Eth+Thul): 3os spear/polearm — outranks Strength
+			if (this.isPurityRecipe(rw[0])) {
+				if (this.mercHasPurity() || (this.hasCompletedInsight && this.hasCompletedInsight())) {
+					continue;
+				}
+
+				if (me.charlvl < 25) {
+					continue;
+				}
+
+				if (!this.wantPurityBase(unit)) {
+					continue;
+				}
+
+				if (this.haveRunes(rw[0])) {
+					return true;
+				}
+
+				continue;
+			}
+
+			// Treachery (Shael+Thul+Lem): 3os armor def>120 — best base / upgrade
+			if (this.isTreacheryRecipe(rw[0])) {
+				if (this.hasCompletedTreacheryArmor() || !this.wantTreacheryBase(unit)) {
+					continue;
+				}
+
+				if (this.haveRunes(rw[0])) {
+					return true;
+				}
+
+				continue;
+			}
+
 			// Insight — at most one empty base; only want upgrades
 			if (this.isInsightRecipe(rw[0])) {
 				if (this.hasCompletedInsight()) {
@@ -1884,7 +3633,13 @@ var Runewords = {
 				continue;
 			}
 
-			if (unit.classid !== rw[1]) {
+			baseId = this.resolveBaseClassid(rw[1]);
+
+			if (baseId < 0 && typeof rw[1] === "number") {
+				baseId = rw[1];
+			}
+
+			if (baseId < 0 || unit.classid !== baseId) {
 				continue;
 			}
 
@@ -1899,10 +3654,11 @@ var Runewords = {
 			}
 
 			// Already have an empty base for this recipe
-			// Lore/Insight: allow upgrades (higher def / better pole) even if a worse empty base exists
+			// Lore/Insight/Treachery: allow upgrades (higher def / better pole) even if a worse empty base exists
 			if (this.getBase(rw[0], rw[1], ethFlag)) {
 				if (!((this.isInsightRecipe(rw[0]) && this.wantInsightBase(unit)) ||
-						(this.isLoreRecipe(rw[0]) && this.wantLoreBase(unit)))) {
+						(this.isLoreRecipe(rw[0]) && this.wantLoreBase(unit)) ||
+						(this.isTreacheryRecipe(rw[0]) && this.wantTreacheryBase(unit)))) {
 					continue;
 				}
 			}
@@ -1921,8 +3677,10 @@ var Runewords = {
 
 		this.validGids = [];
 		this.needList = [];
-		// Never walk to stash here — caller opens when needed; open UI already shows loc 7
-		items = this.listStorageItems(false);
+		// Never walk to stash here — caller opens when needed; open UI already shows loc 7.
+		// MUST slice — splicing the memoized listStorageItems array starves checkRunewords
+		// of the same runes (Spirit: base+Tal/Thul/Ort/Amn all present, make still dry-passes).
+		items = this.listStorageItems(false).slice();
 
 		for (i = 0; i < Config.Runewords.length; i += 1) {
 			if (this.isLeafRecipe(Config.Runewords[i][0]) && this.hasBetterThanLeafOrb()) {
@@ -1942,6 +3700,30 @@ var Runewords = {
 			}
 
 			if (this.isInsightRecipe(Config.Runewords[i][0]) && this.hasCompletedInsight()) {
+				continue;
+			}
+
+			if (this.isSpiritRecipe(Config.Runewords[i][0]) && this.hasCompletedSpiritSword()) {
+				continue;
+			}
+
+			if (this.isPurityRecipe(Config.Runewords[i][0]) &&
+					(this.mercHasPurity() || (this.hasCompletedInsight && this.hasCompletedInsight()))) {
+				continue;
+			}
+
+			if (this.isTreacheryRecipe(Config.Runewords[i][0]) && this.hasCompletedTreacheryArmor()) {
+				continue;
+			}
+
+			if (this.isStrengthRecipe(Config.Runewords[i][0]) &&
+					(this.mercHasStrength() || (this.hasCompletedInsight && this.hasCompletedInsight()) ||
+						(this.purityOutranksStrength && this.purityOutranksStrength()))) {
+				continue;
+			}
+
+			if (this.isRhymeRecipe(Config.Runewords[i][0]) &&
+					(this.hasCompletedRhymeShield() || !this.wantsRhymeShieldSlot())) {
 				continue;
 			}
 
@@ -2007,16 +3789,24 @@ RuneLoop:
 		}
 
 		this.validGids.push(gid);
+		// Base/rune just entered storage — clear emptySpirit / haveRunes memos
+		this.invalidateCache();
 	},
 
 	// returns an array of items that make a runeword if found, false if we don't have enough items for any
 	checkRunewords: function () {
-		var i, j, k, items, base, itemList, recipe, prefix, bestIns, bestLore, loreTried;
+		var i, j, k, items, base, itemList, recipe, prefix, bestIns, bestLore, loreTried, strengthTried, purityTried, treacheryTried, bestStr, bestPur, bestTr;
 
-		items = this.listStorageItems(false);
 		loreTried = false;
+		strengthTried = false;
+		purityTried = false;
+		treacheryTried = false;
 
 		for (i = 0; i < Config.Runewords.length; i += 1) {
+			// Fresh copy each recipe — splice on a failed Lore/Insight attempt must not
+			// steal Tal/Ort/Amn from Spirit (listStorageItems memo returns the same array).
+			items = this.listStorageItems(false).slice();
+
 			if (this.isLeafRecipe(Config.Runewords[i][0]) && this.hasBetterThanLeafOrb()) {
 				continue;
 			}
@@ -2074,8 +3864,174 @@ RuneLore:
 				continue;
 			}
 
+			// Treachery (Shael+Thul+Lem): best 3os armor def>120
+			if (this.isTreacheryRecipe(Config.Runewords[i][0])) {
+				if (treacheryTried) {
+					continue;
+				}
+
+				treacheryTried = true;
+
+				if (me.charlvl < 43 || this.hasCompletedTreacheryArmor()) {
+					continue;
+				}
+
+				bestTr = this.getBestEmptyTreacheryBase();
+
+				if (!bestTr) {
+					continue;
+				}
+
+				base = me.getItem(-1, -1, bestTr.gid) || bestTr;
+				recipe = Config.Runewords[i][0];
+				itemList = [base];
+				prefix = this.socketedRecipePrefix(base, recipe);
+				items = this.listStorageItems(false).slice();
+
+				if (prefix > 0) {
+					print("ÿc4RWÿc0 :: Treachery base has " + prefix + "/" + recipe.length + " already — continue");
+				}
+
+RuneTr:
+				for (j = prefix; j < recipe.length; j += 1) {
+					k = this.findRecipeRune(items, recipe[j]);
+
+					if (k < 0) {
+						print("ÿc1RWÿc0 :: Treachery — have base but missing rune classid=" + recipe[j] +
+							" (Shael=640 Thul=637 Lem=647); stash runes scanned=" + items.length);
+						break RuneTr;
+					}
+
+					itemList.push(items[k]);
+					items.splice(k, 1);
+
+					if (itemList.length === recipe.length - prefix + 1) {
+						return itemList;
+					}
+				}
+
+				continue;
+			}
+
+			// Purity (Amn+Eth+Thul): 3os spear/polearm — try before Strength
+			if (this.isPurityRecipe(Config.Runewords[i][0])) {
+				if (purityTried) {
+					continue;
+				}
+
+				purityTried = true;
+
+				if (me.charlvl < 25 || this.mercHasPurity() ||
+						(this.hasCompletedInsight && this.hasCompletedInsight())) {
+					continue;
+				}
+
+				bestPur = this.getBestEmptyPurityBase();
+
+				if (!bestPur) {
+					continue;
+				}
+
+				base = me.getItem(-1, -1, bestPur.gid) || bestPur;
+				recipe = Config.Runewords[i][0];
+				itemList = [base];
+				prefix = this.socketedRecipePrefix(base, recipe);
+				items = this.listStorageItems(false).slice();
+
+				if (prefix > 0) {
+					print("ÿc4RWÿc0 :: Purity base has " + prefix + "/" + recipe.length + " already — continue");
+				}
+
+RunePur:
+				for (j = prefix; j < recipe.length; j += 1) {
+					k = this.findRecipeRune(items, recipe[j]);
+
+					if (k < 0) {
+						print("ÿc1RWÿc0 :: Purity — have base but missing rune classid=" + recipe[j] +
+							" (Amn=638 Eth=632 Thul=637); stash runes scanned=" + items.length);
+						break RunePur;
+					}
+
+					itemList.push(items[k]);
+					items.splice(k, 1);
+
+					if (itemList.length === recipe.length - prefix + 1) {
+						return itemList;
+					}
+				}
+
+				continue;
+			}
+
+			// Strength (Amn+Tir): peel merc 2os spear/polearm — skipped when Purity preferred
+			if (this.isStrengthRecipe(Config.Runewords[i][0])) {
+				if (strengthTried) {
+					continue;
+				}
+
+				strengthTried = true;
+
+				if (this.purityOutranksStrength && this.purityOutranksStrength()) {
+					continue;
+				}
+
+				bestStr = this.getBestEmptyStrengthBase();
+
+				if (!bestStr) {
+					continue;
+				}
+
+				base = me.getItem(-1, -1, bestStr.gid);
+
+				if (!base) {
+					base = bestStr;
+				}
+
+				recipe = Config.Runewords[i][0];
+				itemList = [base];
+				prefix = this.socketedRecipePrefix(base, recipe);
+				items = this.listStorageItems(false).slice(); // refresh after peel
+
+				if (prefix > 0) {
+					print("ÿc4RWÿc0 :: Strength base has " + prefix + "/" + recipe.length + " already — continue");
+				}
+
+RuneStr:
+				for (j = prefix; j < recipe.length; j += 1) {
+					k = this.findRecipeRune(items, recipe[j]);
+
+					if (k < 0) {
+						print("ÿc1RWÿc0 :: Strength — have base but missing rune classid=" + recipe[j] +
+							" (Amn=638 Tir=630); found so far=" + (itemList.length - 1) +
+							"/" + recipe.length + " stash runes scanned=" + items.length +
+							(recipe[j] === 630 ? " ← Tir not in storage scan" :
+								(recipe[j] === 638 ? " ← Amn not in storage scan" : "")));
+						// Re-allow full diagnose next visit (ghost Tir hunt)
+						this._strengthDiagnosed = false;
+						this._strengthVisitDiagnosed = false;
+						break RuneStr;
+					}
+
+					itemList.push(items[k]);
+					items.splice(k, 1);
+
+					if (itemList.length === recipe.length - prefix + 1) {
+						return itemList;
+					}
+				}
+
+				continue;
+			}
+
 			if (this.isInsightRecipe(Config.Runewords[i][0]) && this.hasCompletedInsight()) {
 				continue;
+			}
+
+			// Rhyme: only while 1H equipped; skip once we already have one
+			if (this.isRhymeRecipe(Config.Runewords[i][0])) {
+				if (this.hasCompletedRhymeShield() || !this.wantsRhymeShieldSlot()) {
+					continue;
+				}
 			}
 
 			itemList = []; // reset item list
@@ -2154,8 +4110,9 @@ RuneLoop:
 			return false;
 		}
 
-		// Shop/field: Stealth @17+; Lore @20+; Spirit sword @18+
-		if (this.wantStealthShopBase(unit) || this.wantLoreShopBase(unit) || this.wantSpiritShopBase(unit)) {
+		// Shop/field: Stealth @17+; Lore @20+; Spirit sword @18+; Treachery @35+
+		if (this.wantStealthShopBase(unit) || this.wantLoreShopBase(unit) || this.wantSpiritShopBase(unit) ||
+				(this.wantTreacheryShopBase && this.wantTreacheryShopBase(unit))) {
 			return true;
 		}
 
@@ -2204,6 +4161,37 @@ RuneLoop:
 			if ((best && best.gid === unit.gid) || this.wantInsightBase(unit)) {
 				return true;
 			}
+		}
+
+		// Empty 3os Purity spear/polearm — at most one (best), never after Purity/Insight
+		if (this.isEmptyPurityBase && this.isEmptyPurityBase(unit) && this.purityBaseScore(unit) > 0 &&
+				!(this.mercHasPurity && this.mercHasPurity()) &&
+				!(this.hasCompletedInsight && this.hasCompletedInsight())) {
+			best = this.getBestEmptyPurityBase();
+
+			if ((best && best.gid === unit.gid) || (this.wantPurityBase && this.wantPurityBase(unit))) {
+				return true;
+			}
+		}
+
+		// Empty 3os Purity spear/polearm while Amn+Eth+Thul ready
+		if (this.shouldHoldForPurityMake(unit)) {
+			return true;
+		}
+
+		// Empty 3os Treachery armor (def>120) — best base only
+		if (this.shouldHoldForTreacheryMake && this.shouldHoldForTreacheryMake(unit)) {
+			return true;
+		}
+
+		// Empty 2os Strength spear/polearm (merc) while Amn+Tir ready — not when Purity preferred
+		if (!(this.purityOutranksStrength && this.purityOutranksStrength()) &&
+				(this.shouldHoldForStrengthMake(unit) ||
+				(this.hasStrengthRecipe() && !unit.getItem() &&
+					(unit.itemType === 33 || unit.itemType === 34) &&
+					((unit.getStat(194) || 0) === 2 || (unit.getStatEx && unit.getStatEx(194) === 2)) &&
+					!unit.getFlag(0x4000000) && this.wantBaseForRunes(unit)))) {
+			return true;
 		}
 
 		// Still need this empty base for a recipe we have runes for
@@ -2527,7 +4515,7 @@ RuneLoop:
 			return false;
 		}
 
-		var i, items, stealthWanted, loreWanted, baseGid, rune, sockOk, base,
+		var i, items, stealthWanted, loreWanted, strengthWanted, baseGid, rune, sockOk, base,
 			baseName, runeLabel, madeName, prefix, asideN, made;
 
 		// Storage may have changed since the last memo (pickups, stash moves) — start clean
@@ -2538,8 +4526,17 @@ RuneLoop:
 			return false;
 		}
 
+		// Merc wearing empty 2os spear — pull it off so Strength (Amn+Tir) can socket
+		if (this.hasStrengthRecipe && this.hasStrengthRecipe() &&
+				!(this.purityOutranksStrength && this.purityOutranksStrength())) {
+			this.peelMercForStrength();
+		}
+
 		stealthWanted = this.hasStealthRecipe() && !this.hasCompletedArmorRuneword();
 		loreWanted = this.hasLoreRecipe() && !this.hasCompletedLoreHelm();
+		strengthWanted = this.hasStrengthRecipe() && !this.mercHasStrength() &&
+			!(this.hasCompletedInsight && this.hasCompletedInsight()) &&
+			!(this.purityOutranksStrength && this.purityOutranksStrength());
 		made = false;
 
 		// Only clear cube UI if it's open — do NOT walk to stash yet
@@ -2554,6 +4551,21 @@ RuneLoop:
 			items = this.checkRunewords();
 
 			if (!items) { // can't make runewords - exit loop
+				// Strength: always dump once per game (PS merc path) — Amn/Tir/base misses are silent otherwise
+				if (strengthWanted && !this._strengthDiagnosed) {
+					this._strengthDiagnosed = true;
+					this._strengthVisitDiagnosed = true;
+					print("ÿc1RWÿc0 :: Strength not ready — emptyBase=" +
+						!!this.getBestEmptyStrengthBaseNoPeel() +
+						" haveAmnTir=" + this.haveRunes(Runeword.Strength, false) +
+						" peelMerc=" + this.mercHasPeelableStrengthBase() +
+						" storageItems=" + this.listStorageItems(false).length +
+						" stashOpen=" + !!getUIFlag(0x19) +
+						" needsVisit=" + this.needsStrengthMakeVisit());
+					this.diagnoseStrengthRunes();
+					this.diagnoseStrengthBases();
+				}
+
 				// Diagnose dumps are debug-only and once per game (Config.RunewordDebug)
 				if (Config.RunewordDebug) {
 					if (stealthWanted && !this._stealthDiagnosed) {

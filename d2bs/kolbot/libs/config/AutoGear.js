@@ -23,6 +23,11 @@
 (function () {
 	var classNips, nip, build, overlay, bases, i, ag, caps, midEnabled;
 
+	// Phase 3 dynamic tierscore — must load before Pickit.init evaluates #tier formulas
+	if (me.classid === 1 && !isIncluded("common/AutoGearScore.js")) {
+		include("common/AutoGearScore.js");
+	}
+
 	function pushPickit(file) {
 		if (Config.PickitFiles.indexOf(file) === -1) {
 			Config.PickitFiles.push(file);
@@ -87,15 +92,33 @@
 				pushPickit("auto/leveling_rw_spirit.nip");
 			}
 		} else if (build === "poisonstrike") {
-			// PS melee — Strength (Amn+Tir) in knives; not Stealth/Lore/Steel
+			// PS knives = shop/drop +PS/+IAS only — merc sticks: Purity (3os) > Strength (2os)
 			pushPickit("auto/leveling_rw_poisonstrike.nip");
-			bases = ["Dagger", "Dirk", "Kris", "Blade", "Poignard", "Rondel", "Cinquedeas"];
+
+			bases = [
+				"Spear", "Trident", "Brandistock", "Spetum", "Pike",
+				"War Spear", "Fuscina", "War Fork", "Yari", "Lance",
+				"Bardiche", "Voulge", "Scythe", "Poleaxe", "Halberd", "War Scythe",
+				"Lochaber Axe", "Bill", "Battle Scythe", "Partizan", "Bec de Corbin", "Grim Scythe"
+			];
+
+			// Purity first (Amn+Eth+Thul) — outranks Strength when 3os + runes are ready
+			if (Runeword.Purity) {
+				for (i = 0; i < bases.length; i += 1) {
+					pushRW(Runeword.Purity, bases[i], Roll.NonEth);
+				}
+
+				Config.KeepRunewords.push("[type] == spear || [type] == polearm # [ias] >= 45"); // Purity
+				Config.KeepRunewords.push("[type] == spear || [type] == polearm # [itemcrushingblow] >= 25"); // Strength
+			}
 
 			for (i = 0; i < bases.length; i += 1) {
 				pushRW(Runeword.Strength, bases[i], Roll.NonEth);
 			}
 
-			Config.KeepRunewords.push("[type] == knife # [itemcrushingblow] >= 25");
+			if (!Runeword.Purity) {
+				Config.KeepRunewords.push("[type] == spear || [type] == polearm # [itemcrushingblow] >= 25");
+			}
 		} else if (me.classid !== 2) {
 			// Melee classes — Steel
 			pushPickit("auto/leveling_rw_melee.nip");
@@ -172,6 +195,26 @@
 		});
 	}
 
+	// Rhyme (Shael+Eth): CBF + resists — early 1H-offhand before Splendor/Lidless
+	function hasRhymeShield() {
+		return !!findOwnedItem(function (it) {
+			if (it.itemType !== 2 && it.itemType !== 70) {
+				return false;
+			}
+
+			return !!(it.getFlag(0x4000000) && (it.getStat(153) || 0) >= 1);
+		});
+	}
+
+	function wantsOneHandShield() {
+		// Only craft/keep shield RWs while a 1H is equipped (no 2H staff)
+		if (typeof Item !== "undefined" && Item.wantsShieldSlot) {
+			return !!Item.wantsShieldSlot();
+		}
+
+		return false;
+	}
+
 	function mercHasInsight() {
 		var merc, item;
 
@@ -202,9 +245,36 @@
 		});
 	}
 
+	// Treachery (Shael+Thul+Lem): 45 IAS + 30 cold res on body armor
+	function hasTreacheryArmor() {
+		if (typeof Runewords !== "undefined" && Runewords.hasCompletedTreacheryArmor) {
+			return !!Runewords.hasCompletedTreacheryArmor();
+		}
+
+		return !!findOwnedItem(function (it) {
+			var dmg;
+
+			if (it.itemType !== 3 || !it.getFlag(0x4000000)) {
+				return false;
+			}
+
+			// PD2 itemType can misreport a weapon as type 3 — cross-check base damage
+			dmg = (getBaseStat("items", it.classid, "mindam") || 0) +
+				(getBaseStat("items", it.classid, "maxdam") || 0) +
+				(getBaseStat("items", it.classid, "2handmindam") || 0) +
+				(getBaseStat("items", it.classid, "2handmaxdam") || 0);
+
+			if (dmg > 0) {
+				return false;
+			}
+
+			return (it.getStat(93) || 0) >= 45 && (it.getStat(43) || 0) >= 30;
+		});
+	}
+
 	// SoloPlay idea: gate mid RWs by progression — PD2 Spirit sword / caster shields / Insight
 	function pushMidRunewords() {
-		var mid = [], swordBases, shieldBases, poleBases, i, wantShield;
+		var mid = [], swordBases, shieldBases, poleBases, armorBases, i;
 
 		if (!ag.EnableMidRW) {
 			return mid;
@@ -215,9 +285,9 @@
 			return mid;
 		}
 
-		// Spirit sword — casters once Tal/Thul/Ort/Amn are in play (~18+)
-		// Cold/light already pick bases early via pushLevelingRunewords; recipes start here.
-		if ((me.classid === 1 || me.classid === 2) && me.charlvl >= 18 && !hasSpiritSword()) {
+		// Spirit sword — sorc + caster necro only (poisonstrike = daggers forever)
+		if ((me.classid === 1 || (me.classid === 2 && build !== "poisonstrike" && build !== "poison")) &&
+				me.charlvl >= 18 && !hasSpiritSword()) {
 			pushPickit("auto/leveling_rw_spirit.nip");
 			swordBases = ["Crystal Sword", "Broad Sword", "Long Sword"];
 
@@ -229,31 +299,36 @@
 			mid.push("Spirit-sword");
 		}
 
-		// Caster mid shields — Splendor / Lidless / Moser's (NOT Spirit Monarch on PD2)
-		if ((me.classid === 1 || me.classid === 2) && me.charlvl >= 24 && !hasCasterMidShield()) {
-			wantShield = (me.classid === 2) ||
-				(typeof Item !== "undefined" && Item.wantsShieldSlot && Item.wantsShieldSlot()) ||
-				hasSpiritSword() || me.charlvl >= 30;
+		// Caster mid shields — Rhyme (early) / Splendor / Lidless / Moser's (NOT Spirit Monarch on PD2)
+		// Recipes bank when a 1H is equipped or Spirit sword is owned; make still requires 1H (wantsShieldSlot)
+		if ((me.classid === 1 || me.classid === 2) && me.charlvl >= 24 && !hasCasterMidShield() &&
+				(wantsOneHandShield() || hasSpiritSword() || me.classid === 2)) {
+			pushPickit("auto/leveling_rw_caster_shield.nip");
+			shieldBases = [
+				"Buckler", "Small Shield", "Kite Shield", "Spiked Shield", "Bone Shield",
+				"Round Shield", "Grim Shield", "Luna", "Hyperion", "Troll Nest"
+			];
 
-			if (wantShield) {
-				pushPickit("auto/leveling_rw_caster_shield.nip");
-
-				if (Runeword.Splendor) {
-					shieldBases = [
-						"Buckler", "Small Shield", "Kite Shield", "Spiked Shield", "Bone Shield",
-						"Round Shield", "Grim Shield", "Luna", "Hyperion", "Troll Nest"
-					];
-
-					for (i = 0; i < shieldBases.length; i += 1) {
-						pushRW(Runeword.Splendor, shieldBases[i], Roll.NonEth);
-					}
-
-					Config.KeepRunewords.push("[type] == shield # [itemallskills] == 1 && [fcr] == 10");
-					mid.push("Splendor");
+			// Rhyme (Shael+Eth) first — cheap CBF shield; socket only while 1H (Runewords.wantsRhymeShieldSlot)
+			if (Runeword.Rhyme && !hasRhymeShield()) {
+				for (i = 0; i < shieldBases.length; i += 1) {
+					pushRW(Runeword.Rhyme, shieldBases[i], Roll.NonEth);
 				}
 
-				mid.push("Lidless/Mosers");
+				Config.KeepRunewords.push("[type] == shield # [itemcannotbefrozen] == 1");
+				mid.push("Rhyme");
 			}
+
+			if (Runeword.Splendor) {
+				for (i = 0; i < shieldBases.length; i += 1) {
+					pushRW(Runeword.Splendor, shieldBases[i], Roll.NonEth);
+				}
+
+				Config.KeepRunewords.push("[type] == shield # [itemallskills] == 1 && [fcr] == 10");
+				mid.push("Splendor");
+			}
+
+			mid.push("Lidless/Mosers");
 		}
 
 		// Insight — Act2 merc progression (Sol ~27)
@@ -270,6 +345,26 @@
 
 			Config.KeepRunewords.push("[type] == polearm # [meditationaura] >= 12");
 			mid.push("Insight");
+		}
+
+		// PS mid armor — Treachery (Shael+Thul+Lem) in 3os chest with solid defense
+		if (build === "poisonstrike" && Runeword.Treachery && me.charlvl >= 35 &&
+				!hasTreacheryArmor()) {
+			pushPickit("auto/leveling_rw_treachery.nip");
+			armorBases = [
+				"Breast Plate", "Light Plate", "Field Plate", "Gothic Plate", "Full Plate Mail", "Ancient Armor",
+				"Ghost Armor", "Serpentskin Armor", "Demonhide Armor", "Trellised Armor", "Linked Mail",
+				"Tigulated Mail", "Cuirass", "Mesh Armor", "Mage Plate", "Sharktooth Armor", "Embossed Plate",
+				"Chaos Armor", "Ornate Plate", "Wyrmhide", "Scarab Husk", "Wire Fleece", "Diamond Mail",
+				"Loricated Mail", "Great Hauberk", "Boneweave", "Balrog Skin", "Hellforged Plate", "Kraken Shell"
+			];
+
+			for (i = 0; i < armorBases.length; i += 1) {
+				pushRW(Runeword.Treachery, armorBases[i], Roll.NonEth);
+			}
+
+			Config.KeepRunewords.push("[type] == armor # [ias] >= 45 && [coldresist] >= 30");
+			mid.push("Treachery");
 		}
 
 		return mid;
@@ -296,6 +391,14 @@
 
 	if (ag.FinalGearBoost === undefined) {
 		ag.FinalGearBoost = 100000;
+	}
+
+	if (ag.DebugScore === undefined) {
+		ag.DebugScore = false;
+	}
+
+	if (ag.DebugMercEquip === undefined) {
+		ag.DebugMercEquip = false;
 	}
 
 	if (!ag.CharmCaps || typeof ag.CharmCaps !== "object") {
@@ -409,10 +512,13 @@
 		+ (build ? " (build=" + build + (build === "fire" && me.charlvl < 12 ? "+earlyFB" : "") + ")" : "")
 		+ (isCasterBuild()
 			? (" [caster Stealth+Lore" + (build === "fire" ? "+Leaf" : (build === "cold" || build === "light" ? "+SpiritBases" : "")) + "]")
-			: (build === "poisonstrike" ? " [PS Strength]" : (me.classid === 2 ? " [necro]" : " [melee Steel]"))));
+			: (build === "poisonstrike" ? " [PS Purity>Strength+Treachery]" : (me.classid === 2 ? " [necro]" : " [melee Steel]"))));
 	print("ÿc2AutoGearÿc0 :: PD2 knobs — ProtectRWBases=" + !!ag.ProtectRWBases
 		+ " CharmCaps=" + (caps && caps.Enabled ? "on" : "off")
 		+ " MidRW=" + !!ag.EnableMidRW
 		+ (midEnabled && midEnabled.length ? (" [" + midEnabled.join("+") + "]") : "")
-		+ " Secondary=" + !!ag.EnableSecondary);
+		+ " Secondary=" + !!ag.EnableSecondary
+		+ (me.classid === 1 ? (" Score=" + (typeof AutoGearScore !== "undefined" ? "on" : "off")
+			+ (ag.DebugScore ? "+debug" : "")) : "")
+		+ (ag.DebugMercEquip ? " MercEquip=debug" : ""));
 })();

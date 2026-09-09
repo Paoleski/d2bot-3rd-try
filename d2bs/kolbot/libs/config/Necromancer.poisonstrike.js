@@ -416,6 +416,7 @@ function LoadConfig() {
 	 * Keep lines follow pickit format and any given runeword is tested vs ALL lines so you don't need to repeat them
 	 */
 	Config.MakeRunewords = true; // leveling RW via AutoGear (Insight/Spirit stay commented)
+	Config.RunewordDebug = true; // Strength Amn+Tir / 2os spear diagnose (temp)
 
 	//Config.Runewords.push([Runeword.Insight, "Thresher", Roll.Eth]); // Make Insight Thresher
 	//Config.Runewords.push([Runeword.Insight, "Cryptic Axe", Roll.Eth]); // Make Insight Cryptic Axe
@@ -451,6 +452,7 @@ function LoadConfig() {
 	Config.MinGameTime = 60; // Min game time in seconds. Bot will TP to town and stay in game if the run is completed before.
 	Config.MaxGameTime = 0; // Maximum game time in seconds. Quit game when limit is reached.
 	Config.TeleSwitch = false; // Switch to slot II when teleporting more than 1 node.
+	Config.TeleDelay = -1; // -1 = progressive extra delay (Pather.getTeleDelay); >=0 = fixed ms override
 	Config.OpenChests = true; // Open chests while pathing / clearing (range ~20). Controls key buying.
 	Config.MiniShopBot = true; // Scan items in NPC shops.
 	Config.PacketShopping = false; // Use packets to shop. Improves shopping speed.
@@ -507,14 +509,14 @@ function LoadConfig() {
 	 */
 	/* Attack — PD2 Starter Poison Strike (wiki)
 	 * https://wiki.projectdiablo2.com/wiki/Starter_Poison_Strike_Necromancer
-	 * 73 Poison Strike, 83 Desecrate, 68 Bone Armor, 85 Blood Golem, 79 Golem Mastery, 367 Blood Warp
+	 * AttackSkill[5] = Desecrate when melee can't reach (towers / no valid spot).
 	 */
 	Config.AttackSkill[0] = -1;
 	Config.AttackSkill[1] = 73; // Poison Strike bosses
 	Config.AttackSkill[2] = -1; // no untimed companion — normal attack is LowMana only
 	Config.AttackSkill[3] = 73; // Poison Strike others
 	Config.AttackSkill[4] = -1;
-	Config.AttackSkill[5] = -1; // no Teeth fallback after PS
+	Config.AttackSkill[5] = 83; // Desecrate — ranged fallback when PS can't reach
 	Config.AttackSkill[6] = -1;
 
 	Config.LowManaSkill[0] = 0; // OOM → normal attack only
@@ -531,13 +533,13 @@ function LoadConfig() {
 	Config.TeleStomp = false;
 	Config.Wereform = false;
 
-	// Curses: Lower Resist bosses (apply BEFORE poison), Amplify packs
-	Config.Curse[0] = 91;
-	Config.Curse[1] = 66;
+	// Curses: bosses stay Decrepify; packs Amp → Decrep@24 → Lower Resist@30 (runtime in Attacks/Necromancer.js)
+	Config.Curse[0] = 87; // Boss / special — Decrepify (Amp before 24)
+	Config.Curse[1] = 91; // Packs — Lower Resist when learned (falls back Decrep → Amp)
 
-	Config.ExplodeCorpses = 0; // do NOT set 83 — that is Desecrate
+	Config.ExplodeCorpses = 0; // PS melee — no CE spam (74 is Desecrate prereq only)
 	Config.Golem = "Blood";
-	Config.MaxGolems = 1; // one golem — resummon only when dead (PD2 mastery can hold more)
+	Config.MaxGolems = 5; // PD2: Golem Mastery hard/5 (5→2 … 20→5)
 	Config.Skeletons = 0;
 	Config.SkeletonMages = 0;
 	Config.Revives = 0;
@@ -563,38 +565,46 @@ function LoadConfig() {
 			75: { tab: "summon", x: 641, y: 169 },  // Clay Golem
 			79: { tab: "summon", x: 573, y: 235 },  // Golem Mastery
 			85: { tab: "summon", x: 642, y: 303 },  // Blood Golem
-			367: { tab: "summon", x: 572, y: 370 }, // Blood Warp — F9 if miss
+			367: { tab: "summon", x: 571, y: 376 }, // Blood Warp (F9)
 			66: { tab: "curses", x: 642, y: 99 },   // Amplify Damage
-			91: { tab: "curses", x: 643, y: 441 },  // Lower Resist
+			82: { tab: "curses", x: 641, y: 234 },  // Life Tap (F9)
+			72: { tab: "curses", x: 641, y: 305 },  // Weaken (F9)
+			87: { tab: "curses", x: 572, y: 373 },  // Decrepify (F9)
+			91: { tab: "curses", x: 641, y: 439 },  // Lower Resist (F9)
 			67: { tab: "poison", x: 642, y: 99 },   // Teeth
 			73: { tab: "poison", x: 566, y: 100 },  // Poison Strike
 			68: { tab: "poison", x: 712, y: 172 },  // Bone Armor
-			83: { tab: "poison", x: 710, y: 200 }   // Desecrate — F9 if miss
+			74: { tab: "poison", x: 572, y: 170 },  // Corpse Explosion (F9)
+			83: { tab: "poison", x: 572, y: 236 }   // Desecrate (F9)
 		}
 	};
 
-	/* Wiki leveling:
-	 * Max Poison Strike first; at least 2 Blood Golems before synergies;
-	 * max Bone Armor + Desecrate; rest Blood Golem / Blood Warp;
-	 * 15+ Golem Mastery for 4 golems.
+	/* PS early → curse prereqs → Decrep@24 / LR@30 ASAP (satisfy) → finish PS → synergies →
+	 * Golem Mastery 5 (2 golems) → Blood Golem dump. Blood Golem = 1 early only.
+	 * Never put satisfy:true on BG/Warp before Decrep/LR — that blocked curses forever.
+	 * PD2 LR needs Amp+LifeTap+Weaken only (not Decrep).
 	 */
 	Config.AutoSkill.Build = [
-		[67, 1, true],     // Teeth (prereq)
-		[73, 1, true],     // Poison Strike
-		[68, 1, true],     // Bone Armor
-		[75, 1, true],     // Clay Golem
-		[85, 2, true],     // 2 Blood Golems early (tank while you stab)
-		[73, 20, false],   // MAX Poison Strike first
-		[79, 1, true],     // Golem Mastery
-		[83, 1, true],     // Desecrate (synergy + bodies)
-		[66, 1, false],    // Amplify Damage
-		[91, 1, false],    // Lower Resist (before poison on bosses)
-		[79, 15, false],   // Golem Mastery 15 → 4 golems
-		[83, 20, false],   // MAX Desecrate
-		[68, 20, false],   // MAX Bone Armor
-		[367, 1, true],    // Blood Warp
-		[85, 20, false],   // MAX Blood Golem
-		[367, 20, false]   // MAX Blood Warp
+		[67, 1, true],          // Teeth (prereq)
+		[73, 1, true],          // Poison Strike
+		[68, 1, true],          // Bone Armor
+		[75, 1, true],          // Clay Golem (Blood Golem / Warp / Mastery prereq)
+		[85, 1, false],         // Blood Golem — 1 only early (Warp prereq / summon)
+		[74, 1, false, 11],     // Corpse Explosion @11 (Desecrate prereq)
+		[83, 1, false, 12],     // Desecrate @12 — ranged when melee can't reach
+		[66, 1, false],         // Amplify Damage (packs + LR/Decrep prereq)
+		[82, 1, false, 12],     // Life Tap @12 (LR/Decrep prereq)
+		[72, 1, false, 18],     // Weaken @18 (LR/Decrep prereq)
+		[87, 1, true, 24],      // Decrepify ASAP @24 (bosses forever; packs until LR)
+		[91, 1, true, 30],      // Lower Resist ASAP @30 (packs)
+		[73, 20, false],        // MAX Poison Strike
+		[367, 1, false, 24],    // Blood Warp — 1 only while synergizing
+		[83, 20, false],        // MAX Desecrate (PS synergy)
+		[68, 20, false],        // MAX Bone Armor (PS synergy)
+		[79, 5, false],         // Golem Mastery 5 → 2 golems (PD2)
+		[85, 20, false],        // Blood Golem dump after synergies + Mastery 5
+		[79, 20, false],        // finish Golem Mastery
+		[367, 10, false]        // Blood Warp cap 10 (not 20)
 	];
 
 	Config.AutoStat.Enabled = true;

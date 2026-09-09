@@ -75,6 +75,66 @@ var Town = {
 
 	lastFullChores: 0,
 	forceNextChores: false, // set true for boss prep (Andy antidotes / Duriel thawing, etc.)
+	_mercWeaponBoughtDiff: null, // [norm, nm, hell] — shop Act2 spear once per difficulty
+
+	mercWeaponBoughtPath: function () {
+		return "data/mercWeaponBought." + me.profile + ".json";
+	},
+
+	loadMercWeaponBought: function () {
+		var raw, arr, i;
+
+		if (this._mercWeaponBoughtDiff && this._mercWeaponBoughtDiff.length === 3) {
+			return this._mercWeaponBoughtDiff;
+		}
+
+		arr = [false, false, false];
+
+		try {
+			if (FileTools.exists(this.mercWeaponBoughtPath())) {
+				raw = JSON.parse(Misc.fileAction(this.mercWeaponBoughtPath(), 0) || "[]");
+
+				if (raw && raw.length) {
+					for (i = 0; i < 3; i += 1) {
+						arr[i] = !!raw[i];
+					}
+				}
+			}
+		} catch (eLoad) {
+			arr = [false, false, false];
+		}
+
+		this._mercWeaponBoughtDiff = arr;
+
+		return arr;
+	},
+
+	hasBoughtMercWeaponThisDiff: function () {
+		return !!this.loadMercWeaponBought()[me.diff];
+	},
+
+	markMercWeaponBought: function () {
+		var arr = this.loadMercWeaponBought();
+
+		if (arr[me.diff]) {
+			return;
+		}
+
+		arr[me.diff] = true;
+		this._mercWeaponBoughtDiff = arr;
+
+		try {
+			Misc.fileAction(this.mercWeaponBoughtPath(), 1, JSON.stringify(arr));
+		} catch (eSave) {
+			try {
+				FileTools.writeText(this.mercWeaponBoughtPath(), JSON.stringify(arr));
+			} catch (eWrite) {
+				print("ÿc8Townÿc0 :: mercWeaponBought save failed: " + eWrite);
+			}
+		}
+
+		print("ÿc2Townÿc0 :: Act2 merc weapon shop done for diff " + me.diff);
+	},
 
 	// Gold needed before a potion top-up is worth a vendor walk (buyPotions bails below this anyway)
 	potionGoldMin: function () {
@@ -167,6 +227,11 @@ var Town = {
 				return true;
 			}
 
+			// Unid jewels still in stash — don't wait out the cooldown
+			if (this.hasUnidJewelsInStash && this.hasUnidJewelsInStash()) {
+				return true;
+			}
+
 			return false;
 		}
 
@@ -233,6 +298,11 @@ var Town = {
 			return true;
 		}
 
+		// Unid jewels parked in stash — pull → ID → keep or fragment
+		if (this.hasUnidJewelsInStash && this.hasUnidJewelsInStash()) {
+			return true;
+		}
+
 		items = Storage.Inventory.Compare(Config.Inventory);
 
 		for (i = 0; !!items && i < items.length; i += 1) {
@@ -267,9 +337,18 @@ var Town = {
 			return true;
 		}
 
-		if (Runeword.Spirit && me.charlvl >= 18 && Runewords.hasSpiritRecipe() &&
+		// Spirit sword — never for Poison Strike (daggers only)
+		if (!(typeof Item !== "undefined" && Item.isPoisonStrikeBuild && Item.isPoisonStrikeBuild()) &&
+				Runeword.Spirit && me.charlvl >= 18 && Runewords.hasSpiritRecipe() &&
 				!Runewords.hasCompletedSpiritSword() && !Runewords.hasEmptySpiritBase() &&
 				Runewords.haveRunes(Runeword.Spirit)) {
+			return true;
+		}
+
+		// Treachery — PS mid armor (Shael+Thul+Lem + 3os def>120)
+		if (Runeword.Treachery && me.charlvl >= 35 && Runewords.hasTreacheryRecipe &&
+				Runewords.hasTreacheryRecipe() && !Runewords.hasCompletedTreacheryArmor() &&
+				!Runewords.hasEmptyTreacheryBase() && Runewords.haveRunes(Runeword.Treachery)) {
 			return true;
 		}
 
@@ -284,6 +363,11 @@ var Town = {
 		}
 
 		if (this.rwBaseHuntActive()) {
+			return true;
+		}
+
+		// 1H (orb/Spirit) with empty offhand and no banked shield — hunt now
+		if (typeof Item !== "undefined" && Item.needsShieldShop && Item.needsShieldShop()) {
 			return true;
 		}
 
@@ -338,10 +422,21 @@ var Town = {
 		me.cancel();
 		delay(100 + me.ping);
 
-		// --- 1) Cain ID + local charm ID (inv scrolls only — no vendor) ---
+		// --- 1) Cain ID + local charm/jewel ID (inv scrolls only — no vendor) ---
 		print("ÿc2Townÿc0 :: chores step 1/4 — ID");
+
+		// Pull unid jewels out of stash so Cain / scrolls can ID them (keep good, fragment junk)
+		if (this.hasUnidJewelsInStash && this.hasUnidJewelsInStash()) {
+			if (this.openStash()) {
+				this.unstashUnidJewels();
+				me.cancel();
+				delay(100 + me.ping);
+			}
+		}
+
 		this._choresUsedCain = this.cainID();
 		this.identifyAllCharms(false); // false = do not open Shop to buy isc
+		this.identifyAllJewels(false);
 		me.cancel();
 		delay(150 + me.ping);
 
@@ -432,18 +527,17 @@ var Town = {
 		me.cancel();
 		delay(150 + me.ping);
 
-		// --- 3) Stash ONCE if needed (pots out + bank + gold + RW make in one open) ---
+		// --- 3) Stash ONCE: bank/promote → Cubing → junk jewels → stack → one cancel ---
 		print("ÿc2Townÿc0 :: chores step 3/4 — stash");
-		this.doStashVisit(true);
+		this.doStashVisit(true, true);
 
-		Cubing.doCubing();
+		Cubing.doCubing(true);
 
 		// PD2: junk magic/rare jewels + key → Jewel Fragments (after crafts get first dibs)
 		if (typeof Pd2Stack !== "undefined" && typeof Pd2Stack.cubeJunkJewelsAtStash === "function") {
 			if (Pd2Stack.needsCubeJunkJewels && Pd2Stack.needsCubeJunkJewels()) {
-				if (this.openStash()) {
+				if (getUIFlag(0x19) || this.openStash()) {
 					Pd2Stack.cubeJunkJewelsAtStash();
-					me.cancel();
 				}
 			}
 		}
@@ -451,11 +545,15 @@ var Town = {
 		// PD2: merge leftover loose runes/gems AFTER make (never fold socketables mid-RW)
 		if (typeof Pd2Stack !== "undefined" && typeof Pd2Stack.stackLooseAtStash === "function") {
 			if (Pd2Stack.needsStacking && Pd2Stack.needsStacking()) {
-				if (this.openStash()) {
+				if (getUIFlag(0x19) || this.openStash()) {
 					Pd2Stack.stackLooseAtStash();
-					me.cancel();
 				}
 			}
+		}
+
+		if (getUIFlag(0x1a) || getUIFlag(0x19)) {
+			me.cancel();
+			delay(100 + me.ping);
 		}
 
 		Item.autoEquip();
@@ -725,6 +823,102 @@ var Town = {
 
 		if (n) {
 			print("ÿc2Townÿc0 :: identified " + n + " charm(s)");
+		}
+
+		return true;
+	},
+
+	// ID unid jewels in inventory (after unstashUnidJewels / Cain). Good → stash later; junk → jewf.
+	identifyAllJewels: function (allowShopBuy) {
+		var item, tome, scroll, npc, gids = [], i, gid, unit, n = 0;
+
+		if (allowShopBuy === undefined) {
+			allowShopBuy = true;
+		}
+
+		if (typeof Pickit === "undefined" || typeof Pickit.isJewel !== "function") {
+			return true;
+		}
+
+		item = me.getItem(-1, 0);
+
+		if (item) {
+			do {
+				if (item.location === 3 && Pickit.isJewel(item) && !item.getFlag(0x10)) {
+					gids.push(item.gid);
+				}
+			} while (item.getNext());
+		}
+
+		if (!gids.length) {
+			return true;
+		}
+
+		print("ÿc2Townÿc0 :: ID " + gids.length + " unid jewel(s) (keep good / fragment junk)");
+
+		for (i = 0; i < gids.length; i += 1) {
+			gid = gids[i];
+			unit = me.getItem(-1, -1, gid);
+
+			if (!unit || unit.location !== 3 || unit.getFlag(0x10)) {
+				continue;
+			}
+
+			tome = this.findIdTome();
+
+			if (tome) {
+				this.identifyItem(unit, tome);
+				n += 1;
+				delay(me.ping + 50);
+				continue;
+			}
+
+			scroll = this.findIdScroll();
+
+			if (scroll) {
+				this.identifyItem(unit, scroll);
+				n += 1;
+				delay(me.ping + 50);
+				continue;
+			}
+
+			if (!allowShopBuy) {
+				continue;
+			}
+
+			if (!npc) {
+				npc = this.initNPC("Shop", "idJewels");
+			}
+
+			if (!npc) {
+				break;
+			}
+
+			scroll = this.getShopItem(npc, "isc",
+				(typeof NTIPAliasClassID !== "undefined" && NTIPAliasClassID.isc) ? [NTIPAliasClassID.isc] : [547]);
+
+			if (scroll && me.getStat(14) + me.getStat(15) >= (scroll.getItemCost(0) || 100)) {
+				try {
+					scroll.buy();
+				} catch (eBuy) {
+					break;
+				}
+
+				scroll = this.findIdScroll();
+
+				if (scroll) {
+					this.identifyItem(unit, scroll);
+					n += 1;
+					delay(me.ping + 50);
+				}
+			} else {
+				print("ÿc8Townÿc0 :: unid jewel — no ID scroll/tome and can't buy yet");
+				break;
+			}
+		}
+
+		if (n) {
+			print("ÿc2Townÿc0 :: identified " + n + " jewel(s)");
 		}
 
 		return true;
@@ -1290,16 +1484,47 @@ var Town = {
 		return n;
 	},
 
+	// One walk: belt empty slots + inv pot counts (buyPotions / need checks)
+	potionSnapshot: function () {
+		var beltSize, col, inv = {hp: 0, mp: 0, rv: 0, vps: 0}, item, kind;
+
+		beltSize = Storage.BeltSize();
+		col = this.checkColumns(beltSize);
+		item = me.getItem(-1, 0);
+
+		if (item) {
+			do {
+				if (item.location !== 3) {
+					continue;
+				}
+
+				kind = this.potionKind(item);
+
+				if (kind && inv[kind] !== undefined) {
+					inv[kind] += 1;
+				}
+			} while (item.getNext());
+		}
+
+		return {beltSize: beltSize, col: col, inv: inv};
+	},
+
 	// Empty belt slots configured for this pot type (hp/mp/rv)
-	beltEmptyFor: function (type) {
+	// Optional snap from potionSnapshot() avoids re-walking belt
+	beltEmptyFor: function (type, snap) {
 		var i, beltSize, col, need = 0;
 
 		if (type !== "hp" && type !== "mp" && type !== "rv") {
 			return 0;
 		}
 
-		beltSize = Storage.BeltSize();
-		col = this.checkColumns(beltSize);
+		if (snap) {
+			beltSize = snap.beltSize;
+			col = snap.col;
+		} else {
+			beltSize = Storage.BeltSize();
+			col = this.checkColumns(beltSize);
+		}
 
 		for (i = 0; i < 4; i += 1) {
 			if (Config.BeltColumn[i] === type && col[i] > 0) {
@@ -1312,9 +1537,11 @@ var Town = {
 
 	// Keep inv ≤ buffer + empty belt slots of that type (shop buys often land in inv first).
 	// HPBuffer=0 must NOT sell HP still needed to fill the belt.
+	// Drink excess inv pots above buffer — never sell potions (frees space without a vendor).
+	// Does not cancel/reopen shop (safe mid-chores vendor pass).
 	cullExcessPotions: function () {
 		var kind, kinds = ["hp", "mp", "rv", "vps"], list = {hp: [], mp: [], rv: [], vps: []},
-			item, i, k, buf, keep, excess, sold = 0, drunk = 0, shopOk, needSell = false;
+			item, i, k, buf, keep, excess, drunk = 0, needCull = false;
 
 		item = me.getItem(-1, -1);
 
@@ -1332,7 +1559,6 @@ var Town = {
 			} while (item.getNext());
 		}
 
-		// Decide if anything is over keep (buffer + belt holes) BEFORE opening a vendor
 		for (k = 0; k < kinds.length; k += 1) {
 			kind = kinds[k];
 			buf = kind === "hp" ? (Config.HPBuffer || 0) :
@@ -1342,16 +1568,14 @@ var Town = {
 			keep = buf + ((kind === "hp" || kind === "mp" || kind === "rv") ? this.beltEmptyFor(kind) : 0);
 
 			if (list[kind].length > keep) {
-				needSell = true;
+				needCull = true;
 				break;
 			}
 		}
 
-		if (!needSell) {
+		if (!needCull) {
 			return 0;
 		}
-
-		shopOk = this.isShopOpen() || this.ensureShopOpen("cullPots");
 
 		for (k = 0; k < kinds.length; k += 1) {
 			kind = kinds[k];
@@ -1374,15 +1598,6 @@ var Town = {
 					continue;
 				}
 
-				if (shopOk) {
-					try {
-						item.sell();
-						sold += 1;
-						delay(40 + me.ping);
-						continue;
-					} catch (eSell) {}
-				}
-
 				try {
 					item.interact();
 					drunk += 1;
@@ -1391,7 +1606,11 @@ var Town = {
 			}
 		}
 
-		return sold + drunk;
+		if (drunk) {
+			print("ÿc2Townÿc0 :: drank " + drunk + " excess potion(s)");
+		}
+
+		return drunk;
 	},
 
 	// Mana buffer: FIXED top-right 2×4 (cols 6–9, rows 0–1).
@@ -2246,6 +2465,17 @@ var Town = {
 
 			item = me.getItem(-1, -1, gid);
 
+			// Fragmented charm zone: shuffle parked charms within bottom 4 to free a contiguous spot
+			if (item && !spot && Config.ReorganizeInventory !== false) {
+				print("ÿc2Townÿc0 :: Reorganizing charm zone for " + (charms[i].name || "charm"));
+
+				if (Storage.Inventory.MakeRoom(item, 8, {minRow: 4, maxRow: 7})) {
+					spot = this.findCharmSpot(item);
+				}
+
+				item = me.getItem(-1, -1, gid);
+			}
+
 			if (!item || !spot) {
 				print("ÿc8Townÿc0 :: No room in charm zone for " + (charms[i].name || "charm"));
 				continue;
@@ -2602,12 +2832,12 @@ var Town = {
 			return false;
 		}
 
-		var i, j, npc, col, beltSize, pot, stamBuffer,
+		var i, j, npc, col, beltSize, pot, stamBuffer, snap,
 			needPots = false,
 			needBuffer = false,
 			needStamina = false,
 			buffer = {hp: 0, mp: 0, vps: 0},
-			beforeEmpty, afterEmpty, wantHp, wantMp, hpBuf, mpBuf;
+			beforeEmpty, wantHp, wantMp, hpBuf, mpBuf;
 
 		// Belt cursor moves need shop closed — doChores preps belt before opening trade
 		if (!shopAlreadyOpen) {
@@ -2623,27 +2853,16 @@ var Town = {
 		stamBuffer = (Config.StaminaUntilLevel && me.charlvl < Config.StaminaUntilLevel) ? (Config.StaminaBuffer || 0) : 0;
 		hpBuf = Config.HPBuffer || 0;
 		mpBuf = Config.MPBuffer || 0;
-		beltSize = Storage.BeltSize();
-		col = this.checkColumns(beltSize);
 
-		buffer.hp = (typeof Misc.countPotions === "function") ? Misc.countPotions("hp", "inv") : 0;
-		buffer.mp = (typeof Misc.countPotions === "function") ? Misc.countPotions("mp", "inv") : 0;
-		buffer.vps = 0;
+		snap = this.potionSnapshot();
+		beltSize = snap.beltSize;
+		col = snap.col;
+		buffer.hp = snap.inv.hp;
+		buffer.mp = snap.inv.mp;
+		buffer.vps = snap.inv.vps;
 
-		if (stamBuffer > 0) {
-			pot = me.getItem(-1, 0);
-
-			if (pot) {
-				do {
-					if (pot.location === 3 && (String(pot.code || "").toLowerCase() === "vps" || pot.itemType === 79)) {
-						buffer.vps += 1;
-					}
-				} while (pot.getNext());
-			}
-		}
-
-		wantHp = this.potionNeedCount("hp");
-		wantMp = this.potionNeedCount("mp");
+		wantHp = this.potionNeedCount("hp", snap);
+		wantMp = this.potionNeedCount("mp", snap);
 
 		if (wantHp <= 0 && wantMp <= 0 && buffer.vps >= stamBuffer) {
 			this.cullExcessPotions();
@@ -2689,11 +2908,15 @@ var Town = {
 
 		// Belt fill — shift-buy only when every empty slot is for this type.
 		// Full empty belt (hp+mp columns): shift HP would flood mana columns too.
-		col = this.checkColumns(beltSize);
+		snap = this.potionSnapshot();
+		beltSize = snap.beltSize;
+		col = snap.col;
+		buffer.hp = snap.inv.hp;
+		buffer.mp = snap.inv.mp;
 
 		for (i = 0; i < 2; i += 1) {
 			wantHp = (i === 0) ? "hp" : "mp";
-			beforeEmpty = this.beltEmptyFor(wantHp);
+			beforeEmpty = this.beltEmptyFor(wantHp, snap);
 
 			if (beforeEmpty <= 0) {
 				continue;
@@ -2774,14 +2997,18 @@ var Town = {
 				}
 			}
 
-			col = this.checkColumns(beltSize);
-			buffer.mp = Misc.countPotions("mp", "inv");
-			buffer.hp = Misc.countPotions("hp", "inv");
+			// Refresh once per type after buys (not after every single pot)
+			snap = this.potionSnapshot();
+			beltSize = snap.beltSize;
+			col = snap.col;
+			buffer.hp = snap.inv.hp;
+			buffer.mp = snap.inv.mp;
 		}
 
 		// Inv buffer only — never more than Config.*Buffer
-		buffer.hp = Misc.countPotions("hp", "inv");
-		buffer.mp = Misc.countPotions("mp", "inv");
+		snap = this.potionSnapshot();
+		buffer.hp = snap.inv.hp;
+		buffer.mp = snap.inv.mp;
 
 		if (hpBuf > buffer.hp) {
 			for (i = 0; i < hpBuf - buffer.hp; i += 1) {
@@ -2796,7 +3023,8 @@ var Town = {
 			}
 		}
 
-		buffer.mp = Misc.countPotions("mp", "inv");
+		snap = this.potionSnapshot();
+		buffer.mp = snap.inv.mp;
 
 		if (mpBuf > buffer.mp) {
 			for (i = 0; i < mpBuf - buffer.mp; i += 1) {
@@ -2947,15 +3175,23 @@ var Town = {
 	},
 
 	// How many pots of type we still want (belt columns + inv buffer). Stash does not count.
-	potionNeedCount: function (type) {
+	// Optional snap from potionSnapshot()
+	potionNeedCount: function (type, snap) {
 		var i, beltSize, col, need = 0, inv, buf;
 
 		if (type !== "hp" && type !== "mp") {
 			return 0;
 		}
 
-		beltSize = Storage.BeltSize();
-		col = this.checkColumns(beltSize);
+		if (snap) {
+			beltSize = snap.beltSize;
+			col = snap.col;
+			inv = snap.inv[type] || 0;
+		} else {
+			beltSize = Storage.BeltSize();
+			col = this.checkColumns(beltSize);
+			inv = (typeof Misc.countPotions === "function") ? Misc.countPotions(type, "inv") : 0;
+		}
 
 		for (i = 0; i < 4; i += 1) {
 			if (Config.BeltColumn[i] === type && col[i] > 0) {
@@ -2963,7 +3199,6 @@ var Town = {
 			}
 		}
 
-		inv = (typeof Misc.countPotions === "function") ? Misc.countPotions(type, "inv") : 0;
 		buf = type === "hp" ? (Config.HPBuffer || 0) : (Config.MPBuffer || 0);
 
 		if (inv < buf) {
@@ -3315,9 +3550,68 @@ var Town = {
 		return hit;
 	},
 
+	// PD2 findItem("tbk") can return a wrong unit — always verify .code (same as Pather.makePortal)
+	findBook: function (tomeCode) {
+		var tome, item, code, alts, i;
+
+		code = String(tomeCode || "").toLowerCase();
+
+		if (code !== "tbk" && code !== "ibk") {
+			return false;
+		}
+
+		alts = code === "tbk" ? [535, 518] : [536, 519];
+		tome = me.findItem(code, 0, 3);
+
+		if (tome && String(tome.code || "").toLowerCase() !== code) {
+			tome = false;
+		}
+
+		for (i = 0; !tome && i < alts.length; i += 1) {
+			tome = me.findItem(alts[i], 0, 3);
+
+			if (tome && String(tome.code || "").toLowerCase() !== code) {
+				tome = false;
+			}
+		}
+
+		if (tome) {
+			return tome;
+		}
+
+		item = me.getItem(-1, 0);
+
+		if (item) {
+			do {
+				if (item.location === 3 && String(item.code || "").toLowerCase() === code) {
+					return copyUnit(item);
+				}
+			} while (item.getNext());
+		}
+
+		return false;
+	},
+
+	countLooseScrolls: function (scrollCode) {
+		var scroll, n = 0;
+
+		scrollCode = scrollCode ? String(scrollCode).toLowerCase() : "";
+		scroll = me.getItem(-1, 0);
+
+		if (scroll) {
+			do {
+				if (scroll.location === 3 && String(scroll.code || "").toLowerCase() === scrollCode) {
+					n += 1;
+				}
+			} while (scroll.getNext());
+		}
+
+		return n;
+	},
+
 	// Same thresholds fillTome() uses — true when the tome is missing or below its keep level
 	tomeNeedsFill: function (tomeCode) {
-		var keepMin;
+		var keepMin, tome;
 
 		if (tomeCode === "tbk") {
 			keepMin = me.charlvl >= 30 ? 80 : 20;
@@ -3327,11 +3621,13 @@ var Town = {
 			return false;
 		}
 
-		if (!me.findItem(tomeCode, 0, 3)) {
+		tome = this.findBook(tomeCode);
+
+		if (!tome) {
 			return true;
 		}
 
-		return this.checkScrolls(tomeCode) < keepMin;
+		return (tome.getStat(70) || 0) < keepMin;
 	},
 
 	fillTome: function (code, shopAlreadyOpen) {
@@ -3340,7 +3636,7 @@ var Town = {
 		}
 
 		// PD2 classids shifted — use item codes (tbk/ibk/tsc/isc); accept legacy LoD numeric ids too
-		var scroll, tome, tomeCode, scrollCode, npc, cur, want, keepMin, i, cost;
+		var scroll, tome, tomeCode, scrollCode, npc, cur, want, i, cost, before, looseBefore;
 
 		if (code === 518 || code === 533 || code === "tbk") {
 			tomeCode = "tbk";
@@ -3352,17 +3648,13 @@ var Town = {
 			return false;
 		}
 
-		// TP: early game 20 scrolls (save gold); lvl 30+ fill/buy stack to 80
+		// TP: early game 20 scrolls (save gold); lvl 30+ fill to PD2 tome cap 80
 		// ID tome: always keep ~20
 		if (tomeCode === "tbk") {
 			want = me.charlvl >= 30 ? 80 : 20;
-			keepMin = want; // top up whenever below target
 		} else {
 			want = 20;
-			keepMin = 13;
 		}
-
-		cur = this.checkScrolls(tomeCode);
 
 		if (!this.tomeNeedsFill(tomeCode)) {
 			return true;
@@ -3394,7 +3686,9 @@ var Town = {
 			return false;
 		}
 
-		if (!me.findItem(tomeCode, 0, 3)) {
+		tome = this.findBook(tomeCode);
+
+		if (!tome) {
 			tome = this.getShopItem(npc, tomeCode, tomeCode === "tbk" ? [535, 518] : [536, 519]);
 
 			if (!tome) {
@@ -3424,9 +3718,17 @@ var Town = {
 				print("ÿc1Townÿc0 :: Cannot buy " + tomeCode + " (no inventory space)");
 				return false;
 			}
+
+			tome = this.findBook(tomeCode);
 		}
 
-		cur = this.checkScrolls(tomeCode);
+		// Never buy scrolls without a real tome — they dump into inventory as loose tsc/isc
+		if (!tome) {
+			print("ÿc8Townÿc0 :: no " + tomeCode + " in inventory — skip " + scrollCode + " buy");
+			return false;
+		}
+
+		cur = tome.getStat(70) || 0;
 
 		if (cur >= want) {
 			return true;
@@ -3460,7 +3762,14 @@ var Town = {
 			// Shift-buy fills the tome from the vendor in one action (shop mode 6).
 			// Under 30 we only want `want` scrolls — buy that many clicks without closing shop.
 			if (tomeCode === "tbk" && me.charlvl < 30) {
-				for (i = 0; i < 40 && this.checkScrolls(tomeCode) < want; i += 1) {
+				for (i = 0; i < 40; i += 1) {
+					tome = this.findBook(tomeCode);
+					cur = tome ? (tome.getStat(70) || 0) : 0;
+
+					if (cur >= want) {
+						break;
+					}
+
 					scroll = this.getShopItem(npc, scrollCode, [546, 529]);
 
 					if (!scroll) {
@@ -3487,6 +3796,9 @@ var Town = {
 						break;
 					}
 
+					before = cur;
+					looseBefore = this.countLooseScrolls(scrollCode);
+
 					try {
 						scroll.buy();
 					} catch (eBuy) {
@@ -3495,10 +3807,22 @@ var Town = {
 						break;
 					}
 
-					delay(Math.max(30, me.ping));
+					delay(Math.max(80, me.ping * 2));
+					tome = this.findBook(tomeCode);
+					cur = tome ? (tome.getStat(70) || 0) : 0;
+
+					// Buy landed in inventory instead of tome — stop or we stack loose scrolls
+					if (cur <= before) {
+						if (this.countLooseScrolls(scrollCode) > looseBefore) {
+							print("ÿc8Townÿc0 :: TP scroll went to inventory — stop buying");
+						}
+
+						break;
+					}
 				}
 
-				print("ÿc2Townÿc0 :: TP scrolls " + this.checkScrolls(tomeCode) + "/" + want + " (cap until lvl 30)");
+				tome = this.findBook(tomeCode);
+				print("ÿc2Townÿc0 :: TP scrolls " + (tome ? (tome.getStat(70) || 0) : 0) + "/" + want + " (cap until lvl 30)");
 			} else {
 				if (me.gold < cost) {
 					print("ÿc8Townÿc0 :: cannot afford " + scrollCode + " stack");
@@ -3506,9 +3830,20 @@ var Town = {
 					return false;
 				}
 
-				scroll.buy(true); // lvl 30+ (or ID tome): fill / buy full stack
-				delay(me.ping + 100);
+				looseBefore = this.countLooseScrolls(scrollCode);
+				before = cur;
+				scroll.buy(true); // lvl 30+ (or ID tome): fill tome from vendor
+				delay(me.ping * 2 + 150);
 				this.dismissShopError();
+
+				tome = this.findBook(tomeCode);
+				cur = tome ? (tome.getStat(70) || 0) : 0;
+
+				if (cur <= before && this.countLooseScrolls(scrollCode) > looseBefore) {
+					print("ÿc8Townÿc0 :: " + scrollCode + " shift-buy spilled to inventory — not into tome");
+				} else if (tomeCode === "tbk") {
+					print("ÿc2Townÿc0 :: TP scrolls " + cur + "/" + want);
+				}
 			}
 		} catch (e2) {
 			print(e2.message);
@@ -3522,45 +3857,50 @@ var Town = {
 	},
 
 	checkScrolls: function (id) {
-		var tome = me.findItem(id, 0, 3);
+		var tomeCode, tome;
 
-		if (!tome) {
-			switch (id) {
-			case 519:
-			case 534:
-			case "ibk":
-				return Config.FieldID ? 0 : 20;
-			case 518:
-			case 533:
-			case "tbk":
-				return 0; // Force TP tome check
-			}
+		switch (id) {
+		case 519:
+		case 534:
+		case "ibk":
+			tomeCode = "ibk";
+			break;
+		case 518:
+		case 533:
+		case "tbk":
+			tomeCode = "tbk";
+			break;
+		default:
+			tomeCode = String(id || "").toLowerCase();
 		}
 
-		return tome.getStat(70);
+		tome = this.findBook(tomeCode);
+
+		if (!tome) {
+			// Missing ID tome: pretend full so we don't shop-spam when FieldID is off
+			if (tomeCode === "ibk") {
+				return Config.FieldID ? 0 : 20;
+			}
+
+			return 0;
+		}
+
+		return tome.getStat(70) || 0;
 	},
 
 	// Real scroll count for logs — never the fake 20 from checkScrolls when no ID tome
 	scrollFillCount: function (scrollCode) {
-		var tomeCode, tome, scroll, n = 0;
+		var tomeCode, tome, n;
 
 		scrollCode = scrollCode ? String(scrollCode).toLowerCase() : "";
 		tomeCode = (scrollCode === "tsc") ? "tbk" : "ibk";
-		tome = me.findItem(tomeCode, 0, 3);
+		tome = this.findBook(tomeCode);
 
 		if (tome) {
 			return tome.getStat(70) || 0;
 		}
 
-		scroll = me.findItem(scrollCode, 0, 3);
-
-		if (scroll) {
-			do {
-				if (scroll.location === 3) {
-					n += 1;
-				}
-			} while (scroll.getNext());
-		}
+		n = this.countLooseScrolls(scrollCode);
 
 		return n;
 	},
@@ -3593,6 +3933,12 @@ var Town = {
 				// Magic/rare rings & amulets — always ID (keep/sell/equip needs stats)
 				if ((list[i].itemType === 10 || list[i].itemType === 12) &&
 						(list[i].quality === 4 || list[i].quality === 6)) {
+					return true;
+				}
+
+				// Jewels — always ID (wanted keep vs junk → fragments)
+				if (typeof Pickit !== "undefined" && typeof Pickit.isJewel === "function" &&
+						Pickit.isJewel(list[i])) {
 					return true;
 				}
 
@@ -3740,6 +4086,12 @@ MainLoop:
 				// Unid magic/rare rings & amulets — always ID (never keep/sell blind)
 				if (!item.getFlag(0x10) && (item.itemType === 10 || item.itemType === 12) &&
 						(item.quality === 4 || item.quality === 6)) {
+					result.result = -1;
+				}
+
+				// Unid jewels — always ID (wanted keep vs junk → fragments)
+				if (!item.getFlag(0x10) && typeof Pickit !== "undefined" && typeof Pickit.isJewel === "function" &&
+						Pickit.isJewel(item)) {
 					result.result = -1;
 				}
 
@@ -4090,6 +4442,11 @@ MainLoop:
 			return false;
 		}
 
+		// Poison Strike = daggers only — never hunt Spirit swords
+		if (typeof Item !== "undefined" && Item.isPoisonStrikeBuild && Item.isPoisonStrikeBuild()) {
+			return false;
+		}
+
 		if (typeof Runewords === "undefined" || typeof Runeword === "undefined" || !Runeword.Spirit) {
 			return false;
 		}
@@ -4166,7 +4523,11 @@ MainLoop:
 			});
 
 			print("ÿc2Townÿc0 :: Equipping inventory dagger for Poison Strike");
-			Item.equip(list[0], 4);
+			Item.equip(list[0], 4, {
+				why: "poison strike dagger",
+				reason: "need dagger equipped for Poison Strike",
+				tier: NTIP.GetTier(list[0]) || 0
+			});
 			Item.autoEquip();
 
 			return this.hasEquippedDagger();
@@ -4271,7 +4632,10 @@ MainLoop:
 		if (item) {
 			do {
 				if (item.location === 3 && item.itemType === 32 && Item.canEquip(item)) {
-					Item.equip(item, 4);
+					Item.equip(item, 4, {
+						why: "poison strike dagger",
+						reason: "need dagger equipped for Poison Strike"
+					});
 
 					return true;
 				}
@@ -4281,10 +4645,8 @@ MainLoop:
 		return false;
 	},
 
-	// Act2 desert merc needs spear/polearm/javelin — empty or white starter
+	// Act2 desert merc — Fara shop spear once per difficulty (flag in data/mercWeaponBought.<profile>.json)
 	needMercWeapon: function () {
-		var eq;
-
 		if (!Config.UseMerc || !Config.AutoEquipMerc) {
 			return false;
 		}
@@ -4293,31 +4655,21 @@ MainLoop:
 			return false;
 		}
 
-		eq = Item.getMercItem(4);
-
-		if (!eq.item) {
-			return true;
-		}
-
-		// White / inferior starter — shop usually has magic+
-		return (eq.item.quality || 0) <= 2;
+		return !this.hasBoughtMercWeaponThisDiff();
 	},
 
-	// Act2 desert merc spear from Fara. Inventory equip: any act.
-	// Fara shop-scan: ONLY while already in Act2 AND this chore pass already needs heal or repair
-	// (Fara is Heal+Repair there). Never change acts for this. force = Act2 hire path (already in Lut).
+	// Act2 desert merc spear from Fara. Inventory equip: any act (always).
+	// Fara shop-scan: once per difficulty, ONLY while already in Act2 AND this chore pass
+	// already needs heal or repair (Fara is Heal+Repair there). Never change acts for this.
+	// force = Act2 hire path (already in Lut) — still only one shop mark per diff.
 	buyMercWeapon: function (force) {
-		var npc, item, cand, best, cost, gold, i, eq, list = [], invBest = null;
+		var npc, item, cand, best, cost, gold, i, eq, list = [], invBest = null, reason;
 
 		if (!Config.UseMerc || !Config.AutoEquipMerc) {
 			return true;
 		}
 
 		if (typeof Item === "undefined" || typeof Item.isDesertMerc !== "function" || !Item.isDesertMerc()) {
-			return true;
-		}
-
-		if (!force && !this.needMercWeapon()) {
 			return true;
 		}
 
@@ -4338,6 +4690,13 @@ MainLoop:
 				}
 
 				if (!Item.canMercEquip(item)) {
+					reason = Item.canMercEquipReason(item);
+
+					if (reason && !Item._mercFailLogged[item.gid]) {
+						Item._mercFailLogged[item.gid] = true;
+						Item.mercEquipLog(item, 4, "SKIP", reason);
+					}
+
 					continue;
 				}
 
@@ -4355,15 +4714,11 @@ MainLoop:
 			print("ÿc2Townÿc0 :: Equipping inv merc weapon: " + (invBest.name || "?"));
 			Item.equipMerc(invBest, 4);
 			Item.autoEquipMerc(true);
-
-			if (!force && !this.needMercWeapon()) {
-				return true;
-			}
-
 			eq = Item.getMercItem(4);
 		}
 
-		if (!force && !this.needMercWeapon()) {
+		// Shop at most once per difficulty
+		if (this.hasBoughtMercWeaponThisDiff()) {
 			return true;
 		}
 
@@ -4457,7 +4812,14 @@ MainLoop:
 			print("ÿc8Townÿc0 :: No better affordable merc weapon in shop");
 			me.cancel();
 
-			return !this.needMercWeapon();
+			// Armed already and nothing better — count as the once-per-diff shop pass
+			if (eq.item) {
+				this.markMercWeaponBought();
+
+				return true;
+			}
+
+			return false;
 		}
 
 		try {
@@ -4477,6 +4839,7 @@ MainLoop:
 
 		if (eq.item) {
 			print("ÿc2Townÿc0 :: Act2 merc armed: " + (eq.item.name || "?"));
+			this.markMercWeaponBought();
 
 			return true;
 		}
@@ -4549,6 +4912,8 @@ CursorLoop:
 		var i, item, result, buy, stealthHunt, stealthFound, stealthBought, stealthBuy,
 			loreHunt, loreFound, loreBought, loreBuy,
 			spiritHunt, spiritFound, spiritBought, spiritBuy,
+			treacheryHunt, treacheryFound, treacheryBought, treacheryBuy,
+			shieldHunt, shieldFound, shieldBought, shieldBuy, shieldBest,
 			items = [],
 			equipBest = {}, // bodyLoc → {unit, tier, def, line}
 			loc, locs, tier, def, key, entry, boughtName,
@@ -4575,6 +4940,13 @@ CursorLoop:
 		spiritHunt = false;
 		spiritFound = false;
 		spiritBought = false;
+		treacheryHunt = false;
+		treacheryFound = false;
+		treacheryBought = false;
+		shieldHunt = false;
+		shieldFound = false;
+		shieldBought = false;
+		shieldBest = null;
 
 		// Notify when Tal+Eth are ready and we still need a Stealth base
 		if (typeof Runewords !== "undefined" && typeof Runeword !== "undefined" && Runeword.Stealth &&
@@ -4597,8 +4969,9 @@ CursorLoop:
 			print("ÿc4MiniShopBotÿc0: Searching for 2-socket helm for Lore (best def; Ort+Sol ready)");
 		}
 
-		// Spirit — Tal+Thul+Ort+Amn ready, need empty 4os Crystal/Broad/Long
-		if (typeof Runewords !== "undefined" && typeof Runeword !== "undefined" && Runeword.Spirit &&
+		// Spirit — Tal+Thul+Ort+Amn ready, need empty 4os Crystal/Broad/Long (not PS necro)
+		if (!(typeof Item !== "undefined" && Item.isPoisonStrikeBuild && Item.isPoisonStrikeBuild()) &&
+				typeof Runewords !== "undefined" && typeof Runeword !== "undefined" && Runeword.Spirit &&
 				typeof Runewords.hasSpiritRecipe === "function" && Runewords.hasSpiritRecipe() &&
 				typeof Runewords.haveRunes === "function" && Runewords.haveRunes(Runeword.Spirit) &&
 				typeof Runewords.hasCompletedSpiritSword === "function" && !Runewords.hasCompletedSpiritSword() &&
@@ -4606,6 +4979,22 @@ CursorLoop:
 				me.charlvl >= 18) {
 			spiritHunt = true;
 			print("ÿc4MiniShopBotÿc0: Searching for 4-socket sword for Spirit (Tal+Thul+Ort+Amn in inv/stash)");
+		}
+
+		// Treachery — Shael+Thul+Lem ready, need 3os armor def>120 (PS mid)
+		if (typeof Runewords !== "undefined" && typeof Runeword !== "undefined" && Runeword.Treachery &&
+				typeof Runewords.hasTreacheryRecipe === "function" && Runewords.hasTreacheryRecipe() &&
+				typeof Runewords.haveRunes === "function" && Runewords.haveRunes(Runeword.Treachery) &&
+				typeof Runewords.hasCompletedTreacheryArmor === "function" && !Runewords.hasCompletedTreacheryArmor() &&
+				me.charlvl >= 35) {
+			treacheryHunt = true;
+			print("ÿc4MiniShopBotÿc0: Searching for 3-socket armor def>120 for Treachery (Shael+Thul+Lem ready)");
+		}
+
+		// 1H equipped, empty offhand, no banked/memory shield — fill offhand from shop
+		if (typeof Item !== "undefined" && Item.needsShieldShop && Item.needsShieldShop()) {
+			shieldHunt = true;
+			print("ÿc4MiniShopBotÿc0: Searching for shield (1H equipped, empty offhand)");
 		}
 
 		do {
@@ -4620,8 +5009,10 @@ CursorLoop:
 			stealthBuy = false;
 			loreBuy = false;
 			spiritBuy = false;
+			treacheryBuy = false;
+			shieldBuy = false;
 
-			// Stealth / Lore / Spirit RW bases — not gated on worthShopBuy/autoequip
+			// Stealth / Lore / Spirit / Treachery RW bases — not gated on worthShopBuy/autoequip
 			if (typeof Runewords !== "undefined") {
 				if (typeof Runewords.wantStealthShopBase === "function" && Runewords.wantStealthShopBase(items[i])) {
 					buy = true;
@@ -4635,6 +5026,29 @@ CursorLoop:
 					buy = true;
 					spiritFound = true;
 					spiritBuy = true;
+				} else if (typeof Runewords.wantTreacheryShopBase === "function" && Runewords.wantTreacheryShopBase(items[i])) {
+					buy = true;
+					treacheryFound = true;
+					treacheryBuy = true;
+				}
+			}
+
+			// Offhand fill — track best canEquip shield even when nip tier is 0 (plain kite)
+			if (!buy && shieldHunt && typeof Item.isShieldItem === "function" && Item.isShieldItem(items[i]) &&
+					!(me.classid !== 3 && Item.isAuricShield && Item.isAuricShield(items[i])) &&
+					Item.canEquip(items[i]) && !Item.isBroken(items[i])) {
+				tier = NTIP.GetTier(items[i]) || 0;
+				def = items[i].getStat(31) || 0;
+
+				if (typeof items[i].getStatEx === "function") {
+					def = Math.max(def, items[i].getStatEx(31) || 0);
+				}
+
+				shieldFound = true;
+
+				if (!shieldBest || tier > shieldBest.tier ||
+						(tier === shieldBest.tier && def > shieldBest.def)) {
+					shieldBest = { unit: items[i], tier: tier, def: def };
 				}
 			}
 
@@ -4687,6 +5101,10 @@ CursorLoop:
 						if (spiritBuy) {
 							spiritBought = true;
 						}
+
+						if (treacheryBuy) {
+							treacheryBought = true;
+						}
 					}
 				} catch (e) {
 					print(e);
@@ -4730,6 +5148,29 @@ CursorLoop:
 			delay(2);
 		}
 
+		// Empty-offhand fill — buy best tracked shield when autoequip path skipped it (tier 0 kite)
+		if (shieldHunt && shieldBest && shieldBest.unit && !(equipBest[5] || equipBest["5"])) {
+			item = shieldBest.unit;
+
+			try {
+				if (Storage.Inventory.CanFit(item) && me.getStat(14) + me.getStat(15) >= item.getItemCost(0)) {
+					boughtName = (item.name || item.classid || "?").toString().replace(/ÿc[0-9a-z]/gi, "").split("\n")[0];
+					Misc.itemLogger("Shopped", item);
+					Misc.logItem("Shopped", item, "offhand-fill");
+					item.buy();
+					shieldBought = true;
+					print("ÿc2MiniShopBotÿc0: Bought offhand fill — " + boughtName +
+						" tier=" + shieldBest.tier + " def=" + shieldBest.def);
+				}
+			} catch (eSh) {
+				print(eSh);
+			}
+
+			delay(2);
+		} else if (shieldHunt && (equipBest[5] || equipBest["5"])) {
+			shieldBought = true; // slot-5 autoequip buy already covers the hunt
+		}
+
 		if (stealthHunt) {
 			if (stealthBought) {
 				print("ÿc2MiniShopBotÿc0: Found 2-socket armor for Stealth — bought");
@@ -4757,6 +5198,26 @@ CursorLoop:
 				print("ÿc1MiniShopBotÿc0: Found 4-socket sword for Spirit — could not buy (gold/space)");
 			} else {
 				print("ÿc1MiniShopBotÿc0: No 4-socket Crystal/Broad/Long for Spirit in this shop");
+			}
+		}
+
+		if (treacheryHunt) {
+			if (treacheryBought) {
+				print("ÿc2MiniShopBotÿc0: Found 3-socket armor for Treachery — bought");
+			} else if (treacheryFound) {
+				print("ÿc1MiniShopBotÿc0: Found 3-socket armor for Treachery — could not buy (gold/space)");
+			} else {
+				print("ÿc1MiniShopBotÿc0: No 3-socket armor def>120 for Treachery in this shop");
+			}
+		}
+
+		if (shieldHunt) {
+			if (shieldBought) {
+				print("ÿc2MiniShopBotÿc0: Found shield for empty offhand — bought");
+			} else if (shieldFound) {
+				print("ÿc1MiniShopBotÿc0: Found shield for empty offhand — could not buy (gold/space)");
+			} else {
+				print("ÿc1MiniShopBotÿc0: No usable shield for empty offhand in this shop");
 			}
 		}
 
@@ -5690,25 +6151,108 @@ MainLoop:
 		return false;
 	},
 
-	unstashFakeRwBases: function () {
-		var item, moved = 0;
+	// Unidentified jewels parked in stash — need pull → Cain/scroll ID → keep or → jewf
+	hasUnidJewelsInStash: function () {
+		var item = me.getItem(-1, -1);
 
-		item = me.getItem(-1, -1);
-
-		if (!item) {
-			return 0;
+		if (!item || typeof Pickit === "undefined" || typeof Pickit.isJewel !== "function") {
+			return false;
 		}
 
 		do {
-			if (item.location !== 7 || !this.isFakeRwBase(item)) {
+			if (item.location === 7 && !item.getFlag(0x10) && Pickit.isJewel(item)) {
+				return true;
+			}
+		} while (item.getNext());
+
+		return false;
+	},
+
+	unstashUnidJewels: function () {
+		var item, i, gid, name, gids = [], moved = 0, batchCap = 15;
+
+		if (typeof Pickit === "undefined" || typeof Pickit.isJewel !== "function") {
+			return 0;
+		}
+
+		// Snapshot gids first — MoveTo invalidates the live getNext() cursor
+		item = me.getItem(-1, -1);
+
+		if (item) {
+			do {
+				if (item.location === 7 && !item.getFlag(0x10) && Pickit.isJewel(item)) {
+					gids.push(item.gid);
+				}
+			} while (item.getNext());
+		}
+
+		if (!gids.length) {
+			return 0;
+		}
+
+		for (i = 0; i < gids.length && moved < batchCap; i += 1) {
+			gid = gids[i];
+			item = me.getItem(-1, -1, gid);
+
+			if (!item || item.location !== 7 || item.getFlag(0x10) || !Pickit.isJewel(item)) {
 				continue;
 			}
 
-			if (Storage.Inventory.CanFit(item) && Storage.Inventory.MoveTo(item)) {
+			if (!Storage.Inventory.CanFit(item)) {
+				break;
+			}
+
+			if (Storage.Inventory.MoveTo(item)) {
+				name = (item.name || "jewel").toString().replace(/ÿc[0-9a-z]/gi, "").split("\n")[0];
+				print("ÿc8Townÿc0 :: unstash unid jewel (" + name + ")");
+				moved += 1;
+				delay(me.ping + 60);
+			}
+		}
+
+		if (moved) {
+			print("ÿc2Townÿc0 :: pulled " + moved + "/" + gids.length + " unid jewel(s) from stash for ID");
+		}
+
+		return moved;
+	},
+
+	unstashFakeRwBases: function () {
+		var item, i, gid, gids = [], moved = 0;
+
+		// Snapshot gids first — MoveTo invalidates the live getNext() cursor
+		item = me.getItem(-1, -1);
+
+		if (item) {
+			do {
+				if (item.location === 7 && this.isFakeRwBase(item)) {
+					gids.push(item.gid);
+				}
+			} while (item.getNext());
+		}
+
+		if (!gids.length) {
+			return 0;
+		}
+
+		for (i = 0; i < gids.length; i += 1) {
+			gid = gids[i];
+			item = me.getItem(-1, -1, gid);
+
+			if (!item || item.location !== 7 || !this.isFakeRwBase(item)) {
+				continue;
+			}
+
+			if (!Storage.Inventory.CanFit(item)) {
+				break;
+			}
+
+			if (Storage.Inventory.MoveTo(item)) {
 				print("ÿc8Townÿc0 :: unstash junk (" + (item.name || item.classid) + ")");
 				moved += 1;
+				delay(me.ping + 60);
 			}
-		} while (item.getNext());
+		}
 
 		return moved;
 	},
@@ -5768,10 +6312,22 @@ MainLoop:
 			return false;
 		}
 
+		// Never bank unid jewels — ID first, then keep good / fragment junk
+		if (!item.getFlag(0x10) && typeof Pickit !== "undefined" && typeof Pickit.isJewel === "function" &&
+				Pickit.isJewel(item)) {
+			return false;
+		}
+
 		// PD2: leave junk jewels in inv for cubeJunkJewelsAtStash (→ jewf)
+		// If no key, bank them so a 15-jewel batch can't clog inventory forever
 		if (typeof Pickit !== "undefined" && typeof Pickit.isJunkJewel === "function" &&
 				Pickit.isJunkJewel(item)) {
-			return false;
+			if (typeof Pd2Stack !== "undefined" && typeof Pd2Stack.findPromoteKey === "function" &&
+					Pd2Stack.findPromoteKey()) {
+				return false;
+			}
+
+			return true; // no key — bank; listJunkJewels still finds loc=7 later
 		}
 
 		if (result || (typeof Pickit.isRuneItem === "function" && Pickit.isRuneItem(item))) {
@@ -5782,9 +6338,10 @@ MainLoop:
 	},
 
 	// One stash open: promote flawless→perfect → pull pots → bank → gold → close
+	// keepOpen: leave stash/cube UI up for Cubing / junk jewels / stack in doChores
 	// (rune/gem merge runs after Runewords.makeRunewords in doChores)
-	doStashVisit: function (stashGold) {
-		var needPots, needBank, needPromote, needCull, i, items;
+	doStashVisit: function (stashGold, keepOpen) {
+		var needPots, needBank, needPromote, needCull, needStack, i, items;
 
 		if (stashGold === undefined) {
 			stashGold = true;
@@ -5795,8 +6352,10 @@ MainLoop:
 		needPromote = (typeof Pd2Stack !== "undefined" && typeof Pd2Stack.needsPromoteFlawless === "function" &&
 			Pd2Stack.needsPromoteFlawless());
 		needCull = this.hasFakeRwBasesInStash();
+		needStack = (typeof Pd2Stack !== "undefined" && typeof Pd2Stack.needsStacking === "function" &&
+			Pd2Stack.needsStacking());
 
-		if (!needPots && !needBank && !needPromote && !needCull) {
+		if (!needPots && !needBank && !needPromote && !needCull && !needStack) {
 			print("ÿc2Townÿc0 :: stash skip (nothing to bank / no stashed pots)");
 			return true;
 		}
@@ -5810,7 +6369,7 @@ MainLoop:
 		}
 
 		print("ÿc2Townÿc0 :: stash once (pots=" + needPots + " bank=" + needBank +
-			" promote=" + needPromote + " cull=" + needCull + ")");
+			" promote=" + needPromote + " cull=" + needCull + " stack=" + needStack + ")");
 
 		// Pull magic/rare 2os "fake" RW bases out of stash so clearInventory can sell them
 		this.unstashFakeRwBases();
@@ -5853,11 +6412,45 @@ MainLoop:
 				Runewords.cullWorseLoreBases();
 			}
 
+			if (Runewords.cullWorseTreacheryBases) {
+				Runewords.cullWorseTreacheryBases();
+			}
+
+			// Purity ready/worn — dump obsolete 2os Strength spears before make
+			if (Runewords.cullObsoleteStrengthBases) {
+				Runewords.cullObsoleteStrengthBases();
+			}
+
+			// Purity done or multiple empty 3os — keep at most one best base
+			if (Runewords.cullWorsePurityBases) {
+				Runewords.cullWorsePurityBases();
+			}
+
 			Runewords.makeRunewords();
+
+			// Retry equip for any completed Stealth/Lore/Spirit that missed its one-shot
+			// craft-time equip (stat lag, str/dex/lvl not met yet, or a code fix landed after
+			// it was already made) — otherwise it stays stranded in the stash forever.
+			if (Runewords.equipStrandedRunewords) {
+				Runewords.equipStrandedRunewords();
+			}
 		}
 
-		me.cancel();
-		delay(100 + me.ping);
+		// Spirit/orb just worn — pull memory/banked shield while stash is still open
+		if (typeof Item !== "undefined" && Item.equipBestOwnedShield) {
+			Item.equipBestOwnedShield();
+		}
+
+		// Merge jewf/WSS/rune piles after bank + make (jewf singles→QTY, multi stash piles)
+		if (typeof Pd2Stack !== "undefined" && typeof Pd2Stack.stackLooseAtStash === "function" &&
+				Pd2Stack.needsStacking && Pd2Stack.needsStacking()) {
+			Pd2Stack.stackLooseAtStash();
+		}
+
+		if (!keepOpen) {
+			me.cancel();
+			delay(100 + me.ping);
+		}
 
 		return true;
 	},
@@ -5875,6 +6468,49 @@ MainLoop:
 		}
 
 		if (checkGold && Config.StashGold && me.getStat(14) >= Config.StashGold && me.getStat(15) < 25e5) {
+			return true;
+		}
+
+		// Purity ready (Amn+Eth+Thul + empty 3os spear/polearm) — open stash to socket
+		if (typeof Runewords !== "undefined" && Runewords.needsPurityMakeVisit &&
+				Runewords.needsPurityMakeVisit()) {
+			return true;
+		}
+
+		// Treachery ready (Shael+Thul+Lem + empty 3os armor def>120) — open stash to socket
+		if (typeof Runewords !== "undefined" && Runewords.needsTreacheryMakeVisit &&
+				Runewords.needsTreacheryMakeVisit()) {
+			return true;
+		}
+
+		// Strength ready (Amn+Tir + empty 2os on merc/inv) — open stash to peel/socket
+		if (typeof Runewords !== "undefined" && Runewords.needsStrengthMakeVisit &&
+				Runewords.needsStrengthMakeVisit()) {
+			return true;
+		}
+
+		// Spirit ready (Tal+Thul+Ort+Amn + empty 4os Crystal/Broad/Long) — open stash to socket
+		if (typeof Runewords !== "undefined" && Runewords.needsSpiritMakeVisit &&
+				Runewords.needsSpiritMakeVisit()) {
+			return true;
+		}
+
+		// Rhyme ready (Shael+Eth + empty 2os shield) while 1H equipped — open stash to socket
+		if (typeof Runewords !== "undefined" && Runewords.needsRhymeMakeVisit &&
+				Runewords.needsRhymeMakeVisit()) {
+			return true;
+		}
+
+		// Completed Stealth/Lore/Spirit stranded unequipped in stash (missed its one-shot
+		// craft-time equip) — nothing else here asks for a visit once the recipe is "done".
+		if (typeof Runewords !== "undefined" && Runewords.needsRunewordEquipVisit &&
+				Runewords.needsRunewordEquipVisit()) {
+			return true;
+		}
+
+		// Multiple jewf/WSS/rune piles that can still merge
+		if (typeof Pd2Stack !== "undefined" && typeof Pd2Stack.needsStacking === "function" &&
+				Pd2Stack.needsStacking()) {
 			return true;
 		}
 
@@ -5896,12 +6532,13 @@ MainLoop:
 	openStash: function () {
 		var i, tick, stash;
 
-		if (getUIFlag(0x1a) && !Cubing.closeCube()) {
-			return false;
-		}
-
+		// Stash already open — never closeCube first (cancel drops stash on PD2 and forces reopen)
 		if (getUIFlag(0x19)) {
 			return true;
+		}
+
+		if (getUIFlag(0x1a) && !Cubing.closeCube()) {
+			return false;
 		}
 
 		for (i = 0; i < 5; i += 1) {
@@ -6134,19 +6771,41 @@ MainLoop:
 	clearScrolls: function () {
 		var i, items = me.getItems(),
 			shopped = false,
-			code, hasCain;
+			code, hasCain, tpTome, tpQty;
 
 		hasCain = !!(me.getQuest(4, 0) || me.getQuest(4, 1) || me.act >= 2);
+		tpTome = this.findBook("tbk");
+		tpQty = tpTome ? (tpTome.getStat(70) || 0) : 0;
 
 		for (i = 0; !!items && i < items.length; i += 1) {
 			if (items[i].location === 3 && items[i].mode === 0 && items[i].itemType === 22) {
 				code = items[i].code ? String(items[i].code).toLowerCase() : "";
 
-				// Keep loose TP scrolls (fill tome). ID scrolls only pre-Cain.
+				// Loose TP scrolls: keep only as portal backup when tome is missing/empty.
+				// With a stocked tome they just waste inv (fillTome buys into the book).
 				if (code === "tsc") {
+					if (tpQty < 1) {
+						continue;
+					}
+
+					if (!shopped) {
+						this.ensureShopOpen("clearScrolls");
+						shopped = true;
+					}
+
+					try {
+						print("ÿc2Townÿc0 :: sell loose TP scroll (tome has " + tpQty + ")");
+						Misc.itemLogger("Sold", items[i]);
+						items[i].sell();
+						delay(Math.min(120, 40 + me.ping));
+					} catch (eTsc) {
+						print("ÿc8Townÿc0 :: sell loose tsc failed: " + eTsc);
+					}
+
 					continue;
 				}
 
+				// ID scrolls only pre-Cain.
 				if (code === "isc" && !hasCain) {
 					continue;
 				}
@@ -6176,8 +6835,8 @@ MainLoop:
 		return !!this.initNPC("Shop", reason || "sellJunk");
 	},
 
-	// Prefer sell. Keep consumable hp/mp/rv/stamina/scrolls/tomes.
-	// Antidote (yps) / thawing (wms) ARE sold — field leftovers only; Andy/Duriel buy fresh after chores.
+	// Prefer sell. Never sell potions — drink leftovers (flushToxPots / cullExcessPotions).
+	// Keep scrolls/tomes (except post-Cain isc).
 	sellInventoryItem: function (item) {
 		var cost, code, kind;
 
@@ -6218,53 +6877,19 @@ MainLoop:
 			return true;
 		}
 
-		// Never sell/drop hp/mp/rv/stamina — potionKind first (PD2 type/code can disagree)
-		if (kind === "hp" || kind === "mp" || kind === "rv" || kind === "vps") {
+		// Never sell any potion (hp/mp/rv/stamina/tox) — drink path owns them
+		if (kind || item.itemType === 80 || item.itemType === 81 ||
+				/^hp[1-5]$/.test(code) || /^mp[1-5]$/.test(code) ||
+				code === "rvs" || code === "rvl" || code === "vps" || code === "yps" || code === "wms" ||
+				[76, 77, 78, 79].indexOf(item.itemType) > -1) {
 			return false;
-		}
-
-		// Sell antidote / thawing leftovers (never keep after field pick / old buys)
-		if (kind === "yps" || kind === "wms" ||
-				((item.itemType === 80 || item.itemType === 81 || code === "yps" || code === "wms") && !kind)) {
-			if (!this.ensureShopOpen("sellToxPot")) {
-				// Shop fail — drink tox rather than ground-drop
-				try {
-					if (this.isShopOpen() || getUIFlag(0x08)) {
-						me.cancel();
-						delay(100 + me.ping);
-					}
-
-					item.interact();
-				} catch (eDrinkTox) {}
-
-				return true;
-			}
-
-			try {
-				print("ÿc2Townÿc0 :: sell " + (kind || code || "tox pot"));
-				Misc.itemLogger("Sold", item);
-				item.sell();
-				delay(Math.min(120, 40 + me.ping));
-				return true;
-			} catch (eSellTox) {
-				try {
-					me.cancel();
-					delay(100 + me.ping);
-					item.interact();
-				} catch (eDrink2) {}
-
-				return true;
-			}
 		}
 
 		// Never sell/drop scrolls / tomes (and leftover type checks)
 		// Exception: ID scrolls after Cain — Cain IDs, no need to keep isc
 		if (code === "isc" && (me.getQuest(4, 0) || me.getQuest(4, 1) || me.act >= 2)) {
 			// fall through to sell below
-		} else if ([76, 77, 78, 79].indexOf(item.itemType) > -1 ||
-				/^hp[1-5]$/.test(code) || /^mp[1-5]$/.test(code) || code === "rvs" || code === "rvl" ||
-				code === "vps" ||
-				code === "tsc" || code === "isc" || code === "tbk" || code === "ibk" ||
+		} else if (code === "tsc" || code === "isc" || code === "tbk" || code === "ibk" ||
 				item.itemType === 18 || item.itemType === 22) {
 			return false;
 		}
@@ -6309,21 +6934,23 @@ MainLoop:
 
 	// True if this inv item should be sold this chores pass
 	isTownJunk: function (item) {
-		var result, kind, best;
+		var result, kind, best, socks;
 
 		if (!item || item.location !== 3) {
 			return false;
 		}
 
-		// potionKind first — PD2 itemType/code can disagree; never sell hp/mp/rv/stamina
+		// Never sell potions — cull/flush drinks excess (PD2 type/code can disagree)
 		kind = this.potionKind(item);
 
-		if (kind === "hp" || kind === "mp" || kind === "rv" || kind === "vps") {
+		if (kind) {
 			return false;
 		}
 
-		if (kind === "yps" || kind === "wms") {
-			return true;
+		// Never sell jewels — wanted ones are kept (Pickit.checkItem "always keep"), junk ones
+		// get cubed into Jewel Fragments (Pd2Stack.cubeJunkJewelsAtStash), never vendored.
+		if (typeof Pickit !== "undefined" && typeof Pickit.isJewel === "function" && Pickit.isJewel(item)) {
+			return false;
 		}
 
 		// Cain lore Horadric Scroll (tr1) — drop junk; NOT Lam Esen (bbb) / Inifuss (bks)
@@ -6388,6 +7015,11 @@ MainLoop:
 			return true;
 		}
 
+		// Poison Strike necro: valued heads (+PS / 30-20 / Decrep) — NEVER sell
+		if (typeof Item !== "undefined" && Item.isValuedPsNecroHead && Item.isValuedPsNecroHead(item)) {
+			return false;
+		}
+
 		// Real player autoequip upgrade only
 		if (Item.hasTier(item) && Item.autoEquipCheck(item)) {
 			return false;
@@ -6436,6 +7068,11 @@ MainLoop:
 
 		// Tiered leftovers (extra amulets/rings/etc. that aren't upgrades) — sell
 		if (Config.AutoEquip && NTIP.GetTier(item) > 0 && !Item.autoEquipCheck(item)) {
+			// Exception: valued PS heads stay in inv even if not beating current offhand yet
+			if (typeof Item.isValuedPsNecroHead === "function" && Item.isValuedPsNecroHead(item)) {
+				return false;
+			}
+
 			return true;
 		}
 
@@ -6496,10 +7133,10 @@ MainLoop:
 			return true;
 		}
 
-		// Antidote (80) / thawing (81) — sell leftovers only when not a known consumable pot
+		// Antidote / thawing leftovers — drink via flushToxPots, never sell
 		if (!kind && (item.itemType === 80 || item.itemType === 81 ||
 				(item.code && (String(item.code).toLowerCase() === "yps" || String(item.code).toLowerCase() === "wms")))) {
-			return true;
+			return false;
 		}
 
 		// Bad charms (identified, not in leveling keep nip) — sell
@@ -6528,6 +7165,14 @@ MainLoop:
 		if (result === 1 && !Item.hasTier(item) && !Cubing.keepItem(item) && !Runewords.keepItem(item) &&
 				!(typeof Item !== "undefined" && Item.isProtectedRWBase && Item.isProtectedRWBase(item)) &&
 				!(typeof Runewords !== "undefined" && Runewords.wantBaseForRunes && Runewords.wantBaseForRunes(item))) {
+			if (typeof Item !== "undefined" && Item.isValuedPsNecroHead && Item.isValuedPsNecroHead(item)) {
+				return false;
+			}
+
+			if (typeof Item !== "undefined" && Item.isNecroHead && Item.isNecroHead(item) && me.classid === 2) {
+				return false; // any necro head on PS char — ID/score first, never vendor-vacuum
+			}
+
 			if (item.quality >= 4 || item.getItemCost(1) > 50) {
 				return true;
 			}
@@ -6543,6 +7188,38 @@ MainLoop:
 			}
 		}
 
+		// Obsolete 2os Strength bases once Purity is makeable/worn — sell
+		if (typeof Runewords !== "undefined" && Runewords.purityOutranksStrength &&
+				Runewords.purityOutranksStrength() &&
+				(item.itemType === 33 || item.itemType === 34) && !item.getItem() &&
+				!item.getFlag(0x4000000) && Item.isRwBaseQuality(item)) {
+			socks = item.getStat(194) || 0;
+
+			if (typeof item.getStatEx === "function") {
+				socks = Math.max(socks, item.getStatEx(194) || 0);
+			}
+
+			if (socks === 2) {
+				return true;
+			}
+		}
+
+		// Empty 3os Purity bases once worn/Insight, or worse than best banked — sell
+		if (typeof Runewords !== "undefined" && Runewords.isEmptyPurityBase &&
+				Runewords.isEmptyPurityBase(item)) {
+			if ((Runewords.mercHasPurity && Runewords.mercHasPurity()) ||
+					(Runewords.hasCompletedInsight && Runewords.hasCompletedInsight())) {
+				return true;
+			}
+
+			best = Runewords.getBestEmptyPurityBase && Runewords.getBestEmptyPurityBase();
+
+			if (best && best.gid !== item.gid &&
+					!(Runewords.wantPurityBase && Runewords.wantPurityBase(item))) {
+				return true;
+			}
+		}
+
 		if (result === 1 || result === 2 || result === 3 || result === 5) {
 			return false;
 		}
@@ -6550,7 +7227,8 @@ MainLoop:
 		return result === 0 || result === 4 || result === -1;
 	},
 
-	// Flush antidote / thawing from inv + belt (field leftovers). Andy/Duriel buy after chores.
+	// Drink antidote / thawing leftovers (never sell). Andy/Duriel buy fresh after chores.
+	// Does not cancel shop — safe mid-chores; stubborn pots retry on next clearInventory.
 	flushToxPots: function () {
 		var item, list = [], i, pot, code, kind, n = 0;
 
@@ -6578,7 +7256,7 @@ MainLoop:
 			return 0;
 		}
 
-		print("ÿc2Townÿc0 :: flush " + list.length + " antidote/thawing leftover(s)");
+		print("ÿc2Townÿc0 :: drink " + list.length + " antidote/thawing leftover(s)");
 
 		for (i = 0; i < list.length; i += 1) {
 			pot = me.getItem(-1, -1, list[i].gid);
@@ -6587,39 +7265,11 @@ MainLoop:
 				continue;
 			}
 
-			// Belt → sell needs shop; inv sellInventoryItem handles inv
-			if (pot.location === 3) {
-				if (this.sellInventoryItem(pot)) {
-					n += 1;
-				}
-
-				continue;
-			}
-
-			// Belt pot
-			if (!this.ensureShopOpen("flushToxBelt")) {
-				try {
-					me.cancel();
-					delay(80 + me.ping);
-					pot.interact(); // drink rather than clog belt
-					n += 1;
-				} catch (eDrink) {}
-
-				continue;
-			}
-
 			try {
-				pot.sell();
+				pot.interact();
 				n += 1;
-				delay(40 + me.ping);
-			} catch (eSell) {
-				try {
-					me.cancel();
-					delay(80 + me.ping);
-					pot.interact();
-					n += 1;
-				} catch (eDrink2) {}
-			}
+				delay(150 + me.ping);
+			} catch (eDrink) {}
 		}
 
 		return n;
@@ -6639,10 +7289,10 @@ MainLoop:
 			this.refillBeltIfNeeded();
 		}
 
-		// Sell (prefer) / drink inv pots above buffer (belt already filled)
+		// Drink inv pots above buffer (never sell) — belt already filled
 		this.cullExcessPotions();
 
-		// Antidote / thawing — never keep as field loot (shop prep buys fresh)
+		// Antidote / thawing — drink leftovers (shop prep buys fresh)
 		this.flushToxPots();
 
 		// Collect junk, then sell (reuse open shop when keepShopOpen)
@@ -6663,9 +7313,10 @@ MainLoop:
 		// Charms locked earlier / sitting in zone — sell bad ones explicitly
 		this.sellAllBadCharms(junk);
 
-		// Ammo can sit outside Compare (locked charm cells) — always flush leftovers
+		// Ammo / merc bows / other junk can sit outside Compare (locked charm cells)
 		this.sellAllInvAmmo(junk);
 		this.sellAllInvMercWeapons(junk);
+		this.sellAllInvTownJunk(junk);
 
 		if (junk.length) {
 			print("ÿc2Townÿc0 :: Selling " + junk.length + " junk item(s)");
@@ -6729,6 +7380,44 @@ MainLoop:
 				print("ÿc2Townÿc0 :: sell junk charm " + code + " type=" + item.itemType + " @ " + item.x + "," + item.y);
 				gids.push(item.gid);
 				seen[item.gid] = true;
+			} while (item.getNext());
+		}
+
+		for (i = 0; i < gids.length; i += 1) {
+			gid = gids[i];
+			item = me.getItem(-1, -1, gid);
+
+			if (item && item.location === 3) {
+				junk.push(copyUnit(item));
+			}
+		}
+	},
+
+	// Full-inv isTownJunk scan — Compare skips locked charm/mana cells, so white
+	// leftovers (Greaves, etc.) parked next to charms were never sold.
+	sellAllInvTownJunk: function (junk) {
+		var item, seen = {}, i, gids = [], gid;
+
+		if (!junk) {
+			junk = [];
+		}
+
+		for (i = 0; i < junk.length; i += 1) {
+			seen[junk[i].gid] = true;
+		}
+
+		item = me.getItem(-1, 0);
+
+		if (item) {
+			do {
+				if (item.location !== 3 || seen[item.gid]) {
+					continue;
+				}
+
+				if (this.isTownJunk(item)) {
+					gids.push(item.gid);
+					seen[item.gid] = true;
+				}
 			} while (item.getNext());
 		}
 

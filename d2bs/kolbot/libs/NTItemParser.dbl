@@ -158,7 +158,7 @@ NTIP.Clear = function () {
 };
 
 NTIP.GetTier = function (item) {
-	var i, tier = 0, lineTier, t;
+	var i, tier = 0, lineTier, t, bonus, locs;
 
 	// Go through ALL lines that describe the item
 	for (i = 0; i < NTIP_CheckList.length; i += 1) {
@@ -198,6 +198,49 @@ NTIP.GetTier = function (item) {
 			}
 		}
 	}
+
+	// PD2: necro heads often miss [type]==head / LoD classid nip lines — JS score fills the gap
+	try {
+		if (item && typeof Item !== "undefined" && typeof Item.necroHeadTier === "function") {
+			lineTier = Item.necroHeadTier(item);
+
+			if (!isNaN(lineTier) && lineTier > tier) {
+				tier = lineTier;
+			}
+		}
+	} catch (eHead) {}
+
+	// Lore/Stealth/Spirit identity floors when nip #tier misses (same class of bug as necro heads)
+	try {
+		if (item && typeof Item !== "undefined" && typeof Item.identityRunewordTier === "function") {
+			lineTier = Item.identityRunewordTier(item);
+
+			if (!isNaN(lineTier) && lineTier > tier) {
+				tier = lineTier;
+			}
+		}
+	} catch (eIdRw) {}
+
+	// Cannot Be Frozen — boost only if we don't already have CBF elsewhere
+	try {
+		if (item && typeof Item !== "undefined" && typeof Item.cbfTierBonus === "function") {
+			bonus = Item.cbfTierBonus(item);
+
+			if (bonus > 0) {
+				if (tier > 0) {
+					tier += bonus;
+				} else if (typeof Item.getBodyLoc === "function") {
+					locs = Item.getBodyLoc(item);
+
+					if (locs && locs.length) {
+						tier = bonus;
+					}
+				} else {
+					tier = bonus;
+				}
+			}
+		}
+	} catch (eCbf) {}
 
 	return tier;
 };

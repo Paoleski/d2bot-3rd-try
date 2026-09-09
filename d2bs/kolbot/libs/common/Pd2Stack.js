@@ -1148,6 +1148,10 @@ var Pd2Stack = {
 
 		if (!me.itemoncursor) {
 			this.stashAsideInvGear(keepGid ? [keepGid] : null);
+			this.clearF10Cell(keepGid ? [keepGid] : null);
+		} else {
+			// Pile already on cursor — still clear F10 so Ctrl-separate doesn't land on a pot
+			this.clearF10Cell(null);
 		}
 
 		if (!this.hasForceKeysProxy()) {
@@ -1347,7 +1351,7 @@ var Pd2Stack = {
 
 	// Drop cursor item onto empty F10 cell (no Ctrl/Shift) — used for qty1 +form before clear+
 	placeCursorAtF10: function () {
-		var mouse, cell, n, nDelay;
+		var mouse, cell, n, nDelay, cursor, expectGid, expectCode, landed;
 
 		mouse = this.ensureDefaultF10();
 		cell = this.readF10Cell();
@@ -1365,6 +1369,29 @@ var Pd2Stack = {
 			return {ok: false, err: "stash"};
 		}
 
+		cursor = getUnit(100);
+		expectGid = cursor ? cursor.gid : 0;
+		expectCode = cursor && cursor.code ? String(cursor.code).toLowerCase() : "";
+
+		// Occupied F10 (pots/charms/…) swaps with cursor — Amn became rejuv in parkCursor
+		if (!this.clearF10Cell(expectGid ? [expectGid] : null)) {
+			this.log("ÿc1place failÿc0 :: could not clear F10 cell " + cell.col + "," + cell.row);
+			return {ok: false, err: "f10_occupied"};
+		}
+
+		if (!me.itemoncursor) {
+			this.log("ÿc1place failÿc0 :: lost cursor while clearing F10");
+			return {ok: false, err: "lost_cursor"};
+		}
+
+		cursor = getUnit(100);
+
+		if (cursor && expectGid && cursor.gid !== expectGid) {
+			this.log("ÿc1place failÿc0 :: cursor swapped while clearing F10 (want gid=" +
+				expectGid + " have " + this.itemLabel(cursor) + ")");
+			return {ok: false, err: "cursor_swapped"};
+		}
+
 		this.clearForceKeys();
 		delay(40);
 		this.vlog("ÿc4Pd2Stackÿc0 :: placeAtF10 cell " + cell.col + "," + cell.row);
@@ -1380,6 +1407,15 @@ var Pd2Stack = {
 			while ((getTickCount() - nDelay) < Math.max(800, me.ping * 3 + 400)) {
 				if (!me.itemoncursor) {
 					delay(60 + me.ping);
+					// Confirm our rune landed — not a silent swap with junk that was mid-flight
+					landed = this.itemAtInvCell(cell.col, cell.row);
+
+					if (landed && expectGid && landed.gid !== expectGid) {
+						this.log("ÿc1place failÿc0 :: F10 has " + this.itemLabel(landed) +
+							" not expected gid=" + expectGid);
+						return {ok: false, err: "wrong_landed"};
+					}
+
 					return {ok: true, via: "clickItem"};
 				}
 
@@ -1391,8 +1427,122 @@ var Pd2Stack = {
 			return {ok: false, err: "f10_hit_gear"};
 		}
 
-		this.log("ÿc1place failÿc0 :: still on cursor (cell occupied?)");
+		cursor = getUnit(100);
+
+		// Swap symptom: still holding pot/charm while our rune sits under F10
+		if (cursor && expectGid && cursor.gid !== expectGid) {
+			this.log("ÿc1place failÿc0 :: swap — cursor now " + this.itemLabel(cursor) +
+				" (expected rune gid=" + expectGid + " code=" + expectCode + ")");
+			landed = this.itemAtInvCell(cell.col, cell.row);
+
+			if (landed && landed.gid === expectGid) {
+				this.log("ÿc8Pd2Stackÿc0 :: recovering — rune is under F10, parking swapped junk");
+				this.parkCursor();
+				return {ok: true, via: "recovered_swap"};
+			}
+		}
+
+		this.log("ÿc1place failÿc0 :: still on cursor (cell occupied?) " +
+			(cursor ? this.itemLabel(cursor) : "none"));
 		return {ok: false, err: "still_on_cursor"};
+	},
+
+	// Item covering an inventory grid cell (col/row), or null
+	itemAtInvCell: function (col, row) {
+		var item, sx, sy;
+
+		item = me.getItem(-1, -1);
+
+		if (!item) {
+			return null;
+		}
+
+		do {
+			if (item.location !== 3) {
+				continue;
+			}
+
+			sx = item.sizex || 1;
+			sy = item.sizey || 1;
+
+			if (item.x <= col && (item.x + sx) > col && item.y <= row && (item.y + sy) > row) {
+				return copyUnit(item);
+			}
+		} while (item.getNext());
+
+		return null;
+	},
+
+	// Move whatever occupies the F10 peel cell (pots/charms/junk) so place/Ctrl cannot swap
+	clearF10Cell: function (keepGids) {
+		var cell, occ, keep = {}, i, gid, spot;
+
+		cell = this.readF10Cell();
+
+		if (!cell) {
+			return false;
+		}
+
+		if (keepGids) {
+			if (typeof keepGids === "number") {
+				keep[keepGids] = true;
+			} else {
+				for (i = 0; i < keepGids.length; i += 1) {
+					keep[keepGids[i]] = true;
+				}
+			}
+		}
+
+		occ = this.itemAtInvCell(cell.col, cell.row);
+
+		if (!occ || keep[occ.gid]) {
+			return true;
+		}
+
+		gid = occ.gid;
+		this.log("ÿc8Pd2Stackÿc0 :: clearing F10 cell " + cell.col + "," + cell.row +
+			" occupied by " + this.itemLabel(occ));
+
+		if (typeof Town !== "undefined") {
+			Town.openStash();
+		}
+
+		occ = me.getItem(-1, -1, gid);
+
+		if (!occ || occ.location !== 3) {
+			return true;
+		}
+
+		// Prefer stash; else another inv cell (never click F10 again)
+		if (Storage.Stash.CanFit(occ) && Storage.Stash.MoveTo(occ)) {
+			delay(80 + me.ping);
+			return !this.itemAtInvCell(cell.col, cell.row);
+		}
+
+		if (!me.itemoncursor && occ.toCursor()) {
+			delay(60 + me.ping);
+			Storage.Reload();
+			spot = Storage.Inventory.FindSpot(getUnit(100) || occ);
+
+			if (spot && !(spot.x === cell.col && spot.y === cell.row)) {
+				clickItem(0, spot.y, spot.x, 3);
+				delay(80 + me.ping);
+			} else if (Storage.Inventory.CanFit(occ)) {
+				Storage.Inventory.MoveTo(occ);
+				delay(80 + me.ping);
+			} else {
+				this.parkCursor();
+			}
+		}
+
+		occ = this.itemAtInvCell(cell.col, cell.row);
+
+		if (occ && !keep[occ.gid]) {
+			this.log("ÿc1Pd2Stackÿc0 :: F10 still occupied by " + this.itemLabel(occ));
+			return false;
+		}
+
+		return true;
 	},
 
 	// One-shot test: write "r07" (or r08) to data/pd2_force_unstack.txt — ToolsThread runs it in town
@@ -1750,6 +1900,8 @@ var Pd2Stack = {
 
 		// Lore circlet under F10 → Ctrl+Shift picks up the base instead of peeling the rune
 		this.stashAsideInvGear([gid]);
+		// Pots/charms under F10 swap with the rune on place — clear the cell first
+		this.clearF10Cell([gid]);
 
 		if (inPlace) {
 			unit = me.getItem(-1, -1, gid) || unit;
@@ -1779,10 +1931,23 @@ var Pd2Stack = {
 				return false;
 			}
 
+			{
+				var curPick = getUnit(100);
+
+				if (!curPick || curPick.gid !== gid) {
+					this.log("ÿc1clear+ failÿc0 :: cursor is " +
+						(curPick ? this.itemLabel(curPick) : "empty") +
+						" not expected rune gid=" + gid);
+					this.parkCursor();
+					return false;
+				}
+			}
+
 			place = this.placeCursorAtF10();
 
 			if (!place || !place.ok) {
-				this.log("ÿc1clear+ failÿc0 :: place @ F10");
+				this.log("ÿc1clear+ failÿc0 :: place @ F10" +
+					(place && place.err ? (" (" + place.err + ")") : ""));
 				this.parkCursor();
 				return false;
 			}
@@ -3016,6 +3181,7 @@ var Pd2Stack = {
 
 		// Keep F10 clear of circlet/helm (Lore base must stay in stash)
 		this.stashAsideInvGear([gid]);
+		this.clearF10Cell([gid]);
 		this.watchPause("after stashAside");
 
 		unit = me.getItem(-1, -1, gid);
@@ -3361,11 +3527,12 @@ var Pd2Stack = {
 		return false;
 	},
 
-	// PD2: place one stackable onto another of the SAME form (+ on +, or single on single).
-	// Cross-form (loose onto +) does not merge — game leaves src in place.
-	// WSS: QTY piles; fill to WSS_MAX_STACK then leave remainder as a new stack.
+	// PD2: place one stackable onto another.
+	// Runes/gems: same +/- form only (loose onto + does not merge).
+	// WSS/jewf: QTY piles — singles merge onto piles; fill to max then leave a new stack.
+	// Cross inv↔stash allowed for WSS/jewf (src moved onto tgt's side first).
 	mergeIntoStack: function (sourceGid, targetGid) {
-		var src, tgt, beforeQty, afterQty;
+		var src, tgt, beforeQty, afterQty, qtyStack;
 
 		if (!sourceGid || !targetGid || sourceGid === targetGid) {
 			return false;
@@ -3400,23 +3567,48 @@ var Pd2Stack = {
 			return false;
 		}
 
-		// Same inventory/stash container only
-		if (src.location !== tgt.location) {
-			return false;
-		}
-
-		beforeQty = this.effectiveQty(tgt);
-
-		// Cap: don't try to dump onto a full WSS pile — leave/start another stack
+		// Cap: don't try to dump onto a full WSS/jewf pile — leave/start another stack
 		if (!this.stackHasRoom(tgt)) {
 			return false;
 		}
 
-		// Runes/gems: same +/- form only. WSS is QTY-only — singles merge onto piles.
-		if (!(this.isWssItem(src) && this.isWssItem(tgt)) &&
-				this.isStacked(src) !== this.isStacked(tgt)) {
+		// QTY stackables (WSS / jewf): allow single→pile and cross inv↔stash (move src first)
+		qtyStack = (this.isWssItem(src) && this.isWssItem(tgt)) ||
+			(this.isJewfItem(src) && this.isJewfItem(tgt));
+
+		// Runes/gems: same +/- form only. WSS/jewf are QTY-only — singles merge onto piles.
+		if (!qtyStack && this.isStacked(src) !== this.isStacked(tgt)) {
 			return false;
 		}
+
+		// Same container required for the click-merge; QTY items may relocate first
+		if (src.location !== tgt.location) {
+			if (!qtyStack) {
+				return false;
+			}
+
+			if (tgt.location === 7) {
+				if (!Storage.Stash.CanFit(src) || !Storage.Stash.MoveTo(src)) {
+					return false;
+				}
+			} else if (tgt.location === 3) {
+				if (!Storage.Inventory.CanFit(src) || !Storage.Inventory.MoveTo(src)) {
+					return false;
+				}
+			} else {
+				return false;
+			}
+
+			delay(80 + me.ping);
+			src = me.getItem(-1, -1, sourceGid);
+			tgt = me.getItem(-1, -1, targetGid);
+
+			if (!src || !tgt || src.location !== tgt.location) {
+				return false;
+			}
+		}
+
+		beforeQty = this.effectiveQty(tgt);
 
 		if (typeof Packet !== "undefined" && typeof Packet.itemToCursor === "function") {
 			if (!Packet.itemToCursor(src)) {
@@ -3933,19 +4125,21 @@ var Pd2Stack = {
 			return false;
 		}
 
-		if (!Cubing.emptyCube()) {
-			this.log("ÿc1Pd2Stackÿc0 :: promoteFlawless — emptyCube failed");
-			return false;
-		}
-
 		Cubing.cursorCheck();
 
+		// Must open cube BEFORE empty — jewf/stacks are invisible to findItems while UI closed
 		if (!Cubing.openCube()) {
 			this.log("ÿc1Pd2Stackÿc0 :: promoteFlawless — openCube failed");
 			return false;
 		}
 
 		openedCube = true;
+
+		if (!Cubing.ensureCubeEmpty()) {
+			this.log("ÿc1Pd2Stackÿc0 :: promoteFlawless — cube not empty (jewf/other leftover?)");
+			return false;
+		}
+
 		made = 0;
 
 		for (i = 0; i < families.length; i += 1) {
@@ -3964,8 +4158,8 @@ var Pd2Stack = {
 			}
 
 			// Clear previous family's leftovers/perfects without closing the UI
-			if (!Cubing.emptyCube()) {
-				this.log("ÿc1Pd2Stackÿc0 :: promoteFlawless — emptyCube failed mid");
+			if (!Cubing.ensureCubeEmpty()) {
+				this.log("ÿc1Pd2Stackÿc0 :: promoteFlawless — cube not empty mid");
 				break;
 			}
 
@@ -3975,6 +4169,14 @@ var Pd2Stack = {
 				this.vlog("ÿc8Pd2Stackÿc0 :: promote skip " + key + " (cube qty < 3)");
 				Cubing.emptyCube();
 				continue;
+			}
+
+			// Refuse transmute if junk (jewf etc.) snuck into the cube with the gems
+			if (this.cubeHasForeignItems(key)) {
+				this.log("ÿc1Pd2Stackÿc0 :: promoteFlawless abort " + key +
+					" — cube has non-gem items (empty first)");
+				Cubing.emptyCube();
+				break;
 			}
 
 			keyItem = this.findPromoteKey();
@@ -3995,6 +4197,12 @@ var Pd2Stack = {
 				cubeQty = this.flawlessQtyInCube(key);
 
 				if (cubeQty < 3) {
+					break;
+				}
+
+				if (this.cubeHasForeignItems(key)) {
+					this.log("ÿc1Pd2Stackÿc0 :: promoteFlawless abort " + key +
+						" — foreign item in cube before transmute");
 					break;
 				}
 
@@ -4048,6 +4256,38 @@ var Pd2Stack = {
 		}
 
 		return made > 0;
+	},
+
+	// True if cube has anything that isn't this flawless family (or a key for the recipe)
+	cubeHasForeignItems: function (familyKey) {
+		var items, i, it;
+
+		items = me.findItems(-1, -1, 6);
+
+		if (!items) {
+			return false;
+		}
+
+		for (i = 0; i < items.length; i += 1) {
+			it = items[i];
+
+			if (this.isFlawlessGem(it) && this.flawlessKey(it) === familyKey) {
+				continue;
+			}
+
+			// Key is required for the recipe
+			if (it.code && String(it.code).toLowerCase() === "key") {
+				continue;
+			}
+
+			if (it.itemType === 41 || it.classid === 560) {
+				continue;
+			}
+
+			return true; // jewf, perfects from other runs, junk, …
+		}
+
+		return false;
 	},
 
 	// --- PD2 junk jewels + key → Jewel Fragments (1–15 jewels + key) ---
@@ -4129,15 +4369,15 @@ var Pd2Stack = {
 		made = 0;
 		passes = 0;
 
-		if (!Cubing.emptyCube()) {
-			this.log("ÿc1Pd2Stackÿc0 :: cubeJunkJewels — emptyCube failed");
-			return false;
-		}
-
 		Cubing.cursorCheck();
 
 		if (!Cubing.openCube()) {
 			this.log("ÿc1Pd2Stackÿc0 :: cubeJunkJewels — openCube failed");
+			return false;
+		}
+
+		if (!Cubing.ensureCubeEmpty()) {
+			this.log("ÿc1Pd2Stackÿc0 :: cubeJunkJewels — cube not empty");
 			return false;
 		}
 
@@ -4156,8 +4396,8 @@ var Pd2Stack = {
 				break;
 			}
 
-			if (!Cubing.emptyCube()) {
-				this.log("ÿc1Pd2Stackÿc0 :: cubeJunkJewels — emptyCube failed");
+			if (!Cubing.ensureCubeEmpty()) {
+				this.log("ÿc1Pd2Stackÿc0 :: cubeJunkJewels — cube not empty");
 				break;
 			}
 

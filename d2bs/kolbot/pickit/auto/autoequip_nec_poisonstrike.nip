@@ -1,46 +1,65 @@
 // Necromancer POISON STRIKE — melee AutoEquip overlay
 // https://wiki.projectdiablo2.com/wiki/Starter_Poison_Strike_Necromancer
-// IAS FIRST (aim 35+, prefer 58). Then FHR / resists / life / AR / ED. Do NOT chase FCR.
+// Knife: +Poison Strike ≫ IAS only. No Strength RW on knives (merc spears only).
 // Loaded via Config.AutoGearBuild = "poisonstrike" (max tier wins over class nip).
 
 // =============================================================================
-// WEAPON — knife only (PS); on-weapon IAS is king, then +Poison Strike
+// WEAPON — knife only. +PS×100 then IAS×2 (nothing else)
 // =============================================================================
 [type] == knife && [quality] <= superior # # [tier] == 100
-[type] == knife && [quality] == magic # # [tier] == 108
-[type] == knife && [quality] == rare # # [tier] == 112
-// IAS alone beats plain rare/magic
-[type] == knife && [quality] <= rare # [ias] >= 10 # [tier] == 140
-[type] == knife && [quality] <= rare # [ias] >= 20 # [tier] == 150
-[type] == knife && [quality] <= rare # [ias] >= 30 # [tier] == 158
-// +PS without IAS — good, but loses to same skill WITH IAS
-[type] == knife && [quality] <= rare # [skillpoisondagger] >= 1 # [tier] == 130
-[type] == knife && [quality] <= rare # [skillpoisondagger] >= 2 # [tier] == 138
-[type] == knife && [quality] <= rare # [skillpoisondagger] >= 3 # [tier] == 145
-[type] == knife && [quality] <= rare # [skillpoisondagger] >= 1 && [ias] >= 10 # [tier] == 160
-[type] == knife && [quality] <= rare # [skillpoisondagger] >= 2 && [ias] >= 10 # [tier] == 168
-[type] == knife && [quality] <= rare # [skillpoisondagger] >= 3 && [ias] >= 10 # [tier] == 175
-[type] == knife && [quality] <= rare # [skillpoisondagger] >= 2 && [ias] >= 20 # [tier] == 178
-[type] == knife && [quality] <= rare # [skillpoisondagger] >= 3 && [ias] >= 20 # [tier] == 185
-[type] == knife && [flag] == runeword # [itemcrushingblow] >= 25 # [tier] == 128 // Strength (no IAS — mid)
+[type] == knife && [quality] <= rare # # [tier] == 112 + [skillpoisondagger]*100 + [ias]*2
+[type] == knife && [flag] == runeword # # [tier] == 50 // never prefer Strength/etc on necro knives
 
-[name] == kris && [quality] == unique # [skillpoisondagger] >= 2 # [maxquantity] == 1 && [tier] == 170 // Jade Tan Do (Shael socket)
-[name] == cinquedeas && [quality] == unique # [ias] >= 30 && [skillpoisondagger] >= 2 # [maxquantity] == 1 && [tier] == 190 // Blackbog's
+[name] == kris && [quality] == unique # [skillpoisondagger] >= 2 # [maxquantity] == 1 && [tier] == 112 + [skillpoisondagger]*100 + [ias]*2 // Jade Tan Do
+[name] == cinquedeas && [quality] == unique # [skillpoisondagger] >= 2 # [maxquantity] == 1 && [tier] == 112 + [skillpoisondagger]*100 + [ias]*2 // Blackbog's
 
 // =============================================================================
-// OFFHAND — +Poison Strike heads/shields; else block / resists / FHR / defense
+// OFFHAND — PD2 heads share itemType with orbs; match by name (ne*) + type head
+// +Poison Strike alone is keep-tier; famous 30 FBR / 20 ICB is huge even without res
 // =============================================================================
-[type] == head && [quality] <= rare # [skillpoisondagger] >= 1 # [tier] == 100
-[type] == head && [quality] <= rare # [skillpoisondagger] >= 2 # [tier] == 115
-[type] == head && [quality] <= rare # [skillpoisondagger] >= 3 # [tier] == 130
-[type] == head && [quality] <= rare # [fireresist]+[lightresist]+[coldresist] >= 20 # [tier] == 70
-[type] == head && [quality] <= rare # [fireresist]+[lightresist]+[coldresist] >= 40 # [tier] == 85
-[type] == head && [quality] <= rare # [fhr] >= 10 # [tier] == 75
+([name] == preservedhead || [name] == zombiehead || [name] == unravellerhead || [name] == gargoylehead || [name] == demonhead || [name] == mummifiedtrophy || [name] == fetishtrophy || [name] == sextontrophy || [name] == cantortrophy || [name] == heirophanttrophy || [name] == minionskull || [name] == hellspawnskull || [name] == overseerskull || [name] == succubaeskull || [name] == bloodlordskull) && [quality] == rare # # [tier] == 55
+([name] == preservedhead || [name] == zombiehead || [name] == unravellerhead || [name] == gargoylehead || [name] == demonhead || [name] == mummifiedtrophy || [name] == fetishtrophy || [name] == sextontrophy || [name] == cantortrophy || [name] == heirophanttrophy || [name] == minionskull || [name] == hellspawnskull || [name] == overseerskull || [name] == succubaeskull || [name] == bloodlordskull) && [quality] <= rare # [skillpoisondagger] >= 1 # [tier] == 120
+([name] == preservedhead || [name] == zombiehead || [name] == unravellerhead || [name] == gargoylehead || [name] == demonhead || [name] == mummifiedtrophy || [name] == fetishtrophy || [name] == sextontrophy || [name] == cantortrophy || [name] == heirophanttrophy || [name] == minionskull || [name] == hellspawnskull || [name] == overseerskull || [name] == succubaeskull || [name] == bloodlordskull) && [quality] <= rare # [skillpoisondagger] >= 2 # [tier] == 150
+([name] == preservedhead || [name] == zombiehead || [name] == unravellerhead || [name] == gargoylehead || [name] == demonhead || [name] == mummifiedtrophy || [name] == fetishtrophy || [name] == sextontrophy || [name] == cantortrophy || [name] == heirophanttrophy || [name] == minionskull || [name] == hellspawnskull || [name] == overseerskull || [name] == succubaeskull || [name] == bloodlordskull) && [quality] <= rare # [skillpoisondagger] >= 3 # [tier] == 170
+// Famous 30/20 block stack (no res required)
+([name] == preservedhead || [name] == zombiehead || [name] == unravellerhead || [name] == gargoylehead || [name] == demonhead || [name] == mummifiedtrophy || [name] == fetishtrophy || [name] == sextontrophy || [name] == cantortrophy || [name] == heirophanttrophy || [name] == minionskull || [name] == hellspawnskull || [name] == overseerskull || [name] == succubaeskull || [name] == bloodlordskull) && [quality] <= rare # [fbr] >= 30 && [toblock] >= 20 # [tier] == 145
+([name] == preservedhead || [name] == zombiehead || [name] == unravellerhead || [name] == gargoylehead || [name] == demonhead || [name] == mummifiedtrophy || [name] == fetishtrophy || [name] == sextontrophy || [name] == cantortrophy || [name] == heirophanttrophy || [name] == minionskull || [name] == hellspawnskull || [name] == overseerskull || [name] == succubaeskull || [name] == bloodlordskull) && [quality] <= rare # [fbr] >= 30 && [toblock] >= 20 && [fhr] >= 10 # [tier] == 165
+// +PS with block — god rolls (the sold Zombie Head class)
+([name] == preservedhead || [name] == zombiehead || [name] == unravellerhead || [name] == gargoylehead || [name] == demonhead || [name] == mummifiedtrophy || [name] == fetishtrophy || [name] == sextontrophy || [name] == cantortrophy || [name] == heirophanttrophy || [name] == minionskull || [name] == hellspawnskull || [name] == overseerskull || [name] == succubaeskull || [name] == bloodlordskull) && [quality] <= rare # [skillpoisondagger] >= 1 && [fbr] >= 30 && [toblock] >= 20 # [tier] == 190
+([name] == preservedhead || [name] == zombiehead || [name] == unravellerhead || [name] == gargoylehead || [name] == demonhead || [name] == mummifiedtrophy || [name] == fetishtrophy || [name] == sextontrophy || [name] == cantortrophy || [name] == heirophanttrophy || [name] == minionskull || [name] == hellspawnskull || [name] == overseerskull || [name] == succubaeskull || [name] == bloodlordskull) && [quality] <= rare # [skillpoisondagger] >= 2 && [fbr] >= 30 && [toblock] >= 20 # [tier] == 205
+([name] == preservedhead || [name] == zombiehead || [name] == unravellerhead || [name] == gargoylehead || [name] == demonhead || [name] == mummifiedtrophy || [name] == fetishtrophy || [name] == sextontrophy || [name] == cantortrophy || [name] == heirophanttrophy || [name] == minionskull || [name] == hellspawnskull || [name] == overseerskull || [name] == succubaeskull || [name] == bloodlordskull) && [quality] <= rare # [skillpoisondagger] >= 2 && [fbr] >= 30 && [toblock] >= 20 && [fhr] >= 10 # [tier] == 220
+([name] == preservedhead || [name] == zombiehead || [name] == unravellerhead || [name] == gargoylehead || [name] == demonhead || [name] == mummifiedtrophy || [name] == fetishtrophy || [name] == sextontrophy || [name] == cantortrophy || [name] == heirophanttrophy || [name] == minionskull || [name] == hellspawnskull || [name] == overseerskull || [name] == succubaeskull || [name] == bloodlordskull) && [quality] <= rare # [skillpoisondagger] >= 3 && [fbr] >= 30 && [toblock] >= 20 # [tier] == 230
+([name] == preservedhead || [name] == zombiehead || [name] == unravellerhead || [name] == gargoylehead || [name] == demonhead || [name] == mummifiedtrophy || [name] == fetishtrophy || [name] == sextontrophy || [name] == cantortrophy || [name] == heirophanttrophy || [name] == minionskull || [name] == hellspawnskull || [name] == overseerskull || [name] == succubaeskull || [name] == bloodlordskull) && [quality] <= rare # [fhr] >= 10 # [tier] == 80
+([name] == preservedhead || [name] == zombiehead || [name] == unravellerhead || [name] == gargoylehead || [name] == demonhead || [name] == mummifiedtrophy || [name] == fetishtrophy || [name] == sextontrophy || [name] == cantortrophy || [name] == heirophanttrophy || [name] == minionskull || [name] == hellspawnskull || [name] == overseerskull || [name] == succubaeskull || [name] == bloodlordskull) && [quality] <= rare # [fireresist]+[lightresist]+[coldresist] >= 20 # [tier] == 85
+([name] == preservedhead || [name] == zombiehead || [name] == unravellerhead || [name] == gargoylehead || [name] == demonhead || [name] == mummifiedtrophy || [name] == fetishtrophy || [name] == sextontrophy || [name] == cantortrophy || [name] == heirophanttrophy || [name] == minionskull || [name] == hellspawnskull || [name] == overseerskull || [name] == succubaeskull || [name] == bloodlordskull) && [quality] <= rare # [fireresist]+[lightresist]+[coldresist] >= 40 # [tier] == 100
+([name] == preservedhead || [name] == zombiehead || [name] == unravellerhead || [name] == gargoylehead || [name] == demonhead || [name] == mummifiedtrophy || [name] == fetishtrophy || [name] == sextontrophy || [name] == cantortrophy || [name] == heirophanttrophy || [name] == minionskull || [name] == hellspawnskull || [name] == overseerskull || [name] == succubaeskull || [name] == bloodlordskull) && [quality] <= rare # [skilldecrepify] >= 1 # [tier] == 95
+([name] == preservedhead || [name] == zombiehead || [name] == unravellerhead || [name] == gargoylehead || [name] == demonhead || [name] == mummifiedtrophy || [name] == fetishtrophy || [name] == sextontrophy || [name] == cantortrophy || [name] == heirophanttrophy || [name] == minionskull || [name] == hellspawnskull || [name] == overseerskull || [name] == succubaeskull || [name] == bloodlordskull) && [quality] <= rare # [skilldecrepify] >= 2 # [tier] == 115
+([name] == preservedhead || [name] == zombiehead || [name] == unravellerhead || [name] == gargoylehead || [name] == demonhead || [name] == mummifiedtrophy || [name] == fetishtrophy || [name] == sextontrophy || [name] == cantortrophy || [name] == heirophanttrophy || [name] == minionskull || [name] == hellspawnskull || [name] == overseerskull || [name] == succubaeskull || [name] == bloodlordskull) && [quality] <= rare # [skilldecrepify] >= 3 # [tier] == 135
+([name] == preservedhead || [name] == zombiehead || [name] == unravellerhead || [name] == gargoylehead || [name] == demonhead || [name] == mummifiedtrophy || [name] == fetishtrophy || [name] == sextontrophy || [name] == cantortrophy || [name] == heirophanttrophy || [name] == minionskull || [name] == hellspawnskull || [name] == overseerskull || [name] == succubaeskull || [name] == bloodlordskull) && [quality] <= rare # [skillpoisondagger] >= 1 && [skilldecrepify] >= 2 # [tier] == 175
+([name] == preservedhead || [name] == zombiehead || [name] == unravellerhead || [name] == gargoylehead || [name] == demonhead || [name] == mummifiedtrophy || [name] == fetishtrophy || [name] == sextontrophy || [name] == cantortrophy || [name] == heirophanttrophy || [name] == minionskull || [name] == hellspawnskull || [name] == overseerskull || [name] == succubaeskull || [name] == bloodlordskull) && [quality] <= rare # [skillpoisondagger] >= 2 && [skilldecrepify] >= 3 # [tier] == 200
+([name] == preservedhead || [name] == zombiehead || [name] == unravellerhead || [name] == gargoylehead || [name] == demonhead || [name] == mummifiedtrophy || [name] == fetishtrophy || [name] == sextontrophy || [name] == cantortrophy || [name] == heirophanttrophy || [name] == minionskull || [name] == hellspawnskull || [name] == overseerskull || [name] == succubaeskull || [name] == bloodlordskull) && [quality] <= rare # [skillpoisondagger] >= 2 && [fbr] >= 30 && [toblock] >= 20 && [skilldecrepify] >= 3 # [tier] == 235
+
+[type] == head && [quality] == rare # # [tier] == 55
+[type] == head && [quality] <= rare # [skillpoisondagger] >= 1 # [tier] == 120
+[type] == head && [quality] <= rare # [skillpoisondagger] >= 2 # [tier] == 150
+[type] == head && [quality] <= rare # [skillpoisondagger] >= 3 # [tier] == 170
+[type] == head && [quality] <= rare # [fbr] >= 30 && [toblock] >= 20 # [tier] == 145
+[type] == head && [quality] <= rare # [fbr] >= 30 && [toblock] >= 20 && [fhr] >= 10 # [tier] == 165
+[type] == head && [quality] <= rare # [skillpoisondagger] >= 1 && [fbr] >= 30 && [toblock] >= 20 # [tier] == 190
+[type] == head && [quality] <= rare # [skillpoisondagger] >= 2 && [fbr] >= 30 && [toblock] >= 20 # [tier] == 205
+[type] == head && [quality] <= rare # [skillpoisondagger] >= 2 && [fbr] >= 30 && [toblock] >= 20 && [fhr] >= 10 # [tier] == 220
+[type] == head && [quality] <= rare # [fireresist]+[lightresist]+[coldresist] >= 20 # [tier] == 85
+[type] == head && [quality] <= rare # [fireresist]+[lightresist]+[coldresist] >= 40 # [tier] == 100
+[type] == head && [quality] <= rare # [fhr] >= 10 # [tier] == 80
 [type] == head && [quality] <= rare # [enhanceddefense] >= 30 # [tier] == 65
 
+[type] == shield && [type] != auricshields && [quality] == rare # # [tier] == 55
 [type] == shield && [type] != auricshields && [quality] <= rare # [skillpoisondagger] >= 1 # [tier] == 95
 [type] == shield && [type] != auricshields && [quality] <= rare # [skillpoisondagger] >= 2 # [tier] == 110
 [type] == shield && [type] != auricshields && [quality] <= rare # [skillpoisondagger] >= 3 # [tier] == 125
+[type] == shield && [type] != auricshields && [quality] <= rare # [fbr] >= 30 && [toblock] >= 20 # [tier] == 140
+[type] == shield && [type] != auricshields && [quality] <= rare # [fbr] >= 30 && [toblock] >= 20 && [fhr] >= 10 # [tier] == 160
+[type] == shield && [type] != auricshields && [quality] <= rare # [skillpoisondagger] >= 1 && [fbr] >= 30 && [toblock] >= 20 # [tier] == 185
 [type] == shield && [type] != auricshields && [quality] <= rare # [fireresist]+[lightresist]+[coldresist] >= 30 # [tier] == 70
 [type] == shield && [type] != auricshields && [quality] <= rare # [fireresist]+[lightresist]+[coldresist] >= 50 # [tier] == 90
 [type] == shield && [type] != auricshields && [quality] <= rare # [fhr] >= 10 # [tier] == 75
@@ -55,6 +74,8 @@
 // HELM — IAS over plain life/res; Wormskull still strong (Shael for FHR)
 // =============================================================================
 [name] == bonehelm && [quality] == unique # [necromancerskills] >= 1 && [lifeleech] >= 5 # [maxquantity] == 1 && [tier] == 135 // Wormskull
+// Rare floor — pick yellows even unid / without matching IAS/res lines
+[type] == helm && [quality] == rare # # [tier] == 55
 [type] == helm && [quality] <= rare # [ias] >= 10 # [tier] == 125
 [type] == helm && [quality] <= rare # [ias] >= 20 # [tier] == 140
 [type] == helm && [quality] <= rare # [ias] >= 10 && [fireresist]+[lightresist] >= 15 # [tier] == 145
@@ -72,6 +93,9 @@
 // =============================================================================
 // ARMOR — ED / resists / life / FHR (chest IAS rare; keep ED high for PS)
 // =============================================================================
+// Treachery (Shael+Thul+Lem) — mid-game PS armor; beats rare ED/FHR chests
+[type] == armor # [ias] >= 45 && [coldresist] >= 30 # [tier] == 150
+[type] == armor && [quality] == rare # # [tier] == 55
 [type] == armor && [quality] <= rare # [maxhp] >= 20 # [tier] == 70
 [type] == armor && [quality] <= rare # [maxhp] >= 40 # [tier] == 85
 [type] == armor && [quality] <= rare # [fireresist]+[lightresist]+[coldresist] >= 20 # [tier] == 75
@@ -90,34 +114,53 @@
 [type] == armor && [quality] <= rare # [enhanceddefense] >= 50 && [fireresist]+[lightresist] >= 20 # [tier] == 100
 
 // =============================================================================
-// GLOVES — IAS first (Sigon's Gage = 30 IAS target)
+// GLOVES — IAS is king for PS (aim 20–30 on gloves toward 35/58 BP). FCR gloves = trash.
+// Continuous IAS so 19 beats 10, 30 beats Sigon's 30 only with extras.
 // =============================================================================
-[name] == gauntlets && [quality] == set # [strength] > 10 # [maxquantity] == 1 && [tier] == 155 // Sigon's Gage
-[type] == gloves && [quality] <= rare # [ias] >= 10 # [tier] == 130
-[type] == gloves && [quality] <= rare # [ias] >= 20 # [tier] == 145
-[type] == gloves && [quality] <= rare # [ias] >= 10 && [fireresist]+[lightresist] >= 10 # [tier] == 148
-[type] == gloves && [quality] <= rare # [ias] >= 20 && [fireresist]+[lightresist] >= 10 # [tier] == 152
+[name] == gauntlets && [quality] == set # [strength] > 10 # [maxquantity] == 1 && [tier] == 165 // Sigon's Gage (30 IAS)
+[name] == heavygloves && [quality] == unique # [ias] >= 10 # [maxquantity] == 1 && [tier] == 158 // Bloodfist
+[name] == sharkskingloves && [quality] == unique # [ias] >= 10 # [maxquantity] == 1 && [tier] == 160 // Bloodfist excep
+[name] == vampirebonegloves && [quality] == unique # [ias] >= 10 # [maxquantity] == 1 && [tier] == 162 // Bloodfist elite
+// Floor: unique gloves with no IAS (Frostburn etc.) MUST beat white/normal — was tier 0 and lost to whites
+// Works unid ([fcr]==0 unread). Identified Magefist uses fcr>0 demote below (max loses to floor until ID'd).
+[name] == gauntlets && [quality] == unique # # [tier] == 105 // Frostburn (named; no IAS needed)
+[type] == gloves && [quality] == unique # [fcr] == 0 # [tier] == 100
+// Unique IAS gloves (any) — beat FCR Magefist; lose to high rare IAS
+[type] == gloves && [quality] == unique # [ias] >= 10 && [fcr] == 0 # [tier] == 150
+[type] == gloves && [quality] == unique # [ias] >= 20 && [fcr] == 0 # [tier] == 160
+[type] == gloves && [quality] == rare # # [tier] == 55
+// Continuous: base 120 + ias*1.2 so more IAS always wins; res/life/str as sauce
+[type] == gloves && [quality] <= rare # [ias] >= 5 # [tier] == 120 + [ias]*1.2 + ([fireresist]+[lightresist]+[coldresist])/40 + [maxhp]/25 + ([strength]+[dexterity])/30
+[type] == gloves && [quality] <= rare # [ias] >= 10 # [tier] == 130 + [ias]*1.2 + ([fireresist]+[lightresist]+[coldresist])/40 + [maxhp]/25
+[type] == gloves && [quality] <= rare # [ias] >= 20 # [tier] == 145 + [ias]*1.0 + ([fireresist]+[lightresist]+[coldresist])/35 + [maxhp]/20
+[type] == gloves && [quality] <= rare # [ias] >= 30 # [tier] == 170 + ([fireresist]+[lightresist]+[coldresist])/30 + [maxhp]/20
 [type] == gloves && [quality] <= rare # [fireresist]+[lightresist]+[coldresist] >= 20 # [tier] == 80
 [type] == gloves && [quality] <= rare # [strength]+[dexterity] >= 10 # [tier] == 75
 [type] == gloves && [quality] <= rare # [maxhp] >= 10 # [tier] == 70
-// Demote FCR gloves (Magefist etc.) hard
+// Demote FCR gloves (Magefist etc.) hard — only wins when no floor line matches (ID'd fcr>0)
 [type] == gloves && [quality] == unique # [fcr] > 0 # [tier] == 25
 
 // =============================================================================
 // BOOTS — IAS first (Sigon's Sabot); FHR second
 // =============================================================================
 [name] == greaves && [quality] == set # # [maxquantity] == 1 && [tier] == 155 // Sigon's Sabot
+[type] == boots && [quality] == rare # # [tier] == 55
 [type] == boots && [quality] <= rare # [ias] >= 10 # [tier] == 130
 [type] == boots && [quality] <= rare # [ias] >= 20 # [tier] == 145
 [type] == boots && [quality] <= rare # [ias] >= 10 && [fireresist]+[lightresist] >= 10 # [tier] == 150
 [type] == boots && [quality] <= rare # [fhr] >= 10 # [tier] == 100
 [type] == boots && [quality] <= rare # [fhr] >= 20 # [tier] == 115
-[type] == boots && [quality] <= rare # [frw] >= 20 && [fireresist]+[lightresist] >= 20 # [tier] == 110
+[type] == boots && [quality] <= rare # [frw] >= 10 # [tier] == 140
+[type] == boots && [quality] <= rare # [frw] >= 20 # [tier] == 165
+[type] == boots && [quality] <= rare # [frw] >= 30 # [tier] == 180
+[type] == boots && [quality] <= rare # [frw] >= 20 && [fireresist]+[lightresist] >= 20 # [tier] == 175
+[type] == boots && [quality] <= rare # [frw] >= 30 && [fireresist]+[lightresist] >= 20 # [tier] == 190
 [type] == boots && [quality] <= rare # [fireresist]+[lightresist]+[coldresist] >= 30 # [tier] == 90
 
 // =============================================================================
 // BELT — IAS / FHR (prefer IAS when present)
 // =============================================================================
+[type] == belt && [quality] == rare # # [tier] == 55
 [type] == belt && [quality] <= rare # [ias] >= 10 # [tier] == 130
 [type] == belt && [quality] <= rare # [ias] >= 20 # [tier] == 145
 [type] == belt && [quality] <= rare # [ias] >= 10 && [fhr] >= 10 # [tier] == 150

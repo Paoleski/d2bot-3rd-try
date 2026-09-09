@@ -17,6 +17,7 @@
 [Name] == ScrollofIdentify
 
 // gloves
+[type] == gloves && [quality] == rare && [Flag] != Ethereal # # [tier] == 5
 [type] == gloves && [Flag] != Ethereal # [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 5 # [tier] == 1
 [type] == gloves && [quality] == set && [Flag] != Ethereal # # [tier] == 2
 [type] == gloves && [Flag] != Ethereal # [strength] > 0 && [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 5 # [tier] == 3
@@ -36,6 +37,7 @@
 [name] == sash && [Flag] != Ethereal # # [tier] == 1
 [name] == sash && [Flag] != Ethereal # [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 5 # [tier] == 2
 [name] == sash && [quality] == unique && [Flag] != Ethereal # # [tier] == 3
+[type] == belt && [quality] == rare && [Flag] != Ethereal # # [tier] == 5
 [name] == belt && [Flag] != Ethereal # # [tier] == 4
 [name] == belt && [quality] == set && [Flag] != Ethereal # # [tier] == 5
 [name] == belt && [quality] == unique && [Flag] != Ethereal # # [tier] == 6
@@ -52,7 +54,8 @@
 ([name] == Vampirefangbelt || [name] == SpiderwebSash || [name] == DemonhideSash || [name] == SharkskinBelt || [name] == MeshBelt) && [quality] == rare && [Flag] != Ethereal # [strength] > 10 && [maxhp] >= 20 && ([coldresist] >= 10) + ([fireresist] >= 10) + ([lightresist] >= 10) >= 2  # [tier] == 103
 ([name] == Vampirefangbelt || [name] == SpiderwebSash || [name] == DemonhideSash || [name] == SharkskinBelt || [name] == MeshBelt) && [quality] == rare && [Flag] != Ethereal # [strength] > 15 && [maxhp] >= 20 && ([coldresist] >= 10) + ([fireresist] >= 10) + ([lightresist] >= 10) >= 2  # [tier] == 104
 
-// boots
+// boots — FRW is primary (all builds)
+[type] == boots && [quality] == rare # # [tier] == 5
 [type] == boots # [maxhp] > 0 || [maxmana] > 0 # [tier] == 1
 [type] == boots && [quality] == set # # [tier] == 1
 [type] == boots # [fireresist]+[lightresist]+[coldresist] >= 10 # [tier] == 2
@@ -60,10 +63,16 @@
 [type] == boots && [quality] == unique # # [tier] == 4
 [type] == boots # [fireresist]+[lightresist]+[coldresist] >= 40 && ([maxmana] > 10 || [fhr] > 0) # [tier] == 5
 [type] == boots # [fireresist]+[lightresist]+[coldresist] >= 40 && ([maxmana] > 20 || [fhr] > 0) # [tier] == 6
+[type] == boots # [frw] >= 10 # [tier] == 25
+[type] == boots # [frw] >= 20 # [tier] == 40
+[type] == boots # [frw] >= 30 # [tier] == 55
+[type] == boots # [frw] >= 20 && [fireresist]+[lightresist]+[coldresist] >= 20 # [tier] == 65
+[type] == boots # [frw] >= 30 && [fireresist]+[lightresist]+[coldresist] >= 30 # [tier] == 80
 [name] == sharkskinboots && [quality] == unique && [Flag] != Ethereal # # [maxquantity] == 1 && [tier] == 101
 [name] == battleboots && [quality] == unique && [Flag] != Ethereal # # [maxquantity] == 1 && [tier] == 102
 
 // helm
+[type] == helm && [quality] == rare && [Flag] != Ethereal # # [tier] == 5
 [type] == helm && [Flag] != Ethereal # [maxhp] > 0 # [tier] == 1
 [type] == helm && [Flag] != Ethereal # [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 5 # [tier] == 2
 [type] == helm && [Flag] != Ethereal # [maxhp] > 5 # [tier] == 3
@@ -147,6 +156,7 @@
 [name] == ring && ([quality] == magic || [quality] == rare) # [fcr] == 10 && [maxhp] > 30 && [strength] > 15 && ([coldresist] >= 10) + ([fireresist] >= 10) + ([lightresist] >= 10) >= 2 										# [tier] == 104
 
 // armor
+[type] == armor && [quality] == rare # # [tier] == 5
 [type] == armor # [maxhp] > 0 || [strength] > 0 # [tier] == 1
 [type] == armor # [maxhp] > 0 && [strength] > 0 # [tier] == 1
 [name] == quiltedarmor && [quality] == set # # [tier] == 3

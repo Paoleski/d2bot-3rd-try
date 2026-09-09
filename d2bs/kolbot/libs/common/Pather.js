@@ -173,14 +173,25 @@ var Pather = {
 
 	// Progressive *extra* wait between teles (ms). Walk/fight only while this is active.
 	// Normal A1–A2: 10s → A3: 9s → A4: 8s → A5: 7s
-	// NM A1: 6s → A2: 5s → … → A5: 2s
+	// NM A1: 6s → A2: 5s → A3: 4s → A4–A5: 3s/2s (necro / non-sorc)
+	// Sorc: no bot TeleDelay from lvl 45+ anywhere, or from NM Act 4 onward before that
 	// Hell: 0 = no bot delay (still waits on in-game cast frames / FCR in teleportTo)
 	getTeleDelay: function () {
 		var d, a, table;
 
+		// Sorceress lvl 45+: never apply bot TeleDelay (game FCR / cast frames only)
+		if (me.classid === 1 && me.charlvl >= 45) {
+			return 0;
+		}
+
 		// Config.TeleDelay >= 0 forces a fixed extra delay; -1 / omit = progressive
 		if (typeof Config !== "undefined" && Config.TeleDelay !== undefined && Config.TeleDelay >= 0) {
 			return Config.TeleDelay;
+		}
+
+		// Sorceress: spam Teleport once past NM Act 3 (A4/A5 NM + Hell) even before 45
+		if (me.classid === 1 && (me.diff >= 2 || (me.diff === 1 && me.act > 3))) {
+			return 0;
 		}
 
 		table = [
@@ -1070,7 +1081,7 @@ ModeLoop:
 		clearPath - kill monsters while moving
 	*/
 	moveToExit: function (targetArea, use, clearPath) {
-		var i, j, area, exits, targetRoom, dest, currExit, tick, foundExit,
+		var i, j, area, exits, targetRoom, dest, currExit, tick, foundExit, matches, exitDist, bestDist,
 			areas = [];
 
 		if (targetArea instanceof Array) {
@@ -1120,21 +1131,41 @@ ModeLoop:
 			}
 
 			foundExit = false;
+			matches = [];
 
 			for (j = 0; j < exits.length; j += 1) {
-				currExit = {
-					x: exits[j].x,
-					y: exits[j].y,
-					type: exits[j].type,
-					target: exits[j].target,
-					tileid: exits[j].tileid
-				};
+				if (exits[j].target === areas[i]) {
+					matches.push({
+						x: exits[j].x,
+						y: exits[j].y,
+						type: exits[j].type,
+						target: exits[j].target,
+						tileid: exits[j].tileid
+					});
+				}
+			}
 
-				if (currExit.target !== areas[i]) {
-					continue;
+			if (matches.length) {
+				foundExit = true;
+
+				// Multiple exits lead to the same target area (common in outdoor/jungle areas) —
+				// use the nearest one to us, not just the first one listed. Locking onto a far exit
+				// when a much closer one exists is a real roundabout-route bug, not a pathing quirk.
+				currExit = matches[0];
+
+				if (matches.length > 1) {
+					bestDist = getDistance(me, currExit.x, currExit.y);
+
+					for (j = 1; j < matches.length; j += 1) {
+						exitDist = getDistance(me, matches[j].x, matches[j].y);
+
+						if (exitDist < bestDist) {
+							bestDist = exitDist;
+							currExit = matches[j];
+						}
+					}
 				}
 
-				foundExit = true;
 				dest = this.getNearestWalkable(currExit.x, currExit.y, 5, 1);
 
 				if (!dest) {
@@ -1193,8 +1224,6 @@ ModeLoop:
 						break;
 					}
 				}
-
-				break;
 			}
 
 			// use=false used to return true even when no exit matched → stuck in place (Cathedral pack hunt)
@@ -2329,7 +2358,7 @@ MainLoop:
 		clearPath - clear path
 	*/
 	getWP: function (area, clearPath) {
-		var i, j, wp, preset, tick,
+		var i, j, wp, preset, tick, obj, seenIds,
 			wpIDs = [119, 145, 156, 157, 237, 238, 288, 323, 324, 398, 402, 429, 494, 496, 511, 539];
 
 		if (area !== me.area) {
@@ -2375,6 +2404,10 @@ MainLoop:
 							delay(500);
 							me.cancel();
 
+							if (typeof CompLog !== "undefined") {
+								CompLog.onWaypoint(me.area);
+							}
+
 							return true;
 						}
 
@@ -2383,6 +2416,48 @@ MainLoop:
 				}
 			}
 		}
+
+		// Fallback: none of the 16 known preset ids (or the "waypoint" name match) hit —
+		// happens when this area's WP object uses a different id/name (e.g. modded level).
+		// Blind-interact every nearby object and watch for the WP menu (UI flag 0x14) to open.
+		seenIds = [];
+		obj = getUnit(2);
+
+		if (obj) {
+			do {
+				if (seenIds.indexOf(obj.id) < 0) {
+					seenIds.push(obj.id);
+				}
+
+				if (getDistance(me, obj) <= 15) {
+					for (j = 0; j < 5; j += 1) {
+						if (getDistance(me, obj) > 5) {
+							this.moveToUnit(obj, 0, 0, clearPath);
+						}
+
+						Misc.click(0, 0, obj);
+
+						if (getUIFlag(0x14)) {
+							delay(500);
+							me.cancel();
+
+							if (typeof CompLog !== "undefined") {
+								CompLog.onWaypoint(me.area);
+							}
+
+							print("ÿc8Pather.getWPÿc0 :: WP found via blind object scan — id " + obj.id +
+								" in area " + me.area + " (add this id to getWP's wpIDs list)");
+
+							return true;
+						}
+
+						delay(500);
+					}
+				}
+			} while (obj.getNext());
+		}
+
+		print("ÿc8Pather.getWPÿc0 :: no WP found in area " + me.area + " — nearby object ids: " + seenIds.join(","));
 
 		return false;
 	},

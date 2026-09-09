@@ -187,6 +187,7 @@ var Config = {
 	ManaPark: true, // false = belt-only mana (no inv mana organizer / top-right park)
 	PickRange: 40,
 	MakeRoom: true,
+	ReorganizeInventory: true, // shuffle inv items to clear a contiguous spot before town/mule
 	FastPick: false,
 	OpenChests: false,
 	PickitFiles: [],
@@ -231,6 +232,12 @@ var Config = {
 	RunewordWatchDelay: 0, // lab: ms pause between unstack/separate/socket steps (0=off; only honoured when RunewordDebug)
 	RunewordDebug: false, // Lore/Stealth diagnose dumps, cull notes, helper status, Pd2Stack verbose — only the make itself logs when false
 	ConsoleLogAll: false, // also tee prints into logs/console.all.log (per-profile log is always written)
+	// Competition stats — event-only disk writes (quests / first WPs / chicken-death / equip-on-wear / time). Off = zero work.
+	CompLog: {
+		Enabled: true,
+		PollMs: 60000, // quest/WP scan interval (1 min)
+		Verbose: false // print each event to console
+	},
 	// Loot-filter marker that means a rune is socketable (Ctrl+Shift cleared +form). Override if your filter wording differs.
 	Pd2UnstackedNameRegex: /UNSTACKED|WILL\s*SOCKET/i,
 	Pd2ClientWidth: 0, // 0 = read from helper heartbeat; set if helper has no W H yet
@@ -281,6 +288,8 @@ var Config = {
 	FastParty: false,
 	AutoEquip: false,
 	AutoEquipMerc: false,
+	// Added to NTIP tier when identified item has Cannot Be Frozen and we don't already have CBF elsewhere. 0 = off.
+	AutoEquipCbfBonus: 100,
 
 	// AutoGear (PD2) — SoloPlay ideas transformed for this lab. See sdk/pd2-extract/AUTOGEAR_PD2_NOTES.md
 	AutoGearBuild: "",
@@ -289,6 +298,8 @@ var Config = {
 		EnableMidRW: true, // Phase 2: gated Spirit/Insight (off until validated)
 		EnableSecondary: false, // Phase 4: swap CTA/Spirit
 		FinalGearBoost: 100000, // Phase 4: endgame identity boost
+		DebugScore: false, // Phase 3: print AutoGearScore breakdowns
+		DebugMercEquip: false, // Merc equip housekeeping (park/strip/UI); decisions always one-line
 		CharmCaps: {
 			Enabled: true,
 			SmallLife: 6,
@@ -341,7 +352,7 @@ var Config = {
 
 	// Necromancer specific
 	Golem: 0,
-	MaxGolems: 1, // PD2 mastery allows more; keep 1 unless you set higher
+	MaxGolems: 5, // Cap for PD2 Golem Mastery slots (1 + floor(hard/5)); set 1 to force single
 	ActiveSummon: false,
 	Skeletons: 0,
 	SkeletonMages: 0,
@@ -477,7 +488,8 @@ var Config = {
 		EntranceTP: "Entrance TP up",
 		StarTP: "Star TP up",
 		DiabloMsg: "Diablo",
-		WalkClear: false
+		WalkClear: false,
+		ChaosAttackSkill: -1 // primary AttackSkill override while clearing Chaos Sanctuary (trash + seal bosses) in NM/Hell. -1 = disabled. Never applied to Diablo himself.
 	},
 	DiabloHelper: {
 		Wait: 120,
@@ -549,7 +561,11 @@ var Config = {
 		WalkClear: false
 	},
 	Travincal: {
-		PortalLeech: false
+		PortalLeech: false,
+		HitAndRun: true, // NM/Hell light sorc only — timed engage then teleport-kite Council
+		HitAndRunMs: 3000, // ms of attacking before each retreat
+		HitAndRunMinRetreat: 15, // floored up to primary skill range (Lightning → 15+)
+		HitAndRunMaxRetreat: 22 // floored up to skill range + 8 (Lightning → 23)
 	},
 	SkillStat: {
 		Skills: []

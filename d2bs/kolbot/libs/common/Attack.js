@@ -565,20 +565,32 @@ var Attack = {
 
 			if (target) {
 				do {
-					if ((!spectype || (target.spectype & spectype)) && this.checkMonster(target) && this.skipCheck(target)) {
-						// Speed optimization - don't go through monster list until there's at least one within clear range
-						if (!start && getDistance(target, orgx, orgy) <= range &&
-								(Pather.teleSkill() > 0 || !Scripts.Follower || !checkCollision(me, target, 0x1))) {
-							start = true;
-						}
-
-						// Also start if a melee-danger mob is already on us
-						if (!start && dangerR && getDistance(me, target) <= dangerR) {
-							start = true;
-						}
-
-						monsterList.push(copyUnit(target));
+					if (!this.checkMonster(target) || !this.skipCheck(target)) {
+						continue;
 					}
+
+					distMe = getDistance(me, target);
+
+					// Spectype filter (0 = all). Always include melee-danger threats even when
+					// seeking champs only (0x7) — otherwise trash on us is invisible to clear.
+					if (spectype && !(target.spectype & spectype)) {
+						if (!(dangerR > 0 && distMe <= dangerR)) {
+							continue;
+						}
+					}
+
+					// Speed optimization - don't go through monster list until there's at least one within clear range
+					if (!start && getDistance(target, orgx, orgy) <= range &&
+							(Pather.teleSkill() > 0 || !Scripts.Follower || !checkCollision(me, target, 0x1))) {
+						start = true;
+					}
+
+					// Also start if a melee-danger mob is already on us
+					if (!start && dangerR && distMe <= dangerR) {
+						start = true;
+					}
+
+					monsterList.push(copyUnit(target));
 				} while (target.getNext());
 			}
 
@@ -599,8 +611,17 @@ var Attack = {
 					}
 				}
 
-				//monsterList.sort(Sort.units);
-				monsterList.sort(sortfunc);
+				// Peel what's on us before chasing distant champs/specials
+				monsterList.sort(function (a, b) {
+					var aThreat = dangerR > 0 && a.distMe <= dangerR,
+						bThreat = dangerR > 0 && b.distMe <= dangerR;
+
+					if (aThreat !== bThreat) {
+						return aThreat ? -1 : 1;
+					}
+
+					return sortfunc(a, b);
+				});
 
 				target = copyUnit(monsterList[0]);
 				distMe = target.x !== undefined ? getDistance(me, target) : 999;
@@ -913,6 +934,531 @@ var Attack = {
 		return true;
 	},
 
+	/**
+	 * Pick a walkable spot away from a threat cluster (centroid of threatList).
+	 * Ring-searches angles/distances like diabloStandOff — no hardcoded room coords.
+	 * Scores by max distance to nearest threat, with a small penalty for distance from me.
+	 * @returns {{x:number,y:number}|null}
+	 */
+	retreatSpotAwayFrom: function (threatList, minD, maxD) {
+		var i, j, n, cx, cy, tx, ty, d, nearThreat, score, best, bestScore,
+			angles, distances, ox;
+
+		if (!threatList || !threatList.length) {
+			return null;
+		}
+
+		minD = (minD === undefined) ? 12 : minD;
+		maxD = (maxD === undefined) ? 18 : maxD;
+
+		if (maxD < minD) {
+			maxD = minD;
+		}
+
+		cx = 0;
+		cy = 0;
+		n = 0;
+
+		for (i = 0; i < threatList.length; i += 1) {
+			if (threatList[i] && threatList[i].x !== undefined && threatList[i].y !== undefined) {
+				cx += threatList[i].x;
+				cy += threatList[i].y;
+				n += 1;
+			}
+		}
+
+		if (!n) {
+			return null;
+		}
+
+		cx = Math.round(cx / n);
+		cy = Math.round(cy / n);
+
+		angles = [0, 30, -30, 45, -45, 60, -60, 90, -90, 120, -120, 135, -135, 150, -150, 180];
+		distances = [maxD, Math.round((minD + maxD) / 2), minD];
+		best = null;
+		bestScore = -9999;
+
+		for (j = 0; j < distances.length; j += 1) {
+			d = distances[j];
+
+			for (i = 0; i < angles.length; i += 1) {
+				tx = Math.round(cx + Math.cos(angles[i] * Math.PI / 180) * d);
+				ty = Math.round(cy + Math.sin(angles[i] * Math.PI / 180) * d);
+
+				if (!this.validSpot(tx, ty)) {
+					continue;
+				}
+
+				nearThreat = 999;
+
+				for (n = 0; n < threatList.length; n += 1) {
+					if (threatList[n] && threatList[n].x !== undefined) {
+						ox = getDistance(tx, ty, threatList[n].x, threatList[n].y);
+
+						if (ox < nearThreat) {
+							nearThreat = ox;
+						}
+					}
+				}
+
+				if (nearThreat < minD - 1) {
+					continue;
+				}
+
+				// Prefer farther from threats; mild preference for spots closer to us
+				score = nearThreat - (getDistance(me.x, me.y, tx, ty) * 0.15);
+
+				if (score > bestScore) {
+					bestScore = score;
+					best = {x: tx, y: ty};
+				}
+			}
+		}
+
+		return best;
+	},
+
+	/**
+	 * Engage for engageMs, then teleport/walk to a retreat spot away from remaining threats.
+	 * Casters only (caller should gate) — no hardcoded skill IDs; damage via ClassAttack.doAttack.
+	 *
+	 * @param {function} getListFn - returns monster unit array (fresh each call)
+	 * @param {object} [opts]
+	 * @param {number} [opts.engageMs=3000] - ms to attack before each retreat
+	 * @param {number} [opts.minRetreat=12]
+	 * @param {number} [opts.maxRetreat=18]
+	 * @param {number} [opts.maxCycles=60]
+	 */
+	hitAndRunClear: function (getListFn, opts) {
+		var engageMs, minRetreat, maxRetreat, maxCycles,
+			cycle, list, target, i, spot, result, attackCount, engageStart;
+
+		// Defaults first — never read missing opts.* (SpiderMonkey Strict Warning on undefined props)
+		opts = opts || {};
+		engageMs = 3000;
+		minRetreat = 12;
+		maxRetreat = 18;
+		maxCycles = 60;
+
+		if (opts.hasOwnProperty("engageMs") && opts.engageMs > 0) {
+			engageMs = opts.engageMs;
+		}
+
+		if (opts.hasOwnProperty("minRetreat") && opts.minRetreat !== undefined) {
+			minRetreat = opts.minRetreat;
+		}
+
+		if (opts.hasOwnProperty("maxRetreat") && opts.maxRetreat !== undefined) {
+			maxRetreat = opts.maxRetreat;
+		}
+
+		if (opts.hasOwnProperty("maxCycles") && opts.maxCycles > 0) {
+			maxCycles = opts.maxCycles;
+		}
+
+		// Stand farther when primary has long range (Lightning 15 vs CB ~6)
+		skRange = Skill.getRange(Config.AttackSkill[1]) || 0;
+
+		if (skRange > minRetreat) {
+			minRetreat = skRange;
+		}
+
+		if (skRange + 8 > maxRetreat) {
+			maxRetreat = skRange + 8;
+		}
+
+		attackCount = 0;
+
+		if (typeof getListFn !== "function") {
+			throw new Error("hitAndRunClear: getListFn must be a function");
+		}
+
+		if (Config.AttackSkill[1] < 0 || Config.AttackSkill[3] < 0) {
+			return false;
+		}
+
+		this.clearing = true;
+		this._dangerCache = null;
+		print("ÿc2Attackÿc0 :: hitAndRunClear (engage=" + engageMs + "ms retreat=" + minRetreat + "-" + maxRetreat +
+			") AttackSkill[1]=" + Config.AttackSkill[1] + " [2]=" + Config.AttackSkill[2]);
+
+		try {
+			for (cycle = 0; cycle < maxCycles; cycle += 1) {
+				if (me.dead) {
+					return false;
+				}
+
+				list = getListFn();
+
+				if (!list || !list.length) {
+					break;
+				}
+
+				engageStart = getTickCount();
+
+				// Engage for engageMs — doAttack handles getIntoPosition / teleport into range
+				while (getTickCount() - engageStart < engageMs) {
+					if (me.dead) {
+						return false;
+					}
+
+					list = getListFn();
+
+					if (!list || !list.length) {
+						break;
+					}
+
+					for (i = 0; i < list.length; i += 1) {
+						if (list[i].x !== undefined) {
+							list[i].distMe = getDistance(me, list[i]);
+						}
+					}
+
+					list.sort(this.sortMonsters);
+					target = copyUnit(list[0]);
+
+					if (!target || target.x === undefined || !this.checkMonster(target)) {
+						break;
+					}
+
+					Misc.townCheck(true);
+					result = ClassAttack.doAttack(target, attackCount % 15 === 0);
+
+					if (!result) {
+						// Timed skill on delay with no long-range filler — wait, don't abort the engage
+						if (me.getState(121)) {
+							delay(50 + me.ping);
+							continue;
+						}
+
+						Packet.flash(me.gid);
+						break;
+					}
+
+					attackCount += 1;
+
+					// Debug every 4th cast so we can see Lightning is really firing
+					if (attackCount === 1 || attackCount % 4 === 0) {
+						print("ÿc2Attackÿc0 :: Trav cast #" + attackCount + " skill[1]=" + Config.AttackSkill[1] +
+							" dist=" + Math.round(getDistance(me, target)));
+						me.overhead("cast #" + attackCount + " sk=" + Config.AttackSkill[1]);
+					}
+
+					if (target.mode === 0 || target.mode === 12 || Config.FastPick === 2) {
+						Pickit.fastPick();
+					}
+				}
+
+				// Room cleared mid-cycle
+				list = getListFn();
+
+				if (!list || !list.length) {
+					break;
+				}
+
+				// Retreat away from remaining cluster — forceTeleport so TeleDelay / walk pathing can't skip the dodge
+				spot = this.retreatSpotAwayFrom(list, minRetreat, maxRetreat);
+
+				if (!spot) {
+					spot = CollMap.getRandCoordinate(me.x, -1, 1, me.y, -1, 1, Math.max(8, minRetreat));
+				}
+
+				if (spot && spot.x !== undefined) {
+					if (typeof Pather.forceTeleportTo === "function" && Pather.canTeleport()) {
+						if (!Pather.forceTeleportTo(spot.x, spot.y, 5)) {
+							Pather.moveTo(spot.x, spot.y);
+						}
+					} else {
+						Pather.moveTo(spot.x, spot.y);
+					}
+				}
+
+				delay(50 + me.ping);
+			}
+
+			ClassAttack.afterAttack(true);
+			this.openChests(30);
+
+			if (attackCount > 0) {
+				Pickit.pickItems();
+			}
+		} finally {
+			this.clearing = false;
+		}
+
+		return true;
+	},
+
+	/**
+	 * Travel to (x,y) along the real getPath route, clearing monsters after each hop.
+	 * Unlike Pather.clearPath / Attack.clear, never targets excludeClassId (e.g. Mephisto 242).
+	 * opts.nodeDist — tele/walk node spacing (default 30 tele / 5 walk)
+	 * opts.refresh — clearList refresh interval (default 20)
+	 */
+	travelClearing: function (x, y, excludeClassId, opts) {
+		var path, i, node, useTele, nodeDist, refresh, buildListFn, hop;
+
+		opts = opts || {};
+		refresh = 20;
+
+		if (opts.hasOwnProperty("refresh") && opts.refresh > 0) {
+			refresh = opts.refresh;
+		}
+
+		useTele = Pather.canTeleport();
+		nodeDist = 5;
+
+		if (opts.hasOwnProperty("nodeDist") && opts.nodeDist > 0) {
+			nodeDist = opts.nodeDist;
+		} else if (useTele) {
+			nodeDist = 30;
+		}
+
+		buildListFn = function () {
+			var monsterList = [],
+				monster = getUnit(1);
+
+			if (monster) {
+				do {
+					if (excludeClassId !== undefined && excludeClassId !== null &&
+							monster.classid === excludeClassId) {
+						continue;
+					}
+
+					if (Attack.checkMonster(monster)) {
+						monsterList.push(copyUnit(monster));
+					}
+				} while (monster.getNext());
+			}
+
+			return monsterList;
+		};
+
+		if (getDistance(me, x, y) < 5) {
+			this.clearList(buildListFn, null, refresh);
+
+			return true;
+		}
+
+		path = getPath(me.area, x, y, me.x, me.y, useTele ? 1 : 0, nodeDist);
+
+		if (!path || !path.length) {
+			print("ÿc8Attack.travelClearingÿc0 :: no path to " + x + "," + y + " — falling back to moveTo");
+
+			if (useTele && typeof Pather.forceTeleportTo === "function") {
+				if (!Pather.forceTeleportTo(x, y, 5)) {
+					Pather.moveTo(x, y, 3, false);
+				}
+			} else {
+				Pather.moveTo(x, y, 3, false);
+			}
+
+			this.clearList(buildListFn, null, refresh);
+
+			return getDistance(me, x, y) < 8;
+		}
+
+		path.reverse();
+		print("ÿc2Attackÿc0 :: travelClearing → " + x + "," + y + " nodes=" + path.length +
+			" exclude=" + (excludeClassId !== undefined ? excludeClassId : "none") +
+			" tele=" + useTele);
+
+		for (i = 0; i < path.length; i += 1) {
+			if (me.dead) {
+				return false;
+			}
+
+			node = path[i];
+
+			if (!node || node.x === undefined) {
+				continue;
+			}
+
+			if (getDistance(me, node.x, node.y) < 3) {
+				continue;
+			}
+
+			hop = false;
+
+			if (useTele && typeof Pather.forceTeleportTo === "function") {
+				hop = Pather.forceTeleportTo(node.x, node.y, 5);
+			}
+
+			if (!hop) {
+				Pather.moveTo(node.x, node.y, 3, false);
+			}
+
+			delay(50 + me.ping);
+			this.clearList(buildListFn, null, refresh);
+			Misc.townCheck(true);
+		}
+
+		// Ensure we land on the destination and mop up once more
+		if (getDistance(me, x, y) > 5) {
+			if (useTele && typeof Pather.forceTeleportTo === "function") {
+				if (!Pather.forceTeleportTo(x, y, 5)) {
+					Pather.moveTo(x, y, 3, false);
+				}
+			} else {
+				Pather.moveTo(x, y, 3, false);
+			}
+		}
+
+		this.clearList(buildListFn, null, refresh);
+
+		return getDistance(me, x, y) < 8;
+	},
+
+	/** True if configured primary attack is ranged (casters / bow) — not melee hug. */
+	isRangedAttacker: function () {
+		var sk;
+
+		sk = Config.AttackSkill[1];
+
+		if (sk < 0) {
+			sk = Config.AttackSkill[3];
+		}
+
+		if (sk < 0) {
+			return false;
+		}
+
+		return Skill.getRange(sk) > 4;
+	},
+
+	/** Light sorceress only (Config.AutoGearBuild === "light"). */
+	isLightSorc: function () {
+		var build;
+
+		if (me.classid !== 1) {
+			return false;
+		}
+
+		build = (Config.AutoGearBuild && String(Config.AutoGearBuild).toLowerCase()) || "";
+
+		return build === "light";
+	},
+
+	/**
+	 * Light sorc only: force Lightning (49) as sole attack if learned.
+	 * No CB/Nova filler — wait out skill delay at range instead of walking in.
+	 * tag - short label for debug prints/overhead (e.g. "Trav", "Meph"). Defaults to "Trav".
+	 * Returns snapshot to restore, or null if not light sorc / Lightning unavailable.
+	 */
+	preferLightningOnly: function (tag) {
+		var snap, hard, soft, fromSlot5, can;
+
+		tag = tag || "Trav";
+
+		if (!this.isLightSorc()) {
+			print("ÿc2Attackÿc0 :: " + tag + " Lightning skip — not light sorc (build=" + Config.AutoGearBuild + ")");
+
+			return null;
+		}
+
+		hard = me.getSkill(49, 0) || 0;
+		soft = me.getSkill(49, 1) || 0;
+		fromSlot5 = (Config.AttackSkill[5] === 49);
+		can = this.canUseSkill(49);
+
+		print("ÿc2Attackÿc0 :: " + tag + " Lightning debug — canUse=" + can +
+			" hard=" + hard + " soft=" + soft +
+			" AutoGearBuild=" + Config.AutoGearBuild +
+			" AttackSkill=[1]=" + Config.AttackSkill[1] +
+			" [2]=" + Config.AttackSkill[2] +
+			" [3]=" + Config.AttackSkill[3] +
+			" [5]=" + Config.AttackSkill[5]);
+
+		if (!can) {
+			print("ÿc1Attackÿc0 :: " + tag + " Lightning SKIP — skill 49 not usable (still on Charged Bolt)");
+			me.overhead(tag + ": no Lightning");
+
+			return null;
+		}
+
+		snap = {
+			a1: Config.AttackSkill[1],
+			a2: Config.AttackSkill[2],
+			a3: Config.AttackSkill[3],
+			a4: Config.AttackSkill[4]
+		};
+
+		Config.AttackSkill[1] = 49; // Lightning only
+		Config.AttackSkill[2] = -1; // no short-range filler while on skill delay
+		Config.AttackSkill[3] = 49;
+		Config.AttackSkill[4] = -1;
+
+		print("ÿc2Attackÿc0 :: " + tag + " Lightning ON — primary=49 range=" + Skill.getRange(49) +
+			" (was " + snap.a1 + "/" + snap.a2 + ") slot5WasLightning=" + fromSlot5);
+		me.overhead(tag + ": Lightning only");
+
+		return snap;
+	},
+
+	/**
+	 * Light sorc only: force Charged Bolt (38) for close-range boss telestomp (Mephisto).
+	 * Returns snapshot to restore, or null if not light sorc / CB unavailable.
+	 */
+	preferChargedBolt: function (tag) {
+		var snap, can;
+
+		tag = tag || "Meph";
+
+		if (!this.isLightSorc()) {
+			return null;
+		}
+
+		can = this.canUseSkill(38);
+
+		if (!can) {
+			print("ÿc1Attackÿc0 :: " + tag + " Charged Bolt SKIP — skill 38 not usable");
+			me.overhead(tag + ": no Charged Bolt");
+
+			return null;
+		}
+
+		snap = {
+			a1: Config.AttackSkill[1],
+			a2: Config.AttackSkill[2],
+			a3: Config.AttackSkill[3],
+			a4: Config.AttackSkill[4]
+		};
+
+		Config.AttackSkill[1] = 38;
+		Config.AttackSkill[2] = 38;
+		Config.AttackSkill[3] = 38;
+		Config.AttackSkill[4] = 38;
+
+		print("ÿc2Attackÿc0 :: " + tag + " Charged Bolt ON — primary=38 (was " + snap.a1 + "/" + snap.a2 + ")");
+		me.overhead(tag + ": Charged Bolt");
+
+		return snap;
+	},
+
+	/** Travincal + light sorc only: force Lightning (49) as sole attack if learned. */
+	preferTravLightning: function () {
+		return this.preferLightningOnly("Trav");
+	},
+
+	/** @deprecated use preferLightningOnly */
+	preferLongerAttackSkill: function () {
+		return this.preferLightningOnly("Trav");
+	},
+
+	restoreAttackSkill: function (snap) {
+		if (!snap) {
+			return;
+		}
+
+		Config.AttackSkill[1] = snap.a1;
+		Config.AttackSkill[2] = snap.a2;
+		Config.AttackSkill[3] = snap.a3;
+		Config.AttackSkill[4] = snap.a4;
+		print("ÿc2Attackÿc0 :: skills restored — [1]=" + snap.a1 + " [2]=" + snap.a2 +
+			" [3]=" + snap.a3 + " [4]=" + snap.a4);
+	},
+
 	securePosition: function (x, y, range, timer, skipBlocked, special) {
 		/*if (arguments.length < 4) {
 			throw new Error("securePosition needs 4 arguments");
@@ -1036,6 +1582,26 @@ var Attack = {
 		this.ignoredGids = [];
 	},
 
+	// Any live, quest-counting monster within range of a point — gates clearLevel's room walk so it
+	// doesn't hike to rooms with nothing in them. Range is intentionally generous (checkMonster already
+	// excludes dead/friendly/neverCount units) — a missed room costs an extra clearLevel retry; a falsely
+	// skipped room with a real monster in it can strand a full-clear quest (e.g. Den of Evil) unfinished.
+	roomHasMonsters: function (x, y, range, spectype) {
+		var mon = getUnit(1);
+
+		if (!mon) {
+			return false;
+		}
+
+		do {
+			if ((!spectype || (mon.spectype & spectype)) && this.checkMonster(mon) && getDistance(x, y, mon.x, mon.y) <= range) {
+				return true;
+			}
+		} while (mon.getNext());
+
+		return false;
+	},
+
 	// Clear an entire area based on monster spectype
 	clearLevel: function (spectype) {
 		if (Config.MFLeader) {
@@ -1043,7 +1609,7 @@ var Attack = {
 			say("clearlevel " + getArea().name);
 		}
 
-		var room, result, rooms, myRoom, currentArea, previousArea;
+		var room, result, rooms, myRoom, currentArea, previousArea, skipped;
 
 		function RoomSort(a, b) {
 			return getDistance(myRoom[0], myRoom[1], a[0], a[1]) - getDistance(myRoom[0], myRoom[1], b[0], b[1]);
@@ -1083,6 +1649,14 @@ var Attack = {
 
 			rooms.sort(RoomSort);
 			room = rooms.shift();
+
+			// Empty room — nothing within clear range of its center. Don't walk over there hunting for
+			// mobs that aren't there; just drop it and move on to the next candidate room.
+			skipped = !this.roomHasMonsters(room[0], room[1], 45, spectype);
+
+			if (skipped) {
+				continue;
+			}
 
 			result = Pather.getNearestWalkable(room[0], room[1], 18, 3);
 
@@ -1816,6 +2390,11 @@ AuraLoop: // Skip monsters with auras
 
 		if (walk === true) {
 			walk = 1;
+		}
+
+		// NM/Hell Diablo: sit on him (0 range) so his lightning hose misses
+		if (unit.classid === 243 && me.diff > 0) {
+			distance = 0;
 		}
 
 		// Inside a clear: don't walk toward a far target while another mob is in our face

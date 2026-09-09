@@ -157,7 +157,7 @@ function AutoSmurf() {
 				Town.openStash();
 			}
 			clickItem(1, coolStuff);
-			delay(me.ping);
+			delay(Math.max(1, me.ping)); // delay() requires argument >= 1 — me.ping can report 0
 			me.cancel();
 		}
 		for (var i = 0 ; i < questStuff.length ; i += 1) {
@@ -1438,7 +1438,7 @@ function AutoSmurf() {
 						if(me.area === areaIDs[nextAreaIndex]-1 ){
 							Pather.moveToExit(areaIDs[nextAreaIndex], true, Config.ClearType);
 						}
-						delay(me.ping);
+						delay(Math.max(1, me.ping)); // delay() requires argument >= 1 — me.ping can report 0
 					} finally {
 						if (me.area !== areaIDs[nextAreaIndex]) {
 							Town.goToTown();
@@ -1673,7 +1673,7 @@ function AutoSmurf() {
 	}; // Dark-f
 	
 	this.clickWP = function () { // Move to nearest wp and click it.
-		var i, j, wp, presetUnit, wpIDs,
+		var i, j, wp, presetUnit, wpIDs, obj, seenIds,
 			// Always clear mobs on the way to a field WP (Config.ClearType is often false during travel/tele).
 			clearToWp = 0,
 			clickNear = function () {
@@ -1692,14 +1692,22 @@ function AutoSmurf() {
 					delay(me.ping * 2 + 500);
 
 					if (getUIFlag(0x14)) {
-						delay(me.ping);
+						delay(Math.max(1, me.ping)); // delay() requires argument >= 1 — me.ping can report 0
 						me.cancel();
+
+						if (typeof CompLog !== "undefined") {
+							CompLog.onWaypoint(me.area);
+						}
 
 						return true;
 					}
 
 					Packet.flash(me.gid);
 					delay(me.ping * 2 + 250);
+				}
+
+				if (getUIFlag(0x14) && typeof CompLog !== "undefined") {
+					CompLog.onWaypoint(me.area);
 				}
 
 				return !!getUIFlag(0x14);
@@ -1766,7 +1774,50 @@ function AutoSmurf() {
 			}
 		}
 
-		this.status("no WP found in area " + me.area);
+		// Fallback: the 16 known preset ids / the "waypoint" name match didn't hit —
+		// happens when this area's WP object uses a different id/name (e.g. modded level).
+		// Blind-interact every nearby object and watch for the WP menu (UI flag 0x14) to open.
+		seenIds = [];
+		obj = getUnit(2);
+
+		if (obj) {
+			do {
+				if (seenIds.indexOf(obj.id) < 0) {
+					seenIds.push(obj.id);
+				}
+
+				if (getDistance(me, obj) <= 15) {
+					this.status("blind WP scan: trying object id=" + obj.id + " @ " + obj.x + "," + obj.y);
+
+					for (j = 0; j < 5; j += 1) {
+						if (getDistance(me, obj) > 5) {
+							Pather.moveToUnit(obj, 0, 0, clearToWp, false);
+						}
+
+						sendPacket(1, 0x13, 4, obj.type, 4, obj.gid);
+						delay(me.ping * 2 + 300);
+
+						if (getUIFlag(0x14)) {
+							delay(Math.max(1, me.ping)); // delay() requires argument >= 1 — me.ping can report 0
+							me.cancel();
+
+							if (typeof CompLog !== "undefined") {
+								CompLog.onWaypoint(me.area);
+							}
+
+							this.status("WP found via blind object scan — id " + obj.id + " in area " + me.area +
+								" (add this id to clickWP's wpIDs list)");
+
+							return true;
+						}
+
+						Packet.flash(me.gid);
+					}
+				}
+			} while (obj.getNext());
+		}
+
+		this.status("no WP found in area " + me.area + " — nearby object ids: " + seenIds.join(","));
 
 		return false;
 	};
@@ -2000,7 +2051,7 @@ function AutoSmurf() {
 		this.status("toInventory");
 		var i, items = [], item, code, want, pulled = 0, fromLoc;
 
-		want = ["hst", "qf2", "qf1", "qey", "qhr", "qbr", "ice", "tr2", "xyz", "ass", "j34", "g34", "bbb"];
+		want = ["hst", "qf2", "qf1", "qey", "qhr", "qbr", "ice", "tr2", "xyz", "ass", "j34", "g34", "bbb", "hfh", "mss"];
 
 		if (!Town.openStash()) {
 			Town.move("stash");
@@ -2435,7 +2486,10 @@ function AutoSmurf() {
 			return false;
 		}
 
-		if (!Item.equip(finishedFlail, 4)) {
+		if (!Item.equip(finishedFlail, 4, {
+				why: "quest",
+				reason: "equip Khalim's Will for council/orifice"
+			})) {
 			Pickit.pickItems();
 			this.status("equipFlail: Failed to equip Khalim's Will");
 
@@ -2464,19 +2518,46 @@ function AutoSmurf() {
 	};
 
 	this.placeFlail = function () { // SiC-666 TODO: Rename this function to smashOrb, check orb.mode in the loop and stop when it has been smashed.
-		var i,
+		var i, preset,
 			orb = getUnit(2, 404);
+
 		this.status("Smashing the Compelling Orb.");
+
+		// After hit-and-run / town portal, orb often isn't loaded yet — path to preset first
 		if (!orb) {
-			throw new Error("AutoSmurf.placeFlail: Couldn't find Compelling Orb.")
+			try {
+				preset = getPresetUnit(83, 2, 404);
+			} catch (eOrbPreset) {
+				preset = null;
+			}
+
+			if (preset) {
+				Pather.moveTo(preset.roomx * 5 + preset.x, preset.roomy * 5 + preset.y, 3);
+			} else if (me.area === 83) {
+				Pather.moveToPreset(83, 2, 404, 0, 0, false);
+			}
+
+			for (i = 0; i < 20 && !orb; i += 1) {
+				orb = getUnit(2, 404);
+				delay(100 + me.ping);
+			}
 		}
+
+		if (!orb) {
+			throw new Error("AutoSmurf.placeFlail: Couldn't find Compelling Orb.");
+		}
+
 		Pather.moveToUnit(orb, 0, 0, Config.ClearType, false);
+
 		for (i = 0; i < 5; i += 1) {
+			orb = getUnit(2, 404);
+
 			if (orb) {
 				Skill.cast(0, 0, orb);
 				delay(500);
 			}
 		}
+
 		return true;
 	};
 
@@ -4762,8 +4843,13 @@ function AutoSmurf() {
 		// Only run Claw Viper Temple if we still need the amulet (checks stash too)
 		if (!this.hasViper()) {
 			if (teleportingSorc) {
-				this.travel(2); // Halls Of The Dead Level 2
-				this.travel(3); // Lost City
+				// HotD is only for the cube chest — skip whenever we already have box
+				// (Normal cube() already grabbed it; NM/Hell never need Halls again)
+				if (me.diff === 0 && !this.hasCube()) {
+					this.travel(2); // Halls Of The Dead Level 2
+				}
+
+				this.travel(3); // Lost City (Dry Hills → Far Oasis — no Halls)
 			}
 			if (teleportingSorc) {
 				Pather.useWaypoint(44, true);
@@ -4821,7 +4907,7 @@ function AutoSmurf() {
 
 		if (vip && vip.location === 3) {
 			Town.move("stash");
-			delay(me.ping);
+			delay(Math.max(1, me.ping)); // delay() requires argument >= 1 — me.ping can report 0
 			Town.openStash();
 			Storage.Stash.MoveTo(vip);
 		}
@@ -4889,7 +4975,7 @@ function AutoSmurf() {
 		msf = QuestItems.find(QuestItems.staffKings, "msf");
 		if (msf) {
 			Town.move("stash");
-			delay(me.ping);
+			delay(Math.max(1, me.ping)); // delay() requires argument >= 1 — me.ping can report 0
 			Town.openStash();
 			Storage.Stash.MoveTo(msf);
 		}
@@ -6604,7 +6690,7 @@ function AutoSmurf() {
 		item = QuestItems.find(QuestItems.khalimEye, "qey") || me.getItem(QuestItems.khalimEye) || me.getItem("qey");
 		if (item) {
 			Town.move("stash");
-			delay(me.ping);
+			delay(Math.max(1, me.ping)); // delay() requires argument >= 1 — me.ping can report 0
 			Town.openStash();
 			Storage.Stash.MoveTo(item);
 		}
@@ -6656,7 +6742,7 @@ function AutoSmurf() {
 		item = QuestItems.find(QuestItems.khalimHeart, "qhr") || me.getItem(QuestItems.khalimHeart) || me.getItem("qhr");
 		if (item) {
 			Town.move("stash");
-			delay(me.ping);
+			delay(Math.max(1, me.ping)); // delay() requires argument >= 1 — me.ping can report 0
 			Town.openStash();
 			Storage.Stash.MoveTo(item);
 		}
@@ -6719,7 +6805,7 @@ function AutoSmurf() {
 		item = QuestItems.find(QuestItems.khalimBrain, "qbr") || me.getItem(QuestItems.khalimBrain) || me.getItem("qbr");
 		if (item) {
 			Town.move("stash");
-			delay(me.ping);
+			delay(Math.max(1, me.ping)); // delay() requires argument >= 1 — me.ping can report 0
 			Town.openStash();
 			Storage.Stash.MoveTo(item);
 		}
@@ -6753,118 +6839,231 @@ function AutoSmurf() {
 		Town.doChores();
 		this.teamInGame();
 		Pather.teleport = true; // Turn teleport on for all characters. Will turn off right before fighting if it is normal difficulty.
-		if(quest){
-			while (!cain || !cain.openMenu()) { // Try more than once to interact with Deckard Cain.
-				Packet.flash(me.gid);
-				Town.move("cain");
-				cain = getUnit(1, "deckard cain");
-				delay(1000);
-			}
-			me.cancel();
-		}
-		if (teleportingSorc) { // I am the Teleporting Sorc, open a portal to Travincal next to the High Council.
-			Pather.useWaypoint(83);
-			Precast.doPrecast(true);
-			orgX = me.x;
-			orgY = me.y;
-			this.teamInGame();
-			Pather.moveTo(orgX + 101, orgY - 92, 5, false);	// (<3 kolton)
-			Pather.makePortal();
-		} else { // I am not a Sorc, enter the Sorc's Travincal portal.
-			Town.move("portalspot");
-			var j = 0;
-			while (!Pather.usePortal(83, null)) {
-				delay(250);
-				if (j % 20 == 0) { // Check for Team Members every 5 seconds.
-					this.teamInGame();
-				}
-				j += 1;
-			}
-		}
-		Attack.clearList(this.buildList(0)); // Kill the High Council
-		Pickit.pickItems();
-		if(!quest) {
-			if(!Pather.usePortal(null, null)){
-				Town.goToTown();
-			}
-			return true;
-		}
-		if (teleportingSorc && !me.getQuest(18, 0)) { // I am the Teleporting Sorc and I have not completed Khalim's Will yet. Will smash the orb while the others keep the area clear.
-			this.getQuestItem(QuestItems.khalimFlail); // Pick up Khalim's Flail (qf1).
-			preArea = me.area;
-			if(!me.inTown){
-				Town.goToTown();
-			}
-			if (!this.cubeFlail() || !this.equipFlail()) {
-				this.status("travincal: cube/equip Khalim's Will failed — retry next game");
-				Item.autoEquip();
 
+		// Light sorc only: no bot TeleDelay for whole Trav (NM A3 progressive delay blocks kite teles)
+		var savedTeleDelay;
+		if (Attack.isLightSorc()) {
+			savedTeleDelay = Config.TeleDelay;
+			Config.TeleDelay = 0;
+			Pather._lastTeleTick = 0;
+		}
+
+		try {
+			if(quest){
+				while (!cain || !cain.openMenu()) { // Try more than once to interact with Deckard Cain.
+					Packet.flash(me.gid);
+					Town.move("cain");
+					cain = getUnit(1, "deckard cain");
+					delay(1000);
+				}
+				me.cancel();
+			}
+			if (teleportingSorc) { // I am the Teleporting Sorc, open a portal to Travincal next to the High Council.
+				Pather.useWaypoint(83);
+				Precast.doPrecast(true);
+				orgX = me.x;
+				orgY = me.y;
+				this.teamInGame();
+
+				// Approach council — try classic offsets until members are in range (don't fight at WP)
+				var approachSpots = [[101, -92], [101, -56], [76, -67], [85, -67]],
+					spotI, tx, ty, approached = false;
+
+				for (spotI = 0; spotI < approachSpots.length; spotI += 1) {
+					tx = orgX + approachSpots[spotI][0];
+					ty = orgY + approachSpots[spotI][1];
+
+					if (typeof Pather.forceTeleportTo === "function" && Pather.canTeleport()) {
+						if (!Pather.forceTeleportTo(tx, ty, 5)) {
+							Pather.moveTo(tx, ty, 5, false);
+						}
+					} else {
+						Pather.moveTo(tx, ty, 5, false);
+					}
+
+					delay(200 + me.ping);
+
+					if (this.buildList(0).length > 0) {
+						approached = true;
+						this.status("travincal: council spotted @ offset " + approachSpots[spotI][0] + "," + approachSpots[spotI][1] +
+							" (n=" + this.buildList(0).length + ")");
+						break;
+					}
+				}
+
+				if (!approached) {
+					this.status("travincal: no council in range after approach (still @" + me.x + "," + me.y + ") — abort");
+					return false;
+				}
+
+				Pather.makePortal();
+			} else { // I am not a Sorc, enter the Sorc's Travincal portal.
+				Town.move("portalspot");
+				var j = 0;
+				while (!Pather.usePortal(83, null)) {
+					delay(250);
+					if (j % 20 == 0) { // Check for Team Members every 5 seconds.
+						this.teamInGame();
+					}
+					j += 1;
+				}
+
+				// Wait until council is loaded for non-tele helper
+				for (j = 0; j < 40 && this.buildList(0).length < 1; j += 1) {
+					delay(250);
+				}
+			}
+
+			// HitAndRun: NM/Hell + light sorc only (fire/cold/melee tank with clearList)
+			var wantHitAndRun = (Config.Travincal.HitAndRun !== false) && me.diff >= 1 &&
+					Attack.isLightSorc() && Pather.teleSkill() > 0,
+				councilBefore = this.buildList(0).length;
+
+			this.status("travincal council: diff=" + me.diff + " light=" + Attack.isLightSorc() +
+				" tele=" + Pather.teleSkill() + " HitAndRun=" + Config.Travincal.HitAndRun +
+				" n=" + councilBefore + " → " + (wantHitAndRun ? "kite" : "tank"));
+
+			if (councilBefore < 1) {
+				this.status("travincal: zero council before fight — abort (won't cube stashed flail)");
 				return false;
 			}
-			Town.move("portalspot");
-			if (!Pather.usePortal(preArea, me.name)) {
-				throw new Error("AutoSmurf.travincal: Failed to go back from town");
+
+			var savedAtk = null;
+
+			// Travincal: Lightning only for light sorc
+			if (Attack.isLightSorc()) {
+				savedAtk = Attack.preferTravLightning();
 			}
-			Config.PacketCasting = 1;
-			this.teamInGame();
-			this.placeFlail();
 
-			// Stairs open on smash — go there immediately (don't linger at orb / town first)
-			sendPacket(1, 0x40);
-			this.status("travincal: orb smashed — Durance stairs");
+			try {
+				if (wantHitAndRun) {
+					if (typeof Attack.hitAndRunClear !== "function") {
+						this.status("travincal: Attack.hitAndRunClear missing — reload kolbot (Attack.js)");
+						Attack.clearList(this.buildList(0));
+					} else {
+						Attack.hitAndRunClear(this.buildList.bind(this, 0), {
+							engageMs: Config.Travincal.HitAndRunMs || 3000,
+							minRetreat: Config.Travincal.HitAndRunMinRetreat || 15,
+							maxRetreat: Config.Travincal.HitAndRunMaxRetreat || 22
+						});
+					}
+				} else {
+					Attack.clearList(this.buildList(0)); // Kill the High Council
+				}
 
-			if (!Pather.moveToExit(100, true) || me.area !== 100) {
-				Pather.moveToExit(100, false);
-				delay(500 + me.ping);
+				// Finish any leftovers (hitAndRun must not skip to quest with council still up)
+				if (this.buildList(0).length > 0) {
+					this.status("travincal: finishing " + this.buildList(0).length + " leftover council");
+					Attack.clearList(this.buildList(0));
+				}
+			} finally {
+				Attack.restoreAttackSkill(savedAtk);
 
+				// Restore normal TeleDelay right after the fight ends — zero delay must NOT carry
+				// into the post-fight moveToExit(100) stairs crossing / Durance walk below, that
+				// spammed instant teleports across a zone transition and froze/dropped the client.
+				if (Attack.isLightSorc() && savedTeleDelay !== undefined) {
+					Config.TeleDelay = savedTeleDelay;
+					savedTeleDelay = undefined;
+				}
+			}
+
+			if (this.buildList(0).length > 0) {
+				this.status("travincal: council still alive — abort quest smash");
+				return false;
+			}
+
+			Pickit.pickItems();
+			if(!quest) {
+				if(!Pather.usePortal(null, null)){
+					Town.goToTown();
+				}
+				return true;
+			}
+			if (teleportingSorc && !me.getQuest(18, 0)) { // I am the Teleporting Sorc and I have not completed Khalim's Will yet. Will smash the orb while the others keep the area clear.
+				this.status("travincal: council dead — pick flail / cube Will");
+				this.getQuestItem(QuestItems.khalimFlail); // Pick up Khalim's Flail (qf1).
+				preArea = me.area;
+				if(!me.inTown){
+					Town.goToTown();
+				}
+				if (!this.cubeFlail() || !this.equipFlail()) {
+					this.status("travincal: cube/equip Khalim's Will failed — retry next game");
+					Item.autoEquip();
+
+					return false;
+				}
+				Town.move("portalspot");
+				if (!Pather.usePortal(preArea, me.name)) {
+					throw new Error("AutoSmurf.travincal: Failed to go back from town");
+				}
+				Config.PacketCasting = 1;
+				this.teamInGame();
+				this.placeFlail();
+
+				// Stairs open on smash — go there immediately (don't linger at orb / town first)
+				sendPacket(1, 0x40);
+				this.status("travincal: orb smashed — Durance stairs");
+
+				if (!Pather.moveToExit(100, true) || me.area !== 100) {
+					Pather.moveToExit(100, false);
+					delay(500 + me.ping);
+
+					if (me.area === 83) {
+						Pather.moveToExit(100, true);
+					}
+				}
+
+				if (me.area === 100) {
+					this.status("travincal: entered Durance of Hate L1");
+					Pather.makePortal();
+				} else {
+					this.status("travincal: at Durance stairs (area=" + me.area + ")");
+				}
+			} else { // I am not the Teleporting Sorc or Khalim's Will has been completed. If it the latter is true the while loop on the next line will be skipped.
+				while (!me.getQuest(18, 0)) { // I am not the Teleporting Sorc and have not completed Khalim's Will yet.
+					sendPacket(1, 0x40); // This is required to refresh the status of me.getQuest(18, 0). Without it, me.getQuest(18, 0) will not == 1 until the Quest Tab is opened on the character.
+					Pather.moveToExit(100, false); // Stairs to Durance of Hate Level 1.
+					Attack.clear(15);
+					delay(1000);
+				}
+
+				// Quest done — take the stairs with the smasher
 				if (me.area === 83) {
+					this.status("travincal: following into Durance");
 					Pather.moveToExit(100, true);
 				}
 			}
-
-			if (me.area === 100) {
-				this.status("travincal: entered Durance of Hate L1");
-				Pather.makePortal();
-			} else {
-				this.status("travincal: at Durance stairs (area=" + me.area + ")");
+			var unit = getUnit(4, "j34") || getUnit(4, QuestItems.jade);
+			if (unit && teleportingSorc) {
+				this.getQuestItem(QuestItems.jade);
 			}
-		} else { // I am not the Teleporting Sorc or Khalim's Will has been completed. If it the latter is true the while loop on the next line will be skipped.
-			while (!me.getQuest(18, 0)) { // I am not the Teleporting Sorc and have not completed Khalim's Will yet.
-				sendPacket(1, 0x40); // This is required to refresh the status of me.getQuest(18, 0). Without it, me.getQuest(18, 0) will not == 1 until the Quest Tab is opened on the character.
-				Pather.moveToExit(100, false); // Stairs to Durance of Hate Level 1.
-				Attack.clear(15);
-				delay(1000);
+			if (me.findItem("j34") || me.findItem("g34") || me.findItem(QuestItems.jade) || me.findItem(QuestItems.goldenBird) || me.getQuest(20, 1)) {
+				Messaging.sendToList(Config.AutoSmurf.AllTeamProfiles, "team figurine");
+				teamFigurine = true;
 			}
-
-			// Quest done — take the stairs with the smasher
-			if (me.area === 83) {
-				this.status("travincal: following into Durance");
-				Pather.moveToExit(100, true);
-			}
-		}
-		var unit = getUnit(4, "j34") || getUnit(4, QuestItems.jade);
-		if (unit && teleportingSorc) {
-			this.getQuestItem(QuestItems.jade);
-		}
-		if (me.findItem("j34") || me.findItem("g34") || me.findItem(QuestItems.jade) || me.findItem(QuestItems.goldenBird) || me.getQuest(20, 1)) {
-			Messaging.sendToList(Config.AutoSmurf.AllTeamProfiles, "team figurine");
-			teamFigurine = true;
-		}
-		if(!Pather.usePortal(null, null)){
-			if(teleportingSorc) {
-				Town.goToTown();
-			} else {
-				delay(1000);
-				if(!Pather.usePortal(null, null))
+			if(!Pather.usePortal(null, null)){
+				if(teleportingSorc) {
 					Town.goToTown();
+				} else {
+					delay(1000);
+					if(!Pather.usePortal(null, null))
+						Town.goToTown();
+				}
+			}			
+			if(teleportingSorc)
+				Pickit.pickItems();
+			Item.autoEquip(); // For teleportingSorc to re-equip her weapon.
+			this.waitForPartyMembers(); // Wait for everyone to finish Travincal and come to town so I don't miss someone announcing team figurine.
+			this.status("done travincal.");
+			return true;
+		} finally {
+			// Safety net only — normal case already restores TeleDelay right after the fight
+			// (see the inner finally above). Only fires here on an early return before that point.
+			if (Attack.isLightSorc() && savedTeleDelay !== undefined) {
+				Config.TeleDelay = savedTeleDelay;
 			}
-		}			
-		if(teleportingSorc)
-			Pickit.pickItems();
-		Item.autoEquip(); // For teleportingSorc to re-equip her weapon.
-		this.waitForPartyMembers(); // Wait for everyone to finish Travincal and come to town so I don't miss someone announcing team figurine.
-		this.status("done travincal.");
-		return true;
+		}
 	};
 	
 	// Re-enter Durance of Hate Lvl 3 for Meph red portal (never call getPresetUnit(102) from town)
@@ -6982,8 +7181,25 @@ function AutoSmurf() {
 	};
 
 	this.mephisto = function () {
-		var cain, j;
+		var cain, j, savedAtk;
 		var questTry, quest = true;
+
+		// All Durance 3 monsters except Mephisto himself (classid 242) — clear the level
+		// from range before engaging him instead of walking straight in and waking him.
+		this.buildList = function () {
+			var monsterList = [],
+				monster = getUnit(1);
+
+			if (monster) {
+				do {
+					if (monster.classid !== 242 && Attack.checkMonster(monster)) {
+						monsterList.push(copyUnit(monster));
+					}
+				} while (monster.getNext());
+			}
+
+			return monsterList;
+		};
 
 		for (questTry = 0; questTry < 10; questTry += 1) {
 			if (me.getQuest(23, 0)) {
@@ -7016,48 +7232,109 @@ function AutoSmurf() {
 			me.cancel();
 		}
 
-		if (teleportingSorc) { // I am the Teleporting Sorc.
-			if (!Pather.useWaypoint(101)) {
-				print("ÿc1AutoSmurfÿc0 :: Mephisto — Durance 2 WP failed");
+		// Light sorc: Lightning-only for approach + arrival clear + room sweep — restored
+		// in the finally right before the dedicated Mephisto fight starts.
+		savedAtk = Attack.isLightSorc() ? Attack.preferLightningOnly("Meph") : null;
+
+		try {
+			if (teleportingSorc) { // I am the Teleporting Sorc.
+				if (!Pather.useWaypoint(101)) {
+					print("ÿc1AutoSmurfÿc0 :: Mephisto — Durance 2 WP failed");
+					return false;
+				}
+
+				Precast.doPrecast(true);
+
+				// clearPath OFF — Attack.clear would pick Mephisto once we get near the throne.
+				// Enter Durance 3 without fighting, then travelClearing excludes classid 242.
+				Pather.moveToExit(102, true, false);
+
+				if (me.area !== 102) {
+					print("ÿc1AutoSmurfÿc0 :: Mephisto — not in Durance 3 after path (area=" + me.area + ")");
+					return false;
+				}
+
+				if (Attack.isLightSorc()) {
+					this.status("mephisto: lateral room — travelClearing (exclude Mephisto)");
+					Attack.travelClearing(17542, 8066, 242);
+				} else {
+					Pather.moveTo(17542, 8066, 3, false);
+				}
+
+				Pather.makePortal();
+			} else {
+				Town.move("portalspot");
+				j = 0;
+
+				while (!Pather.usePortal(102, null)) {
+					delay(250);
+
+					if (j % 20 === 0) { // Check for Team Members every 5 seconds.
+						this.teamInGame();
+					}
+
+					j += 1;
+
+					if (j > 120) {
+						print("ÿc1AutoSmurfÿc0 :: Mephisto — timed out waiting for Durance 3 portal");
+						return false;
+					}
+				}
+			}
+
+			if (me.area !== 102) {
+				print("ÿc1AutoSmurfÿc0 :: Mephisto — not in Durance 3 after path (area=" + me.area + ")");
 				return false;
 			}
 
-			Precast.doPrecast(true);
-			Pather.moveToExit(102, true, false);
-			Pather.moveTo(17542, 8066);
-			Pather.makePortal();
-		} else {
-			Town.move("portalspot");
-			j = 0;
+			this.teamInGame();
 
-			while (!Pather.usePortal(102, null)) {
-				delay(250);
+			if (Attack.isLightSorc()) {
+				var sweepSpots = [[17542, 8066], [17572, 8011], [17515, 8061], [17572, 8125], [17600, 8095]],
+					spotI;
 
-				if (j % 20 === 0) { // Check for Team Members every 5 seconds.
-					this.teamInGame();
+				// Phase 2: mop up anything adjacent on throne-room arrival (Mephisto excluded)
+				this.status("mephisto: arrival clear (near trash only)");
+				Attack.clearList(this.buildList.bind(this), null, 20);
+
+				// Phase 3: ranged sweep of landmark spots — still exclude Mephisto
+				for (spotI = 0; spotI < sweepSpots.length; spotI += 1) {
+					this.status("mephisto: sweeping room " + (spotI + 1) + "/" + sweepSpots.length +
+						" (Lightning from range)");
+
+					if (typeof Pather.forceTeleportTo === "function" && Pather.canTeleport()) {
+						if (!Pather.forceTeleportTo(sweepSpots[spotI][0], sweepSpots[spotI][1], 5)) {
+							Pather.moveTo(sweepSpots[spotI][0], sweepSpots[spotI][1], 5, false);
+						}
+					} else {
+						Pather.moveTo(sweepSpots[spotI][0], sweepSpots[spotI][1], 5, false);
+					}
+
+					delay(200 + me.ping);
+					Attack.clearList(this.buildList.bind(this), null, 20);
 				}
 
-				j += 1;
-
-				if (j > 120) {
-					print("ÿc1AutoSmurfÿc0 :: Mephisto — timed out waiting for Durance 3 portal");
-					return false;
-				}
+				Attack.clearList(this.buildList.bind(this), null, 20);
 			}
+		} finally {
+			Attack.restoreAttackSkill(savedAtk);
 		}
 
-		if (me.area !== 102) {
-			print("ÿc1AutoSmurfÿc0 :: Mephisto — not in Durance 3 after path (area=" + me.area + ")");
-			return false;
+		// Phase 4: telestomp Mephisto with Charged Bolt (Lightning was for clear-only)
+		if (Attack.isLightSorc()) {
+			this.status("mephisto: telestomp boss (Charged Bolt)");
+			Pather.moveTo(17566, 8069, 3, false);
 		}
 
-		this.teamInGame();
+		savedAtk = Attack.isLightSorc() ? Attack.preferChargedBolt("Meph") : null;
 
 		try {
 			Attack.kill(242);
 		} catch (e) {
 			print(e);
 			Attack.clear(20);
+		} finally {
+			Attack.restoreAttackSkill(savedAtk);
 		}
 
 		if (me.area === 102) {
@@ -7141,6 +7418,10 @@ function AutoSmurf() {
 	this.diablo = function (entry) {
 		if (entry === undefined) {
 			entry = false;
+		}
+		// NM/Hell: clear Chaos from entrance (River clear + early sanctuary)
+		if (me.diff > 0) {
+			entry = true;
 		}
 		// Sort function
 		this.sort = function (a, b) {
@@ -7920,6 +8201,18 @@ function AutoSmurf() {
 			this.status("Seis layout " + this.seisLayout);
 			this.followPath(this.seisLayout === 1 ? this.starToSeisA : this.starToSeisB);
 
+			// Clear corridor to pull hold before opening seal (stay south of nest)
+			if (this.seisLayout === 1) {
+				pullX = 7771;
+				pullY = 5196;
+			} else {
+				pullX = 7798;
+				pullY = 5186;
+			}
+
+			Pather.moveTo(pullX, pullY, 3, true);
+			Attack.clear(30, 0, false, this.sort);
+
 			savedTele = Pather.teleport;
 			savedDelay = (typeof Config !== "undefined") ? Config.TeleDelay : undefined;
 			Pather.teleport = true;
@@ -8211,23 +8504,29 @@ function AutoSmurf() {
 		//} else {
 		//	Pather.teleport = false;
 		//}
-		var clearType;		
+		var clearType;
 		if (teleportingSorc) {
 			Pather.useWaypoint(107);
 			Precast.doPrecast(true);
-			//if( me.classid === 1){
-				clearType = false;
-			//} else {
-			//	clearType = true;
-			//}
-			if(entry){
+			// NM/Hell: clear River of Flame on the way to Chaos. Normal: tele straight in.
+			if (me.diff > 0) {
+				if (!Pather.moveToExit(108, true, true)) {
+					throw new Error("Failed to clear River of Flame to Chaos Sanctuary");
+				}
+			}
+			clearType = false;
+			if (entry) {
 				Pather.moveTo(7790, 5544, 10, clearType, clearType); // Start at Entrance.
 			} else {
 				Pather.moveTo(7791, 5293, 10, clearType, clearType); // Start at Star.
 			}
-			Pather.makePortal();
-			if(me.classid === 1)
-				Town.goToTown();
+			// Solo: stay in Chaos — no TP / town hop for leechers
+			if (Config.AutoSmurf.TeamSize > 1) {
+				Pather.makePortal();
+				if (me.classid === 1) {
+					Town.goToTown();
+				}
+			}
 		} else {
 			Town.goToTown(4);
 			Town.move("portalspot");
@@ -8238,11 +8537,20 @@ function AutoSmurf() {
 		}
 		//this.Bo();
 		Attack.clear(10);
-		if(teleportingSorc && me.classid ===1) {
+		if (Config.AutoSmurf.TeamSize > 1 && teleportingSorc && me.classid === 1) {
 			delay(2000);
 			Pather.usePortal(108, null);
 			Pather.makePortal();
 		}
+
+		var origAttackSkill1 = Config.AttackSkill[1],
+			origAttackSkill3 = Config.AttackSkill[3];
+
+		if (me.diff > 0 && Config.Diablo.ChaosAttackSkill > 0) {
+			Config.AttackSkill[1] = Config.Diablo.ChaosAttackSkill;
+			Config.AttackSkill[3] = Config.Diablo.ChaosAttackSkill;
+		}
+
 		if(entry){
 			Pather.moveTo(7790, 5544, 10, true, true);
 			Attack.clear(30, 0, false, this.sort);
@@ -8277,6 +8585,8 @@ function AutoSmurf() {
 			Pather.moveTo(7788, 5292);
 			break;
 		}
+		Config.AttackSkill[1] = origAttackSkill1;
+		Config.AttackSkill[3] = origAttackSkill3;
 		this.diabloPrep();
 		if (me.gametype === 0) {
 			try {
@@ -8297,7 +8607,7 @@ function AutoSmurf() {
 		}
 		try {
 			if (me.classid === 1) {
-				this.status("Diablo — melee Static×4 / walk stand-off AttackSkill");
+				this.status(me.diff > 0 ? "Diablo — melee hug (lightning dodge) AttackSkill" : "Diablo — melee Static×4 / walk stand-off AttackSkill");
 			}
 
 			Attack.kill(243); // Diablo
@@ -9213,6 +9523,43 @@ function AutoSmurf() {
 			}
 			return true;
 		};
+		// Wave 2 (unravellers) applies poison. Chicken/TownHP are suppressed for Baal, and
+		// Skill 109 (Cleansing) is paladin-only — everyone else dies to DoT between waves
+		// unless we deliberately TP to Malah (HealStatus).
+		this.baalTownIfPoisoned = function () {
+			if (!Config.HealStatus) {
+				return false;
+			}
+
+			if (!me.getState(2) && !me.getState(9) && !me.getState(61)) {
+				return false;
+			}
+
+			// Paladin: cleanse in place when possible
+			if (me.classid === 3 && me.getSkill(109, 1)) {
+				Skill.setSkill(109, 0);
+				delay(500);
+
+				if (!me.getState(2) && !me.getState(9) && !me.getState(61)) {
+					return false;
+				}
+			}
+
+			this.status("Baal — poisoned/cursed, town heal");
+
+			try {
+				Town.visitTown();
+			} catch (e) {
+				print(e);
+
+				return false;
+			}
+
+			Precast.doPrecast(true);
+			Pather.moveTo(15094, me.classid === 3 ? 5029 : 5038);
+
+			return true;
+		};
 		// baal start.
 		Town.goToTown(5);
 		this.teamInGame();
@@ -9278,6 +9625,7 @@ function AutoSmurf() {
 			case 2:
 				Attack.clear(40);
 				tick = getTickCount();
+				this.baalTownIfPoisoned();
 				break;
 			case 4:
 				Attack.clear(40);
@@ -9293,8 +9641,9 @@ function AutoSmurf() {
 				break MainLoop;
 			default:
 				if (getTickCount() - tick < 7e3) {
-					if (me.getState(2)) {
-						Skill.setSkill(109, 0);
+					// Between waves: paladin cleanses; others TP if still poisoned (wave 2 DoT)
+					if (me.getState(2) || me.getState(9) || me.getState(61)) {
+						this.baalTownIfPoisoned();
 					}
 					break;
 				}
@@ -9326,12 +9675,33 @@ function AutoSmurf() {
 			this.status("Couldn't find portal.");
 		}
 		Pather.moveTo(15134, 5923);
-		try{
-			Attack.kill(544); // Baal
-		}catch(e){
+		try {
+			var baal, prevTele = Config.TeleStomp, attackCount = 0;
+
+			// Ignore Festering Appendages — telestomp Baal only (no Attack.clear)
+			Config.TeleStomp = true;
+
+			try {
+				while (attackCount < 300) {
+					baal = getUnit(1, 544);
+
+					if (!baal || !Attack.checkMonster(baal)) {
+						break;
+					}
+
+					if (getDistance(me, baal) > 3) {
+						Pather.moveToUnit(baal);
+					}
+
+					ClassAttack.doAttack(baal, attackCount % 15 === 0);
+					attackCount += 1;
+				}
+			} finally {
+				Config.TeleStomp = prevTele;
+			}
+		} catch (e) {
 			print(e);
-			Attack.clear(20);
-		}	
+		}
 		scriptBroadcast("resumeChicken"); // Baal fight's over — restore normal chicken safety.
 		if (!getUnit(1, 544) && me.diff === 0) {
 			// Baal down in Normal — no Nightmare automation yet, so keep flashing this
@@ -9359,47 +9729,75 @@ function AutoSmurf() {
 		return true;
 	};
 	
-//Adding on 16-7-2018 by Dark-f for NH_MF (Nightmare & Hell difficulty)	
-	this.countess = function () {
-		var poi;
+//Adding on 16-7-2018 by Dark-f for NH_MF (Nightmare & Hell difficulty)
+	// forceFarm: ignore quest-done skip (post-chicken rejuv grab)
+	// Rejuv farm: seek champs/uniques (0x7); trash only when DangerClear says they're on us.
+	this.countess = function (forceFarm) {
+		var poi, clearSpec;
 
-		if (me.getQuest(5, 0)) {
+		if (!forceFarm && me.getQuest(5, 0)) {
 			this.status("Countess already done — skipping");
 			return true;
 		}
 
-		this.status("Forgotten Tower — Countess");
+		clearSpec = forceFarm ? 0x7 : 0; // 0x7 = champ/unique/super; 0 = everything
+		this.status(forceFarm ? "Forgotten Tower — Countess (rejuv farm, specials)" : "Forgotten Tower — Countess");
 		Town.goToTown(1);
 		this.teamInGame();
-		Town.doChores();
+
+		// Rejuv farm: skip chores — belt is empty, go farm immediately; chores after
+		if (!forceFarm) {
+			Town.doChores();
+		}
+
 		Pather.teleport = Pather.teleSkill() > 0;
 
 		if (teleportingSorc || Config.AutoSmurf.TeamSize === 1) {
 			if (!Pather.useWaypoint(6, true)) {
 				// No Black Marsh WP yet — walk from Dark Wood / Outer Cloister path
 				Pather.useWaypoint(5);
-				Pather.moveToExit(6, true, true);
+				Pather.moveToExit(6, true, forceFarm ? clearSpec : true);
 				Pather.getWP(6, true);
 			}
 
 			Precast.doPrecast(true);
 			this.Bo();
-			Pather.moveToExit([20, 21, 22, 23, 24, 25], true, !Pather.teleport);
+
+			if (forceFarm) {
+				// Full tower: clear specials on every floor (Tower Cellar 1–5), then Countess room
+				var towerLvl, towerAreas = [20, 21, 22, 23, 24, 25];
+
+				for (towerLvl = 0; towerLvl < towerAreas.length; towerLvl += 1) {
+					if (me.area !== towerAreas[towerLvl]) {
+						if (!Pather.moveToExit(towerAreas[towerLvl], true, clearSpec)) {
+							this.status("Rejuv farm: failed exit → area " + towerAreas[towerLvl]);
+							break;
+						}
+					}
+
+					this.status("Rejuv farm: clear specials — " + (getArea() && getArea().name ? getArea().name : ("area " + me.area)));
+					Attack.clearLevel(clearSpec);
+					Pickit.pickItems();
+				}
+			} else {
+				Pather.moveToExit([20, 21, 22, 23, 24, 25], true, !Pather.teleport);
+			}
+
 			poi = getPresetUnit(me.area, 2, 580);
 
 			if (!poi) {
 				this.status("Countess chest preset missing — clearing tower");
-				Attack.clearLevel(0);
+				Attack.clearLevel(clearSpec);
 			} else {
 				switch (poi.roomx * 5 + poi.x) {
 				case 12565:
-					Pather.moveTo(12578, 11043);
+					Pather.moveTo(12578, 11043, 3, clearSpec || true);
 					break;
 				case 12526:
-					Pather.moveTo(12548, 11083);
+					Pather.moveTo(12548, 11083, 3, clearSpec || true);
 					break;
 				default:
-					Pather.moveTo(poi.roomx * 5 + poi.x, poi.roomy * 5 + poi.y, 3, true);
+					Pather.moveTo(poi.roomx * 5 + poi.x, poi.roomy * 5 + poi.y, 3, clearSpec || true);
 					break;
 				}
 			}
@@ -9423,13 +9821,17 @@ function AutoSmurf() {
 			Attack.clear(20, 0, getLocaleString(2875)); // The Countess
 		} catch (e) {
 			print(e);
-			Attack.clear(20);
+			Attack.clear(20, clearSpec);
 		}
 
 		Pickit.pickItems();
 
 		if (!Pather.usePortal(null, null)) {
 			Town.goToTown();
+		}
+
+		if (forceFarm) {
+			Town.doChores(); // belt/ID/sell after the grab
 		}
 
 		sendPacket(1, 0x40);
@@ -9831,48 +10233,415 @@ function AutoSmurf() {
 		return true;
 	};
 
-	this.hephasto = function () {
-		this.status("Hephasto");
+	// Hell's Forge (quest 27): Cain → River → Hephasto → equip hfh → place mss → smash.
+	// One hammer per kill — whoever picks it smashes this game; others retry next game.
+	this.hellforge = function () {
+		var cain, hammer, forge, i, j, waitTick, oldWeapon;
+
+		sendPacket(1, 0x40);
+		delay(300);
+
+		if (me.getQuest(27, 0)) {
+			this.status("Hellforge already done — skip");
+
+			return true;
+		}
+
+		this.status("Hellforge");
 		Town.goToTown(4);
 		this.teamInGame();
 		Town.doChores();
+		this.toInventory(); // pull mss / leftover hfh from stash
+
+		// Cain starts the quest and hands out Mephisto's Soulstone if missing
+		Town.move("cain");
+		cain = getUnit(1, "deckard cain");
+
+		for (i = 0; i < 5 && cain; i += 1) {
+			if (cain.openMenu()) {
+				me.cancel();
+				break;
+			}
+
+			Packet.flash(me.gid);
+			delay(500 + me.ping);
+			cain = getUnit(1, "deckard cain");
+		}
+
+		Pickit.pickItems(); // soulstone may land on floor if inv was full
+		this.toInventory();
+
+		if (!QuestItems.has(QuestItems.soulstone, "mss") && !me.getQuest(27, 0)) {
+			this.status("Hellforge: no soulstone after Cain — retry next game");
+
+			return false;
+		}
+
 		Pather.teleport = true;
+
+		// Hephasto only — keep Lightning on the boss; don't dive maggot packs first
+		this.hellforgeHephasto = function () {
+			var list = [], mon = getUnit(1, getLocaleString(1067));
+
+			if (mon && Attack.checkMonster(mon)) {
+				list.push(copyUnit(mon));
+			}
+
+			return list;
+		};
+
+		// Nearby trash after Hephasto is dead (or anything already on us)
+		this.hellforgeThreats = function () {
+			var list = [], mon = getUnit(1), heph = getLocaleString(1067),
+				name;
+
+			if (mon) {
+				do {
+					if (!Attack.checkMonster(mon)) {
+						continue;
+					}
+
+					name = mon.name ? String(mon.name) : "";
+
+					if (name === heph || getDistance(me, mon) <= 28) {
+						list.push(copyUnit(mon));
+					}
+				} while (mon.getNext());
+			}
+
+			list.sort(function (a, b) {
+				var an = a.name ? String(a.name) : "",
+					bn = b.name ? String(b.name) : "",
+					ah = an === heph,
+					bh = bn === heph;
+
+				if (ah !== bh) {
+					return ah ? -1 : 1;
+				}
+
+				return getDistance(me, a) - getDistance(me, b);
+			});
+
+			return list;
+		};
+
+		this.killHephasto = function () {
+			var heph = getLocaleString(1067),
+				unit, cycles, rvCount, savedAtk, spot;
+
+			this.status("Hellforge: kill Hephasto");
+
+			// Out of rejuvs at low HP → restock before tanking the forge pack again
+			if (me.diff > 0 && Config.UseRejuvHP > 0 &&
+					me.hp <= Math.floor(me.hpmax * Config.UseRejuvHP / 100) &&
+					typeof Misc.countPotions === "function") {
+				rvCount = Misc.countPotions("rv");
+
+				if (rvCount === 0) {
+					this.status("Hellforge: no rejuvs @ low HP — town restock");
+					Town.visitTown(true);
+
+					if (me.area !== 107) {
+						if (!Pather.usePortal(107, null)) {
+							Pather.useWaypoint(107);
+							Pather.moveToPreset(me.area, 2, 376, 0, 0, false);
+							Pather.makePortal();
+						}
+					}
+				}
+			}
+
+			// Lightning-only at range — CB walk-in into Hephasto/maggots is what caused the stutter/chicken
+			savedAtk = Attack.isLightSorc() ? Attack.preferLightningOnly("Heph") : null;
+
+			try {
+				// Open with distance: retreat from forge pack before first cast
+				unit = getUnit(1, heph) || getUnit(2, 376);
+
+				if (unit && Pather.canTeleport() && typeof Attack.retreatSpotAwayFrom === "function") {
+					spot = Attack.retreatSpotAwayFrom([copyUnit(unit)], 18, 28);
+
+					if (spot && spot.x !== undefined) {
+						if (typeof Pather.forceTeleportTo === "function") {
+							Pather.forceTeleportTo(spot.x, spot.y, 5);
+						} else {
+							Pather.moveTo(spot.x, spot.y);
+						}
+					}
+				}
+
+				// Phase 1: Hephasto only from Lightning range
+				if (me.diff > 0 && Pather.canTeleport() && typeof Attack.hitAndRunClear === "function") {
+					this.status("Hellforge: Lightning kite Hephasto");
+					Attack.hitAndRunClear(this.hellforgeHephasto.bind(this), {
+						engageMs: 3000,
+						minRetreat: 18,
+						maxRetreat: 28,
+						maxCycles: 100
+					});
+				}
+
+				unit = getUnit(1, heph);
+
+				if (unit && Attack.checkMonster(unit)) {
+					try {
+						Attack.kill(heph);
+					} catch (eKill) {
+						print(eKill);
+					}
+				}
+
+				// Phase 2: mop forge trash (still Lightning) so smash is safe
+				if (me.diff > 0 && Pather.canTeleport() && typeof Attack.hitAndRunClear === "function" &&
+						this.hellforgeThreats().length) {
+					this.status("Hellforge: Lightning clear forge trash");
+					Attack.hitAndRunClear(this.hellforgeThreats.bind(this), {
+						engageMs: 2500,
+						minRetreat: 18,
+						maxRetreat: 28,
+						maxCycles: 40
+					});
+				}
+
+				for (cycles = 0; cycles < 3; cycles += 1) {
+					if (!this.hellforgeThreats().length) {
+						break;
+					}
+
+					Attack.clear(20);
+				}
+			} finally {
+				Attack.restoreAttackSkill(savedAtk);
+			}
+
+			unit = getUnit(1, heph);
+
+			return !(unit && Attack.checkMonster(unit));
+		};
+
 		if (teleportingSorc) {
 			Pather.useWaypoint(107);
-			if (!Pather.moveToPreset(me.area, 2, 376)) {
+			Precast.doPrecast(true);
+
+			// Path to forge without fighting — then portal BEFORE engaging so TownCheck can escape
+			if (!Pather.moveToPreset(me.area, 2, 376, 0, 0, false)) {
 				delay(500);
-				Pather.moveToPreset(me.area, 2, 376);
+				Pather.moveToPreset(me.area, 2, 376, 0, 0, false);
 			}
-			var x = me.x, y = me.y;
-			Pather.moveTo(x + 8, y + 8);
-			if(me.classid === 1 && me.diff === 2) {
-				Town.goToTown();
-				delay(5000);
-				Pather.usePortal(107, null);
+
+			Pather.makePortal();
+
+			// Stand further back before first Lightning — forge pad is melee death
+			if (typeof Pather.forceTeleportTo === "function" && Pather.canTeleport()) {
+				Pather.forceTeleportTo(me.x + 20, me.y - 20, 5);
+			} else {
+				Pather.moveTo(me.x + 20, me.y - 20);
 			}
-			Pather.makePortal();			
 		} else {
 			Town.move("portalspot");
-			while(!Pather.usePortal(107, null)){
-				delay(1000);
+			j = 0;
+
+			while (!Pather.usePortal(107, null)) {
+				delay(250);
+
+				if (j % 20 === 0) {
+					this.teamInGame();
+				}
+
+				j += 1;
+
+				if (j > 120) {
+					this.status("Hellforge: timed out waiting for River portal");
+
+					return false;
+				}
 			}
 		}
-		try{
-			Attack.clear(20, 0, getLocaleString(1067)); // Hephasto The Armorer
-		}catch(e){
-			print(e);
-			Attack.clear(20);
-		}			
+
+		this.teamInGame();
+
+		if (!this.killHephasto()) {
+			this.status("Hellforge: Hephasto still up after kite — clear fallback");
+
+			try {
+				Attack.clear(25, 0, getLocaleString(1067));
+			} catch (eHep) {
+				print(eHep);
+				Attack.clear(20);
+			}
+		}
+
 		Pickit.pickItems();
-		if(teleportingSorc) {
-			Town.goToTown();
-		} else {
-			delay(500);
-			if(!Pather.usePortal(null, null)){
+		this.getQuestItem(QuestItems.hellforge); // hfh from Hephasto
+
+		hammer = QuestItems.find(QuestItems.hellforge, "hfh") || me.getItem("hfh") ||
+			me.getItem(QuestItems.hellforge);
+
+		if (!hammer) {
+			this.status("Hellforge: no hammer this game (another char may have it) — wait for smash");
+
+			for (i = 0; i < 40 && !me.getQuest(27, 0); i += 1) {
+				delay(500);
+				Pickit.pickItems();
+				sendPacket(1, 0x40);
+			}
+
+			if (teleportingSorc) {
+				Town.goToTown();
+			} else if (!Pather.usePortal(null, null)) {
+				Town.goToTown();
+			}
+
+			return true;
+		}
+
+		forge = getUnit(2, 376);
+
+		if (forge) {
+			Attack.clear(15);
+			Pather.moveToUnit(forge, 0, 0, Config.ClearType, false);
+		}
+
+		// Remember current weapon so we can re-equip after smash consumes the hammer
+		oldWeapon = null;
+
+		try {
+			oldWeapon = me.getItem(-1, 1);
+
+			if (oldWeapon && oldWeapon.bodylocation !== 4) {
+				oldWeapon = null;
+			} else if (oldWeapon) {
+				oldWeapon = copyUnit(oldWeapon);
+			}
+		} catch (eOld) {
+			oldWeapon = null;
+		}
+
+		if (hammer.location === 7 || hammer.location === 6) {
+			if (!me.inTown) {
+				Town.goToTown();
+			}
+
+			this.toInventory();
+			hammer = QuestItems.find(QuestItems.hellforge, "hfh") || me.getItem("hfh");
+
+			if (!Pather.usePortal(107, null) && teleportingSorc) {
+				Pather.useWaypoint(107);
+				Pather.moveToPreset(me.area, 2, 376);
+			} else if (!teleportingSorc) {
+				Town.move("portalspot");
+				Pather.usePortal(107, null);
+			}
+
+			forge = getUnit(2, 376);
+		}
+
+		if (!hammer || !Item.equip(hammer, 4, {
+				why: "quest",
+				reason: "equip Hellforge Hammer"
+			})) {
+			this.status("Hellforge: failed to equip hammer");
+			Item.autoEquip();
+
+			return false;
+		}
+
+		if (me.itemoncursor) {
+			var cursorItem = getUnit(100);
+
+			if (cursorItem) {
+				if (Storage.Inventory.CanFit(cursorItem)) {
+					Storage.Inventory.MoveTo(cursorItem);
+				} else {
+					me.cancel();
+					cursorItem.drop();
+				}
+			}
+		}
+
+		forge = getUnit(2, 376);
+
+		if (!forge) {
+			Pather.moveToPreset(me.area, 2, 376);
+			forge = getUnit(2, 376);
+		}
+
+		if (!forge) {
+			this.status("Hellforge: forge object 376 missing");
+			Item.autoEquip();
+
+			return false;
+		}
+
+		// Click forge to place Mephisto's Soulstone, then normal-attack smash (consumes hfh)
+		Misc.openChest(forge);
+		delay(250 + me.ping * 2);
+
+		for (i = 0; i < 12; i += 1) {
+			if (me.getQuest(27, 0) || !QuestItems.has(QuestItems.hellforge, "hfh")) {
+				break;
+			}
+
+			forge = getUnit(2, 376);
+
+			if (!forge) {
+				break;
+			}
+
+			Pather.moveToUnit(forge, 0, 0, Config.ClearType, false);
+			Skill.cast(0, 0, forge); // normal attack — required for hammer smash
+
+			try {
+				if (typeof forge.interact === "function") {
+					forge.interact();
+				}
+			} catch (eSmash) {}
+
+			delay(750 + me.ping);
+			sendPacket(1, 0x40);
+		}
+
+		waitTick = getTickCount();
+
+		while (getTickCount() - waitTick < 5000 && !me.getQuest(27, 0)) {
+			delay(250);
+			sendPacket(1, 0x40);
+		}
+
+		Pickit.pickItems(); // gems + rune
+		Item.autoEquip();
+
+		if (oldWeapon && oldWeapon.location === 3 && oldWeapon.mode !== 1) {
+			try {
+				Item.equip(oldWeapon, 4, { why: "quest", reason: "restore weapon after Hellforge" });
+			} catch (eRest) {}
+		}
+
+		if (!me.inTown) {
+			if (!Pather.usePortal(null, null)) {
 				Town.goToTown();
 			}
 		}
+
+		if (me.act !== 4) {
+			Town.goToTown(4);
+		}
+
+		// Turn-in / reward chatter
+		Town.move("cain");
+		cain = getUnit(1, "deckard cain");
+
+		if (cain && cain.openMenu()) {
+			me.cancel();
+		}
+
+		this.status(me.getQuest(27, 0) ? "Hellforge complete" : "Hellforge smash unfinished — will retry");
+
 		return true;
+	};
+
+	this.hephasto = function () {
+		return this.hellforge();
 	};
 	
 	
@@ -10200,7 +10969,33 @@ function AutoSmurf() {
 		}
 	}
 	this.start();
-	
+
+	// After life-chicken with 0 rejuvs on NM/Hell: one Countess pass for drops, then resume objective
+	(function () {
+		var stats = DataFile.getStats(),
+			savedTeleDelay;
+
+		if (!stats || !stats.needRejuvRun) {
+			return;
+		}
+
+		DataFile.updateStats("needRejuvRun", false);
+
+		if (me.diff <= 0 || Misc.countPotions("rv") > 0) {
+			return;
+		}
+
+		this.status("Post-chicken: farm Countess for rejuvs (NM/Hell, belt empty)");
+		savedTeleDelay = Config.TeleDelay;
+		Config.TeleDelay = 0; // skip progressive TeleDelay — this is a quick pot grab
+
+		try {
+			this.countess(true); // forceFarm — quest may already be done
+		} finally {
+			Config.TeleDelay = savedTeleDelay;
+		}
+	}).call(this);
+
     //act1
     if (!this.isAct1Done()) { // Andariel / Act1 not finished
 		// Only park in Act1 if Andy is still alive — otherwise Warriv → Act2
@@ -10442,7 +11237,8 @@ function AutoSmurf() {
 			}
 			if (QuestItems.has(QuestItems.khalimWill, "qf2") ||
 					(QuestItems.has(QuestItems.khalimEye, "qey") && QuestItems.has(QuestItems.khalimHeart, "qhr") && QuestItems.has(QuestItems.khalimBrain, "qbr")) ||
-					!me.getQuest(20, 0) || !me.getQuest(21, 0)) {
+					!me.getQuest(20, 0) || !me.getQuest(21, 0) ||
+					!getWaypoint(26)) { // Will/eye/heart/brain already done from a prior game, but this game's Council still guards the stairs — need travincal()'s safe kite/kill to reach them and grab the Durance Of Hate L2 WP (else travel(7) below walks/teles straight through Council with ClearType disabled).
 				this.status("Act 3 — Travincal / Blackened Temple");
 				Messaging.sendToList(Config.AutoSmurf.AllTeamProfiles, "travincal");
 				this.travincal();
@@ -10507,6 +11303,12 @@ function AutoSmurf() {
 			if (!me.getQuest(25, 0) || me.getQuest(25, 1)) { // The Fallen Angel is not done or it has been started.
 				this.izual();
 			}
+
+			// Hell's Forge (quest 27) before Chaos — rune/gem reward + quest order
+			if (!me.getQuest(27, 0)) {
+				this.hellforge();
+			}
+
 			runDiablo = 1; // Dark-f: kill diablo first.
 			this.diablo();
 		}
@@ -10557,7 +11359,7 @@ function AutoSmurf() {
 		//this.shenk();
 		//this.threshSocket();
 		this.baal();
-		this.diablo(false); // true: start at Entrance. if empty or false: start at Star.
+		this.diablo(true); // NM/Hell: entrance→star clear (also forced inside diablo when me.diff > 0)
 		//this.worldstone();
 	} else if (me.gametype === 1 && (me.getQuest(28, 0) || me.act === 5)) { //Dark-f — act 5 reached this game counts too
 		Town.goToTown(5);

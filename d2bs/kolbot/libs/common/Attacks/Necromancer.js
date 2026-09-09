@@ -178,17 +178,107 @@ var ClassAttack = {
 		this.cursesSet = true;
 	},
 
-	// Keep Config.Golem up — only when dead (not every swing / not mastery refill)
+	// State id for a curse skill (runtime curse may differ from Config.Curse[])
+	curseStateId: function (skillId) {
+		switch (skillId) {
+		case 66:
+			return 9;
+		case 71:
+			return 23;
+		case 72:
+			return 19;
+		case 76:
+			return 55;
+		case 77:
+			return 56;
+		case 81:
+			return 59;
+		case 82:
+			return 58;
+		case 86:
+			return 57;
+		case 87:
+			return 60;
+		case 91:
+			return 61;
+		default:
+			return 0;
+		}
+	},
+
+	// gid -> {count, tick} — throttle boss-curse recast when it keeps missing/resisting
+	bossCurseTries: {},
+
+	canTryBossCurse: function (unit) {
+		var info = this.bossCurseTries[unit.gid];
+
+		if (!info) {
+			return true;
+		}
+
+		if (getTickCount() - info.tick > 8000) {
+			return true;
+		}
+
+		return info.count < 2;
+	},
+
+	recordBossCurseTry: function (unit) {
+		var info = this.bossCurseTries[unit.gid];
+
+		if (!info || getTickCount() - info.tick > 8000) {
+			this.bossCurseTries[unit.gid] = {count: 1, tick: getTickCount()};
+		} else {
+			info.count += 1;
+			info.tick = getTickCount();
+		}
+	},
+
+	// Bosses/specials: Decrepify forever once learned; Amplify until then (never LR)
+	getBossCurse: function () {
+		if (this.hasSkill(87)) {
+			return 87;
+		}
+
+		if (this.hasSkill(66)) {
+			return 66;
+		}
+
+		return 0;
+	},
+
+	// Packs: Amp → Decrep@24 → Lower Resist@30
+	getPackCurse: function () {
+		if (this.hasSkill(91)) {
+			return 91;
+		}
+
+		if (this.hasSkill(87)) {
+			return 87;
+		}
+
+		if (this.hasSkill(66)) {
+			return 66;
+		}
+
+		return 0;
+	},
+
+	// Keep Config.Golem up to PD2 Golem Mastery slots (5 hard → 2); cooldown between casts
 	_golemRetryTick: 0,
 
-	ensureGolem: function () {
+	// excludeUnit — the boss/target we're actively meleeing. It shouldn't count as
+	// "monster on top of us" for the interrupt-guard below, otherwise a 1-on-1 boss
+	// fight (Mephisto etc.) can never resummon a dead golem for the whole fight since
+	// the boss itself is always within 5 range.
+	ensureGolem: function (excludeUnit) {
 		var monstersNear;
 
 		if (!Config.Golem || Config.Golem === "None" || Config.Golem === 0) {
 			return false;
 		}
 
-		if (typeof Precast !== "undefined" && Precast.hasGolem && Precast.hasGolem()) {
+		if (typeof Precast !== "undefined" && Precast.hasEnoughGolems && Precast.hasEnoughGolems()) {
 			return true;
 		}
 
@@ -197,13 +287,17 @@ var ClassAttack = {
 			return false;
 		}
 
-		// Don't interrupt a melee swing when monsters are on top of us
+		// Don't interrupt a melee swing when other monsters are on top of us
 		monstersNear = getUnit(1);
 
 		if (monstersNear) {
 			do {
 				try {
 					if (typeof monstersNear.x !== "number") {
+						continue;
+					}
+
+					if (excludeUnit && monstersNear.gid === excludeUnit.gid) {
 						continue;
 					}
 
@@ -235,11 +329,33 @@ var ClassAttack = {
 		}
 	},
 
-	// Bone Armor only when missing — never mid-swing with pack in face
+	// Recast when missing or ≤1/3 absorb left — never mid-combat (hostile within 8)
+	needBoneArmor: function () {
+		var cur, max;
+
+		if (!this.hasSkill(68)) {
+			return false;
+		}
+
+		if (!me.getState(14)) {
+			return true;
+		}
+
+		// Stat 132/133 = bonearmor / bonearmormax (remaining vs cast max)
+		cur = me.getStat(132) || 0;
+		max = me.getStat(133) || 0;
+
+		if (max <= 0) {
+			return false;
+		}
+
+		return cur * 3 <= max;
+	},
+
 	ensureBoneArmor: function () {
 		var monstersNear;
 
-		if (!this.hasSkill(68) || me.getState(14)) {
+		if (!this.needBoneArmor()) {
 			return true;
 		}
 
@@ -252,7 +368,7 @@ var ClassAttack = {
 						continue;
 					}
 
-					if (Attack.checkMonster(monstersNear) && getDistance(me, monstersNear) < 5) {
+					if (Attack.checkMonster(monstersNear) && getDistance(me, monstersNear) < 8) {
 						return false;
 					}
 				} catch (eNear) {}
@@ -273,6 +389,14 @@ var ClassAttack = {
 		}
 
 		this.syncAttackSkills();
+
+		// Long boss fights (Mephisto etc.) run entirely inside Attack.kill()'s loop —
+		// afterAttack()/ensureGolem() only fire once the whole fight ends. If the golem
+		// dies mid-fight it would otherwise stay dead for the rest of the boss. Check it
+		// here too, excluding the boss itself from the "monster on top of us" guard.
+		if (Config.ActiveSummon && unit && (unit.spectype & 0x4)) {
+			this.ensureGolem(unit);
+		}
 
 		// Act1: peel shamans before stabbing fallen (packs revive otherwise)
 		if (Config.NecroShamanFocus && me.act === 1 && unit && !this.isShaman(unit)) {
@@ -304,34 +428,47 @@ var ClassAttack = {
 			return true;
 		}
 
-		var index, checkSkill,
+		var index, checkSkill, bossCurse, bossState, packCurse, packState,
 			timedSkill = -1,
-			untimedSkill = -1;
+			untimedSkill = -1,
+			timedImmune = false,
+			untimedImmune = false;
 
 		index = ((unit.spectype & 0x7) || unit.type === 0) ? 1 : 3;
 
-		if (Config.Curse[0] > 0 && this.hasSkill(Config.Curse[0]) && this.isCursable(unit) && (unit.spectype & 0x7) && !unit.getState(this.curseState[0]) &&
-				Skill.getManaCost(Config.Curse[0]) <= me.mp) {
+		bossCurse = this.getBossCurse();
+		bossState = this.curseStateId(bossCurse);
+
+		// Decrepify/Amp can miss vs boss curse resistance — unit.getState(bossState) then
+		// stays false forever and we'd recast the curse every single doAttack call instead
+		// of ever swinging Poison Strike. Cap it: 2 tries, then let the attack through and
+		// only retry the curse again after an 8s cooldown.
+		if (bossCurse > 0 && this.isCursable(unit) && (unit.spectype & 0x7) && !unit.getState(bossState) &&
+				Skill.getManaCost(bossCurse) <= me.mp && this.canTryBossCurse(unit)) {
 			if (getDistance(me, unit) > 25 || checkCollision(me, unit, 0x4)) {
 				if (!Attack.getIntoPosition(unit, 25, 0x4)) {
 					return false;
 				}
 			}
 
-			Skill.cast(Config.Curse[0], 0, unit);
+			Skill.cast(bossCurse, 0, unit);
+			this.recordBossCurseTry(unit);
 
 			return true;
 		}
 
-		if (Config.Curse[1] > 0 && this.hasSkill(Config.Curse[1]) && this.isCursable(unit) && !(unit.spectype & 0x7) && !unit.getState(this.curseState[1]) &&
-				Skill.getManaCost(Config.Curse[1]) <= me.mp) {
+		packCurse = this.getPackCurse();
+		packState = this.curseStateId(packCurse);
+
+		if (packCurse > 0 && this.isCursable(unit) && !(unit.spectype & 0x7) && !unit.getState(packState) &&
+				Skill.getManaCost(packCurse) <= me.mp) {
 			if (getDistance(me, unit) > 25 || checkCollision(me, unit, 0x4)) {
 				if (!Attack.getIntoPosition(unit, 25, 0x4)) {
 					return false;
 				}
 			}
 
-			Skill.cast(Config.Curse[1], 0, unit);
+			Skill.cast(packCurse, 0, unit);
 
 			return true;
 		}
@@ -346,12 +483,25 @@ var ClassAttack = {
 		checkSkill = this.usableSkill(checkSkill);
 
 		// usableSkill maps PS→0 when no dagger; 0 as primary is OK. Untimed never uses 0 (see usableSkill).
-		if (checkSkill === 0 || (checkSkill > 0 && Attack.checkResist(unit, checkSkill))) {
+		if (checkSkill === 0) {
 			timedSkill = checkSkill;
-		} else if (Config.AttackSkill[5] > -1 && this.hasSkill(Config.AttackSkill[5]) && Attack.checkResist(unit, Config.AttackSkill[5]) && ([56, 59].indexOf(Config.AttackSkill[5]) === -1 || Attack.validSpot(unit.x, unit.y))) {
+		} else if (checkSkill > 0) {
+			if (Attack.checkResist(unit, checkSkill)) {
+				timedSkill = checkSkill;
+			} else {
+				timedImmune = true; // owned skill exists but monster is immune to it
+			}
+		}
+
+		if (timedSkill < 0 && Config.AttackSkill[5] > -1 && Config.AttackSkill[5] !== 83 && this.hasSkill(Config.AttackSkill[5]) && ([56, 59].indexOf(Config.AttackSkill[5]) === -1 || Attack.validSpot(unit.x, unit.y))) {
 			// Don't fall back to Teeth once Poison Strike is learned
+			// Desecrate (83) is position-only via castRangedFallback — not a resist-fail primary
 			if (!(Config.AttackSkill[5] === 67 && this.hasSkill(73))) {
-				timedSkill = Config.AttackSkill[5];
+				if (Attack.checkResist(unit, Config.AttackSkill[5])) {
+					timedSkill = Config.AttackSkill[5];
+				} else {
+					timedImmune = true;
+				}
 			}
 		}
 
@@ -364,10 +514,20 @@ var ClassAttack = {
 
 		checkSkill = this.usableSkill(checkSkill);
 
-		if (checkSkill > 0 && Attack.checkResist(unit, checkSkill)) {
-			untimedSkill = checkSkill;
-		} else if (Config.AttackSkill[6] > -1 && this.hasSkill(Config.AttackSkill[6]) && Attack.checkResist(unit, Config.AttackSkill[6]) && ([56, 59].indexOf(Config.AttackSkill[6]) === -1 || Attack.validSpot(unit.x, unit.y))) {
-			untimedSkill = Config.AttackSkill[6];
+		if (checkSkill > 0) {
+			if (Attack.checkResist(unit, checkSkill)) {
+				untimedSkill = checkSkill;
+			} else {
+				untimedImmune = true;
+			}
+		}
+
+		if (untimedSkill < 0 && Config.AttackSkill[6] > -1 && this.hasSkill(Config.AttackSkill[6]) && ([56, 59].indexOf(Config.AttackSkill[6]) === -1 || Attack.validSpot(unit.x, unit.y))) {
+			if (Attack.checkResist(unit, Config.AttackSkill[6])) {
+				untimedSkill = Config.AttackSkill[6];
+			} else {
+				untimedImmune = true;
+			}
 		}
 
 		// Out of mana → normal attack only (LowManaSkill[0] === 0)
@@ -398,10 +558,17 @@ var ClassAttack = {
 			}
 		}
 
-		// No skills yet: both slots normal attack — cast once
+		// No skills yet: both slots normal attack — cast once.
+		// Never do this when the target is simply immune to our owned skills —
+		// leave both slots unset (doCast → 2) so we don't melee-normal-attack an
+		// immune; TeleStomp (own physical checkResist gate) or the merc handle it.
+		// Exception: no merc yet (early leveling, pre-hire ~clvl 12) — nobody else
+		// can pick up the slack, so normal attack is still better than nothing.
 		if (timedSkill < 0 && untimedSkill < 0) {
-			timedSkill = 0;
-			untimedSkill = -1;
+			if ((!timedImmune && !untimedImmune) || !me.getMerc()) {
+				timedSkill = 0;
+				untimedSkill = -1;
+			}
 		} else if (timedSkill < 0 && untimedSkill === 0) {
 			timedSkill = 0;
 			untimedSkill = -1;
@@ -461,6 +628,33 @@ var ClassAttack = {
 		this.novaTick = 0;
 	},
 
+	// Config.AttackSkill[5] ranged when melee can't reach (e.g. Act5 tower archers) — Desecrate
+	castRangedFallback: function (unit) {
+		var skill = Config.AttackSkill[5], range;
+
+		if (!unit || unit.dead || skill < 1 || !this.hasSkill(skill)) {
+			return false;
+		}
+
+		if (!Attack.checkResist(unit, skill)) {
+			return false;
+		}
+
+		if (Skill.getManaCost(skill) > me.mp) {
+			return false;
+		}
+
+		range = Skill.getRange(skill) || 30;
+
+		if (Math.round(getDistance(me, unit)) > range || checkCollision(me, unit, 0x4)) {
+			if (!Attack.getIntoPosition(unit, range, 0x4)) {
+				return false;
+			}
+		}
+
+		return Skill.cast(skill, Skill.getHand(skill), unit);
+	},
+
 	// Returns: 0 - fail, 1 - success, 2 - no valid attack skills
 	doCast: function (unit, timedSkill, untimedSkill) {
 		var i, walk;
@@ -505,6 +699,10 @@ var ClassAttack = {
 				break;
 			default:
 				if (Skill.getRange(timedSkill) < 4 && !Attack.validSpot(unit.x, unit.y)) {
+					if (this.castRangedFallback(unit)) {
+						return 1;
+					}
+
 					return 0;
 				}
 
@@ -513,6 +711,11 @@ var ClassAttack = {
 					walk = Skill.getRange(timedSkill) < 4 && getDistance(me, unit) < 10 && !checkCollision(me, unit, 0x1);
 
 					if (!Attack.getIntoPosition(unit, Skill.getRange(timedSkill), 0x4, walk)) {
+						// Tower / no LOS melee — Desecrate (AttackSkill[5]) if configured
+						if (Skill.getRange(timedSkill) < 4 && this.castRangedFallback(unit)) {
+							return 1;
+						}
+
 						return 0;
 					}
 				}

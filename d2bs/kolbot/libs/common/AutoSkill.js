@@ -81,10 +81,25 @@ var AutoSkill = new function () {
 			reqLvl = 24;
 			break;
 		case 73: // Poison Strike (PD2; was Poison Dagger)
+			reqLvl = 1; // PD2 wiki: req 1 (Teeth still taken as early dump)
+			break;
+		case 74: // Corpse Explosion
 			reqLvl = 6;
 			break;
-		case 83: // Desecrate (PD2; was Poison Explosion)
+		case 83: // Desecrate (PD2; was Poison Explosion @18 — now lvl 12)
+			reqLvl = 12;
+			break;
+		case 82: // Life Tap
+			reqLvl = 12;
+			break;
+		case 72: // Weaken (PD2 — lvl 18)
 			reqLvl = 18;
+			break;
+		case 87: // Decrepify
+			reqLvl = 24;
+			break;
+		case 91: // Lower Resist
+			reqLvl = 30;
 			break;
 		default:
 			break;

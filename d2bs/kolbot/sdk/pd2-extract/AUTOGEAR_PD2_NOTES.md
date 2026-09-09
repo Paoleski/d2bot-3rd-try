@@ -29,7 +29,7 @@ We do **not** port SoloPlay modules. Each feature is: SoloPlay idea → re-imple
 | `meditationaura` alias `[151,120]` | confirmed in NTItemAlias |
 | Charm types 83/84/85 | Phase 1 |
 | Treachery / CTA as AutoGear mid | optional later (recipes already remapped) |
-| Resist caps / dynamic tiers | Phase 3 |
+| Resist caps / dynamic tiers | Phase 3 — `AutoGearScore.js` + slim `autoequip_sor.nip` |
 | Sorc rare armor floor + FHR/ED (sold 24FHR studded) | fixed — `autoequip_sor.nip` + `isPendingPlayerUpgrade` |
 | PD2 FCR on chest/shield/gloves/belt | scored — sorc + caster nec; gloves/belt 10% only, chest/shield 10/20 |
 | PD2 global ED on chest/shield | PS necro overlay; sorc skips (mercScore already values for Act2) |
@@ -51,8 +51,27 @@ We do **not** port SoloPlay modules. Each feature is: SoloPlay idea → re-imple
 | 0 Config + this doc | done |
 | 1 Empty RW protect, charm caps, jewelry overlays | done |
 | 2 Gated mid RWs (Spirit/Insight) | done — test in-game |
-| 3 Dynamic tierscore | not started |
+| 3 Dynamic tierscore | in progress — sorc hybrid (AutoGearScore + identity flats); fire/cold weights live, light overlay weapon skills kept |
 | 4 Secondary / FinalGear / socketables | not started |
+
+## Phase 3 — AutoGearScore (sorc)
+
+- Module: [`libs/common/AutoGearScore.js`](../../libs/common/AutoGearScore.js)
+- Included from `AutoGear.js` when `me.classid === 1`
+- Nip: `[tier] == AutoGearScore.forItem(item)` on generics; Spirit/Lore/Stealth/Lidless/Magefist/… stay flat ≥80
+- `Item.autoEquipCheck`: below tier 80 uses `beatsEquipped` (context FCR/res); ≥80 uses raw NTIP tier
+- Knob: `Config.AutoGear.DebugScore` — print score breakdowns
+- Soft goals: FCR 20 → 63 → 105; resist 0/20 → NM 50/75 → Hell 75
+- Extended `isLowLvlSetJunk` (Isenhart/Sigon/Arctic/Angelic/…)
+
+### Phase 3 in-game checklist
+
+1. Boot light sorc: log shows `Score=on`
+2. Below 63 FCR: ring that completes next BP beats high-life no-FCR ring
+3. At 63+: life/res ring beats naked 10 FCR ring
+4. Lore/Stealth/Spirit still equip over mid rares
+5. NM: Isenhart/Sigon not picked; resist fill matters
+6. MiniShop: no +1 AC white spam (`worthShopBuy` unchanged)
 
 ## Phase 2 mid shields (casters, PD2)
 

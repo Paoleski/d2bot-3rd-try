@@ -26,6 +26,7 @@ include("common/Precast.js");
 include("common/Prototypes.js");
 include("common/Pd2Stack.js");
 include("common/ConsoleLog.js");
+include("common/CompLog.js");
 include("common/Runewords.js");
 include("common/Storage.js");
 include("common/Town.js");
@@ -57,6 +58,10 @@ function main() {
 	CraftingSystem.buildLists();
 	Runewords.init();
 	Cubing.init();
+
+	if (typeof CompLog !== "undefined") {
+		CompLog.gameStart();
+	}
 
 	for (i = 0; i < 6; i += 1) {
 		timerLastDrink[i] = 0;
@@ -345,6 +350,10 @@ function main() {
 	};
 
 	this.exit = function () {
+		if (typeof CompLog !== "undefined") {
+			CompLog.gameEnd();
+		}
+
 		this.stopDefault(); // halt scripts mid-makePortal / goToTown
 		this.stopTownChicken();
 		quit();
@@ -1157,6 +1166,22 @@ function main() {
 	// Start
 	while (true) {
 		try {
+			// Always leave on death — never sit on "YOU HAVE DIED" (Baal suppressChicken,
+			// LifeChicken 0, out of rejuvs, etc. still die; chicken gates must not block this).
+			if (me.gameReady && me.dead) {
+				D2Bot.printToConsole("Died" + this.getNearestMonster() + " in " + Pather.getAreaName(me.area) + ". Ping: " + me.ping, 9);
+
+				if (typeof CompLog !== "undefined") {
+					CompLog.death(this.getNearestMonster());
+				}
+
+				this.stopDefault();
+				this.stopTownChicken();
+				this.exit();
+
+				break;
+			}
+
 			// Restock path — allow rejuv attempts again after town
 			if (me.gameReady && me.inTown && rejuvGaveUp) {
 				rejuvGaveUp = false;
@@ -1190,6 +1215,19 @@ function main() {
 						this.stopTownChicken();
 						D2Bot.printToConsole("Life Chicken (" + me.hp + "/" + me.hpmax + ")" + this.getNearestMonster() + " in " + Pather.getAreaName(me.area) + ". Ping: " + me.ping, 9);
 						D2Bot.updateChickens();
+
+						if (typeof CompLog !== "undefined") {
+							CompLog.chicken("life", this.getNearestMonster());
+						}
+
+						// NM/Hell + no rejuvs → next AutoSmurf game farms Countess once before the objective
+						if (me.diff > 0 && typeof Misc !== "undefined" && typeof Misc.countPotions === "function" &&
+								Misc.countPotions("rv") === 0) {
+							try {
+								DataFile.updateStats("needRejuvRun", true);
+							} catch (eRejuv) {}
+						}
+
 						this.exit();
 
 						break;
@@ -1216,6 +1254,11 @@ function main() {
 				if (!suppressChicken && Config.ManaChicken > 0 && me.mp <= Math.floor(me.mpmax * Config.ManaChicken / 100)) {
 					D2Bot.printToConsole("Mana Chicken: (" + me.mp + "/" + me.mpmax + ") in " + Pather.getAreaName(me.area), 9);
 					D2Bot.updateChickens();
+
+					if (typeof CompLog !== "undefined") {
+						CompLog.chicken("mana", this.getNearestMonster());
+					}
+
 					this.exit();
 
 					break;
@@ -1230,6 +1273,11 @@ function main() {
 						if (ironGolem.hp <= Math.floor(128 * Config.IronGolemChicken / 100)) { // ironGolem.hpmax is bugged with BO
 							D2Bot.printToConsole("Irom Golem Chicken in " + Pather.getAreaName(me.area), 9);
 							D2Bot.updateChickens();
+
+							if (typeof CompLog !== "undefined") {
+								CompLog.chicken("ironGolem", this.getNearestMonster());
+							}
+
 							this.exit();
 
 							break;
@@ -1245,6 +1293,11 @@ function main() {
 						if (!suppressChicken && mercHP < Config.MercChicken) {
 							D2Bot.printToConsole("Merc Chicken in " + Pather.getAreaName(me.area), 9);
 							D2Bot.updateChickens();
+
+							if (typeof CompLog !== "undefined") {
+								CompLog.chicken("merc", this.getNearestMonster());
+							}
+
 							this.exit();
 
 							break;
@@ -1298,6 +1351,16 @@ function main() {
 
 			//D2Bot.store(JSON.stringify(debugInfo));
 			DataFile.updateStats("debugInfo", JSON.stringify(debugInfo));
+		}
+
+		if (typeof CompLog !== "undefined") {
+			CompLog.poll();
+
+			// Cache nearest threat ~every 2s while in the field (for death/chicken killer)
+			if (me.gameReady && !me.inTown && (!this._compThreatTick || getTickCount() - this._compThreatTick > 2000)) {
+				this._compThreatTick = getTickCount();
+				CompLog.updateThreat(this.getNearestMonster());
+			}
 		}
 
 		// One-shot Tal/Eth unstack test (data/pd2_force_unstack.txt) — lab only, every ~5s

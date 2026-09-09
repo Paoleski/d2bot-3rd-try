@@ -142,7 +142,7 @@ var Container = function (name, width, height, location) {
 			return false;
 		}
 
-		Storage.Reload();
+		Storage.ReloadIfDirty();
 
 		//Loop buffer looking for spot to place item.
 		for (y = 0; y < this.width - (sx - 1); y += 1) {
@@ -163,6 +163,333 @@ Loop:
 				}
 
 				return ({x: x, y: y});
+			}
+		}
+
+		return false;
+	};
+
+	/* Container.FindSpotInRows(item, minRow, maxRow)
+	 *	Find a free rectangle with top row in [minRow, maxRow - sizey + 1].
+	 */
+	this.FindSpotInRows = function (item, minRow, maxRow) {
+		var x, y, nx, ny, sx, sy, rowStart, rowEnd;
+
+		if (!item || typeof item.sizex !== "number" || typeof item.sizey !== "number") {
+			return false;
+		}
+
+		sx = item.sizex;
+		sy = item.sizey;
+
+		if (sx < 1 || sy < 1) {
+			return false;
+		}
+
+		if (minRow === undefined) {
+			minRow = 0;
+		}
+
+		if (maxRow === undefined) {
+			maxRow = this.height - 1;
+		}
+
+		rowStart = minRow;
+		rowEnd = maxRow - (sy - 1);
+
+		if (rowEnd < rowStart) {
+			return false;
+		}
+
+		Storage.ReloadIfDirty();
+
+		for (y = 0; y < this.width - (sx - 1); y += 1) {
+Loop:
+			for (x = rowStart; x <= rowEnd; x += 1) {
+				if (this.buffer[x][y] > 0) {
+					continue;
+				}
+
+				for (nx = 0; nx < sy; nx += 1) {
+					for (ny = 0; ny < sx; ny += 1) {
+						if (this.buffer[x + nx][y + ny]) {
+							continue Loop;
+						}
+					}
+				}
+
+				return ({x: x, y: y});
+			}
+		}
+
+		return false;
+	};
+
+	/* Container.FindSpotExcluding(item, exclude, placeBounds)
+	 *	Like FindSpot, but:
+	 *	- cells inside exclude {x:row, y:col, sizex, sizey} are blocked
+	 *	- cells currently occupied by item (when relocating in-container) are free
+	 *	- optional placeBounds {minRow, maxRow} limits where the item may land
+	 */
+	this.FindSpotExcluding = function (item, exclude, placeBounds) {
+		var x, y, nx, ny, sx, sy, row, col, blocked, rowStart, rowEnd;
+
+		if (!item || typeof item.sizex !== "number" || typeof item.sizey !== "number") {
+			return false;
+		}
+
+		sx = item.sizex;
+		sy = item.sizey;
+
+		if (sx < 1 || sy < 1) {
+			return false;
+		}
+
+		rowStart = 0;
+		rowEnd = this.height - sy;
+
+		if (placeBounds) {
+			if (placeBounds.minRow !== undefined) {
+				rowStart = placeBounds.minRow;
+			}
+
+			if (placeBounds.maxRow !== undefined) {
+				rowEnd = placeBounds.maxRow - (sy - 1);
+			}
+		}
+
+		if (rowEnd < rowStart) {
+			return false;
+		}
+
+		Storage.ReloadIfDirty();
+
+		for (y = 0; y < this.width - (sx - 1); y += 1) {
+Loop:
+			for (x = rowStart; x <= rowEnd; x += 1) {
+				for (nx = 0; nx < sy; nx += 1) {
+					for (ny = 0; ny < sx; ny += 1) {
+						row = x + nx;
+						col = y + ny;
+						blocked = false;
+
+						if (exclude &&
+								row >= exclude.x && row < exclude.x + exclude.sizey &&
+								col >= exclude.y && col < exclude.y + exclude.sizex) {
+							blocked = true;
+						} else if (this.buffer[row][col] > 0) {
+							// Own footprint is free (item is being relocated)
+							if (!(item.location === this.location && item.mode === 0 &&
+									col >= item.x && col < item.x + item.sizex &&
+									row >= item.y && row < item.y + item.sizey)) {
+								blocked = true;
+							}
+						}
+
+						if (blocked) {
+							continue Loop;
+						}
+					}
+				}
+
+				return ({x: x, y: y});
+			}
+		}
+
+		return false;
+	};
+
+	/* Container.MakeRoom(item, maxMoves, bounds)
+	 *	Shuffle existing items within this container so item can fit.
+	 *	Non-destructive — never sells/drops.
+	 *	bounds (optional): {minRow, maxRow, relocateMinRow, relocateMaxRow}
+	 *	  — only clear a spot in [minRow,maxRow]; relocate blockers into relocate* rows
+	 *	  (defaults to same as min/max when set). Without bounds, uses full CanFit.
+	 */
+	this.MakeRoom = function (item, maxMoves, bounds) {
+		var sx, sy, need, free, h, w, candidates, row, col, r, c, idx, blockers,
+			seen, i, cand, live, spot, nDelay, moves, cursor,
+			minRow, maxRow, relMin, relMax, placeBounds, self = this;
+
+		if (maxMoves === undefined) {
+			maxMoves = 6;
+		}
+
+		if (!item || typeof item.sizex !== "number" || typeof item.sizey !== "number") {
+			return false;
+		}
+
+		sx = item.sizex;
+		sy = item.sizey;
+
+		if (sx < 1 || sy < 1) {
+			return false;
+		}
+
+		minRow = 0;
+		maxRow = this.height - 1;
+		relMin = 0;
+		relMax = this.height - 1;
+
+		if (bounds) {
+			if (bounds.minRow !== undefined) {
+				minRow = bounds.minRow;
+			}
+
+			if (bounds.maxRow !== undefined) {
+				maxRow = bounds.maxRow;
+			}
+
+			relMin = (bounds.relocateMinRow !== undefined) ? bounds.relocateMinRow : minRow;
+			relMax = (bounds.relocateMaxRow !== undefined) ? bounds.relocateMaxRow : maxRow;
+		}
+
+		placeBounds = {minRow: relMin, maxRow: relMax};
+
+		function fitsTarget() {
+			if (bounds) {
+				return !!self.FindSpotInRows(item, minRow, maxRow);
+			}
+
+			return self.CanFit(item);
+		}
+
+		Storage.ReloadIfDirty();
+
+		if (fitsTarget()) {
+			return true;
+		}
+
+		need = sx * sy;
+		free = 0;
+
+		for (h = minRow; h <= maxRow; h += 1) {
+			for (w = 0; w < this.width; w += 1) {
+				if (this.buffer[h][w] === 0) {
+					free += 1;
+				}
+			}
+		}
+
+		if (free < need) {
+			return false;
+		}
+
+		candidates = [];
+
+		for (col = 0; col <= this.width - sx; col += 1) {
+			for (row = minRow; row <= maxRow - (sy - 1); row += 1) {
+				blockers = [];
+				seen = {};
+
+				for (r = 0; r < sy; r += 1) {
+					for (c = 0; c < sx; c += 1) {
+						idx = this.buffer[row + r][col + c];
+
+						if (idx > 0 && !seen[idx]) {
+							seen[idx] = true;
+							blockers.push(this.itemList[idx - 1]);
+						}
+					}
+				}
+
+				if (blockers.length > 0 && blockers.length <= maxMoves) {
+					candidates.push({x: row, y: col, sizex: sx, sizey: sy, count: blockers.length});
+				}
+			}
+		}
+
+		candidates.sort(function (a, b) {
+			return a.count - b.count;
+		});
+
+		for (i = 0; i < candidates.length; i += 1) {
+			cand = candidates[i];
+			moves = 0;
+
+			while (moves < maxMoves) {
+				Storage.Reload();
+
+				if (fitsTarget()) {
+					if (moves > 0) {
+						print("ÿc2Storageÿc0 :: MakeRoom cleared space for " + (item.name || ("#" + item.classid)) +
+							" (" + moves + " move" + (moves === 1 ? "" : "s") + ")");
+					}
+
+					return true;
+				}
+
+				blockers = [];
+				seen = {};
+
+				for (r = 0; r < cand.sizey; r += 1) {
+					for (c = 0; c < cand.sizex; c += 1) {
+						idx = this.buffer[cand.x + r][cand.y + c];
+
+						if (idx > 0 && !seen[idx]) {
+							seen[idx] = true;
+							blockers.push(this.itemList[idx - 1]);
+						}
+					}
+				}
+
+				if (!blockers.length) {
+					return fitsTarget();
+				}
+
+				if (blockers.length > maxMoves - moves) {
+					break;
+				}
+
+				live = me.getItem(-1, -1, blockers[0].gid);
+
+				if (!live || live.location !== this.location || live.mode !== 0) {
+					break;
+				}
+
+				spot = this.FindSpotExcluding(live, cand, placeBounds);
+
+				if (!spot) {
+					break;
+				}
+
+				if (me.itemoncursor || !live.toCursor()) {
+					break;
+				}
+
+				clickItem(0, spot.y, spot.x, this.location);
+
+				nDelay = getTickCount();
+
+				while ((getTickCount() - nDelay) < Math.max(1000, me.ping * 3 + 500)) {
+					if (!me.itemoncursor) {
+						break;
+					}
+
+					delay(10);
+				}
+
+				if (me.itemoncursor) {
+					cursor = getUnit(100);
+
+					if (cursor) {
+						this.MoveTo(cursor);
+					}
+
+					break;
+				}
+
+				Storage.markDirty();
+				moves += 1;
+			}
+
+			Storage.Reload();
+
+			if (fitsTarget()) {
+				print("ÿc2Storageÿc0 :: MakeRoom cleared space for " + (item.name || ("#" + item.classid)) +
+					" (" + moves + " move" + (moves === 1 ? "" : "s") + ")");
+
+				return true;
 			}
 		}
 
@@ -234,6 +561,7 @@ Loop:
 					if (!me.itemoncursor) {
 						print("Successfully placed " + item.name + " at X: " + nPos.x + " Y: " + nPos.y);
 						delay(200);
+						Storage.markDirty();
 
 						return true;
 					}
@@ -243,6 +571,10 @@ Loop:
 			}
 
 			// Still on cursor = failed (old code returned true and broke the next MoveTo)
+			if (!me.itemoncursor) {
+				Storage.markDirty();
+			}
+
 			return !me.itemoncursor;
 		} catch (e) {
 			return false;
@@ -277,7 +609,7 @@ Loop:
 			usedSpace = 0,
 			totalSpace = this.height * this.width;
 
-		Storage.Reload();
+		Storage.ReloadIfDirty();
 
 		for (x = 0; x < this.height; x += 1) {
 			for (y = 0; y < this.width; y += 1) {
@@ -296,7 +628,7 @@ Loop:
 	this.Compare = function (baseRef) {
 		var h, w, n, item, itemList, reference;
 
-		Storage.Reload();
+		Storage.ReloadIfDirty();
 
 		try {
 			itemList = [];
@@ -341,6 +673,10 @@ Loop:
 };
 
 var Storage = new function () {
+	this.dirty = true;
+	this.lastReload = 0;
+	this.RELOAD_MAX_AGE = 500; // ms — force refresh even if not marked dirty
+
 	this.Init = function () {
 		// PD2 sizes (classic LoD is inventory 10x4, stash 6x8, cube 3x4)
 		this.StashY = 15;
@@ -352,6 +688,28 @@ var Storage = new function () {
 		this.InvRef = [];
 
 		this.Reload();
+	};
+
+	// Call after pick / sell / equip / cube / any storage change outside MoveTo
+	this.markDirty = function () {
+		this.dirty = true;
+
+		if (typeof Runewords !== "undefined" && typeof Runewords.invalidateCache === "function") {
+			try {
+				Runewords.invalidateCache();
+			} catch (eInv) {}
+		}
+	};
+
+	// Used by FindSpot / CanFit / Compare — avoid full me.getItem walk every call
+	this.ReloadIfDirty = function () {
+		var now = getTickCount();
+
+		if (!this.dirty && this.lastReload && (now - this.lastReload) < this.RELOAD_MAX_AGE) {
+			return true;
+		}
+
+		return this.Reload();
 	};
 
 	this.BeltSize = function () {
@@ -389,6 +747,8 @@ var Storage = new function () {
 		var item = me.getItem();
 
 		if (!item) {
+			this.dirty = false;
+			this.lastReload = getTickCount();
 			return false;
 		}
 
@@ -416,6 +776,9 @@ var Storage = new function () {
 				break;
 			}
 		} while (item.getNext());
+
+		this.dirty = false;
+		this.lastReload = getTickCount();
 
 		return true;
 	};

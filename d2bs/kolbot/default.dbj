@@ -22,6 +22,7 @@ include("common/Precast.js");
 include("common/Prototypes.js");
 include("common/Pd2Stack.js");
 include("common/ConsoleLog.js");
+include("common/CompLog.js");
 include("common/Runewords.js");
 include("common/Storage.js");
 include("common/Town.js");
@@ -151,6 +152,10 @@ function main() {
 		D2Bot.printToConsole("Experience decreased by " + (stats.experience - me.getStat(13)), 9);
 		DataFile.updateStats("deaths");
 		D2Bot.updateDeaths();
+
+		if (typeof CompLog !== "undefined") {
+			CompLog.death("");
+		}
 	}
 
 	DataFile.updateStats(["experience", "name"]);

@@ -78,6 +78,11 @@ function LoadConfig() {
 	Scripts.Endugu = false;
 	Scripts.Travincal = false;
 		Config.Travincal.PortalLeech = false; // Set to true to open a portal for leechers.
+		// HitAndRun (light sorc only, AutoGearBuild=light): NM/Hell → 3s Lightning then retreat.
+		// Config.Travincal.HitAndRun = true;
+		// Config.Travincal.HitAndRunMs = 3000;
+		// Config.Travincal.HitAndRunMinRetreat = 15;
+		// Config.Travincal.HitAndRunMaxRetreat = 22;
 	Scripts.Mephisto = false; // AutoSmurf only — enabled boss scripts run after AutoSmurf
 		Config.Mephisto.MoatTrick = false;
 		Config.Mephisto.KillCouncil = false;
@@ -96,6 +101,7 @@ function LoadConfig() {
 		Config.Diablo.EntranceTP = "Entrance TP up";
 		Config.Diablo.StarTP = "Star TP up";
 		Config.Diablo.DiabloMsg = "Diablo";
+		Config.Diablo.ChaosAttackSkill = 49; // Lightning — Charged Bolt's range is too short for Chaos Sanctuary packs (NM/Hell)
 	Scripts.SealLeader = false; // Clear a safe spot around seals and invite leechers in. Leechers should run SealLeecher script. Don't run with Diablo or FastDiablo.
 
 	// *** act 5 ***
@@ -450,7 +456,7 @@ function LoadConfig() {
 	Config.MinGameTime = 60; // Min game time in seconds. Bot will TP to town and stay in game if the run is completed before.
 	Config.MaxGameTime = 0; // Maximum game time in seconds. Quit game when limit is reached.
 	Config.TeleSwitch = false; // Switch to slot II when teleporting more than 1 node.
-	Config.TeleDelay = -1; // -1 = progressive extra delay (Pather.getTeleDelay); >=0 = fixed ms override
+	Config.TeleDelay = -1; // -1 = progressive (Pather.getTeleDelay); >=0 = fixed ms. Sorc lvl 45+ always 0.
 	// Progressive EXTRA wait (walk between): Norm A1–2=10s … Hell=0 (game FCR only, no bot delay)
 	Config.OpenChests = true; // Open chests while pathing / clearing (range ~20). Controls key buying.
 	Config.MiniShopBot = true; // Scan items in NPC shops.

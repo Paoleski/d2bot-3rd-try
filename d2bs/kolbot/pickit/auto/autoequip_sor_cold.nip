@@ -56,11 +56,4 @@
 
 [type] == sword && [flag] == runeword # [itemallskills] == 2 && [fcr] >= 25 # [tier] == 100
 
-// Amulets/rings ? reinforce cold over any cross-build noise (base nip already cold-biased)
-[type] == amulet && [quality] == rare # [coldskilltab] >= 1 && [maxhp]+[maxmana] >= 50 # [tier] == 27
-[type] == amulet && [quality] == rare # [coldskilltab] >= 1 && [maxhp]+[maxmana] >= 90 # [tier] == 28
-[type] == amulet && [quality] == rare # [coldskilltab] >= 2 # [tier] == 29
-[type] == amulet && [quality] == rare # [coldskilltab] >= 1 && [sorceressskills] >= 1 # [tier] == 30
-[type] == amulet && [quality] == rare # [coldskilltab] >= 2 && [maxhp]+[maxmana] >= 70 # [tier] == 31
-[type] == ring && [quality] == rare # [coldskilltab] >= 1 # [tier] == 20
-[type] == ring && [quality] == rare # [fcr] >= 10 && [fireresist]+[lightresist]+[coldresist] >= 20 # [tier] == 19
+// Jewelry ranking is AutoGearScore (build=cold weights cold tab / FO / FN)
