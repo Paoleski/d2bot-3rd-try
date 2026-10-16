@@ -160,89 +160,122 @@ NTIP.Clear = function () {
 NTIP.GetTier = function (item) {
 	var i, tier = 0, lineTier, t, bonus, locs;
 
-	// Go through ALL lines that describe the item
-	for (i = 0; i < NTIP_CheckList.length; i += 1) {
-		if (NTIP_CheckList[i].length === 3 && NTIP_CheckList[i][2].hasOwnProperty("Tier")) {
-			try {
-				if (NTIP_CheckList[i][0].length > 0) {
-					if (eval(NTIP_CheckList[i][0])) {
-						if (NTIP_CheckList[i][1].length > 0) {
-							if (!eval(NTIP_CheckList[i][1])) {
-								continue;
+	// Safety cap — runaway GetTier↔equip nesting shows up as "too much recursion"
+	if ((NTIP._getTierDepth || 0) > 6) {
+		return 0;
+	}
+
+	NTIP._getTierDepth = (NTIP._getTierDepth || 0) + 1;
+
+	try {
+		// Go through ALL lines that describe the item
+		for (i = 0; i < NTIP_CheckList.length; i += 1) {
+			if (NTIP_CheckList[i].length === 3 && NTIP_CheckList[i][2].hasOwnProperty("Tier")) {
+				try {
+					if (NTIP_CheckList[i][0].length > 0) {
+						if (eval(NTIP_CheckList[i][0])) {
+							if (NTIP_CheckList[i][1].length > 0) {
+								if (!eval(NTIP_CheckList[i][1])) {
+									continue;
+								}
 							}
+						} else {
+							continue;
+						}
+					} else if (NTIP_CheckList[i][1].length > 0) {
+						if (!eval(NTIP_CheckList[i][1])) {
+							continue;
 						}
 					} else {
 						continue;
 					}
-				} else if (NTIP_CheckList[i][1].length > 0) {
-					if (!eval(NTIP_CheckList[i][1])) {
-						continue;
+
+					t = NTIP_CheckList[i][2].Tier;
+
+					if (typeof t === "function") {
+						lineTier = t(item);
+					} else {
+						lineTier = t;
 					}
-				} else {
-					continue;
-				}
 
-				t = NTIP_CheckList[i][2].Tier;
+					if (!isNaN(lineTier) && lineTier > tier) {
+						tier = lineTier;
+					}
+				} catch (e) {
 
-				if (typeof t === "function") {
-					lineTier = t(item);
-				} else {
-					lineTier = t;
 				}
+			}
+		}
+
+		// PD2: necro heads often miss [type]==head / LoD classid nip lines — JS score fills the gap
+		try {
+			if (item && typeof Item !== "undefined" && typeof Item.necroHeadTier === "function") {
+				lineTier = Item.necroHeadTier(item);
 
 				if (!isNaN(lineTier) && lineTier > tier) {
 					tier = lineTier;
 				}
-			} catch (e) {
-
 			}
-		}
-	}
+		} catch (eHead) {}
 
-	// PD2: necro heads often miss [type]==head / LoD classid nip lines — JS score fills the gap
-	try {
-		if (item && typeof Item !== "undefined" && typeof Item.necroHeadTier === "function") {
-			lineTier = Item.necroHeadTier(item);
+		// Gloves: IAS/FCR/res JS floor when nip formula lines miss (MiniShop needs GetTier > 0)
+		try {
+			if (item && typeof Item !== "undefined" && typeof Item.gloveTier === "function") {
+				lineTier = Item.gloveTier(item);
 
-			if (!isNaN(lineTier) && lineTier > tier) {
-				tier = lineTier;
-			}
-		}
-	} catch (eHead) {}
-
-	// Lore/Stealth/Spirit identity floors when nip #tier misses (same class of bug as necro heads)
-	try {
-		if (item && typeof Item !== "undefined" && typeof Item.identityRunewordTier === "function") {
-			lineTier = Item.identityRunewordTier(item);
-
-			if (!isNaN(lineTier) && lineTier > tier) {
-				tier = lineTier;
-			}
-		}
-	} catch (eIdRw) {}
-
-	// Cannot Be Frozen — boost only if we don't already have CBF elsewhere
-	try {
-		if (item && typeof Item !== "undefined" && typeof Item.cbfTierBonus === "function") {
-			bonus = Item.cbfTierBonus(item);
-
-			if (bonus > 0) {
-				if (tier > 0) {
-					tier += bonus;
-				} else if (typeof Item.getBodyLoc === "function") {
-					locs = Item.getBodyLoc(item);
-
-					if (locs && locs.length) {
-						tier = bonus;
-					}
-				} else {
-					tier = bonus;
+				if (!isNaN(lineTier) && lineTier > tier) {
+					tier = lineTier;
 				}
 			}
-		}
-	} catch (eCbf) {}
+		} catch (eGlove) {}
 
-	return tier;
+		// Boots: resist/FRW/ED JS floor — stamina-only blues stay 0 so 5/5 + ED wins
+		try {
+			if (item && typeof Item !== "undefined" && typeof Item.bootTier === "function") {
+				lineTier = Item.bootTier(item);
+
+				if (!isNaN(lineTier) && lineTier > tier) {
+					tier = lineTier;
+				}
+			}
+		} catch (eBoot) {}
+
+		// Lore/Stealth/Spirit identity floors when nip #tier misses (same class of bug as necro heads)
+		try {
+			if (item && typeof Item !== "undefined" && typeof Item.identityRunewordTier === "function") {
+				lineTier = Item.identityRunewordTier(item);
+
+				if (!isNaN(lineTier) && lineTier > tier) {
+					tier = lineTier;
+				}
+			}
+		} catch (eIdRw) {}
+
+		// Cannot Be Frozen — boost only if we don't already have CBF elsewhere
+		try {
+			if (item && typeof Item !== "undefined" && typeof Item.cbfTierBonus === "function") {
+				bonus = Item.cbfTierBonus(item);
+
+				if (bonus > 0) {
+					if (tier > 0) {
+						tier += bonus;
+					} else if (typeof Item.getBodyLoc === "function") {
+						locs = Item.getBodyLoc(item);
+
+						if (locs && locs.length) {
+							tier = bonus;
+						}
+					} else {
+						tier = bonus;
+					}
+				}
+			}
+		} catch (eCbf) {}
+
+		return tier;
+	} finally {
+		NTIP._getTierDepth = Math.max(0, (NTIP._getTierDepth || 1) - 1);
+	}
 };
 
 NTIP.CheckItem = function (item, entryList, verbose) {

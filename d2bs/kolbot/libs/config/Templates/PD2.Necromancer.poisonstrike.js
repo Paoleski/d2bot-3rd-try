@@ -530,11 +530,12 @@ function LoadConfig() {
 	Config.BossPriority = false;
 	Config.NecroShamanFocus = true; // Act1: kill shamans before fallen packs
 	Config.ClearType = 0;
-	Config.DangerClear = { // peel melee-range mobs before walking on
+	Config.DangerClear = { // peel during TeleDelay gaps only (not Act1 walk-leveling)
 		Range: 8,
 		ClearRange: 12,
 		PollMs: 250,
-		WhileTeleporting: false
+		WhileTeleporting: false,
+		WhileWalking: false
 	};
 	Config.TeleStomp = false;
 	Config.Wereform = false;

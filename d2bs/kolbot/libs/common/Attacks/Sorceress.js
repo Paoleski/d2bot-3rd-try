@@ -511,6 +511,17 @@ var ClassAttack = {
 			}
 		}
 
+		// After Act 3 NM Akara respec: Lightning invested over Charged Bolt → use Lightning
+		if ((me.getSkill(49, 0) || 0) > (me.getSkill(38, 0) || 0)) {
+			if ([36, 38].indexOf(Config.AttackSkill[1]) > -1) {
+				Config.AttackSkill[1] = 49;
+			}
+
+			if ([36, 38].indexOf(Config.AttackSkill[3]) > -1) {
+				Config.AttackSkill[3] = 49;
+			}
+		}
+
 		// Cold leveling: Ice Bolt → Frost Nova → Frozen Orb
 		if (me.getSkill(44, 0) > 0) {
 			if ([36, 39].indexOf(Config.AttackSkill[1]) > -1) {
@@ -620,8 +631,9 @@ var ClassAttack = {
 			}
 		}
 
-		// Out of mana → normal attack on RMB (always through lvl 12; also via LowManaSkill config)
-		if (timedSkill > 0 && Skill.getManaCost(timedSkill) > me.mp) {
+		// Out of mana → normal attack on RMB (always through lvl 12 / LowManaSkill[0]===0).
+		// me.mp === 0 also counts at <=7: getManaCost can under-report staff soft skills.
+		if (timedSkill > 0 && (Skill.getManaCost(timedSkill) > me.mp || (me.charlvl <= 7 && me.mp === 0))) {
 			if (me.charlvl <= 12 || Config.LowManaSkill[0] === 0) {
 				timedSkill = 0;
 				untimedSkill = -1;
@@ -631,7 +643,8 @@ var ClassAttack = {
 			}
 		}
 
-		if (untimedSkill > 0 && Skill.getManaCost(untimedSkill) > me.mp && (timedSkill <= 0 || Skill.getManaCost(timedSkill) > me.mp)) {
+		if (untimedSkill > 0 && (Skill.getManaCost(untimedSkill) > me.mp || (me.charlvl <= 7 && me.mp === 0)) &&
+				(timedSkill <= 0 || Skill.getManaCost(timedSkill) > me.mp)) {
 			if (me.charlvl <= 12 || Config.LowManaSkill[0] === 0 || Config.LowManaSkill[1] === 0) {
 				timedSkill = 0;
 				untimedSkill = -1;
@@ -765,13 +778,19 @@ var ClassAttack = {
 					delay(100);
 					return 0;
 				}
-			} else if (range < 4 && !Attack.validSpot(unit.x, unit.y)) {
+			} else if (timedSkill !== 0 && range < 4 && !Attack.validSpot(unit.x, unit.y)) {
 				return 0;
 			} else if (Math.round(getDistance(me, unit)) > range || checkCollision(me, unit, 0x4)) {
-				walk = range < 4 && getDistance(me, unit) < 12 && !checkCollision(me, unit, 0x1);
+				// Skill 0 (OOM RMB): always walk in from bolt range — dist<12 gate never fired
+				// while casting FB at 15–20, so getIntoPosition failed and never Skill.cast(0).
+				walk = timedSkill === 0 || (range < 4 && getDistance(me, unit) < 20 && !checkCollision(me, unit, 0x1));
 
 				if (!Attack.getIntoPosition(unit, range, 0x4, walk)) {
-					return 0;
+					if (timedSkill === 0) {
+						Pather.walkTo(unit.x, unit.y, 3);
+					} else {
+						return 0;
+					}
 				}
 			}
 
@@ -781,7 +800,18 @@ var ClassAttack = {
 				// Spells: skip if still line-blocked. Melee / normal attack: always swing after move.
 				if (timedSkill === 0 || !checkCollision(me, unit, 0x4)) {
 					if (!Skill.cast(timedSkill, hand, unit)) {
-						return 0;
+						// Spell cast failed OOM mid-swing — fall back to RMB Attack early
+						if (timedSkill > 0 && me.charlvl <= 12 && Skill.getManaCost(timedSkill) > me.mp) {
+							if (getDistance(me, unit) > 3) {
+								Pather.walkTo(unit.x, unit.y, 3);
+							}
+
+							if (!Skill.cast(0, this.castHand(0), unit)) {
+								return 0;
+							}
+						} else {
+							return 0;
+						}
 					}
 
 					// Frost Nova on Diablo — back out immediately after (Normal only; NM/Hell hugs)
@@ -836,13 +866,17 @@ var ClassAttack = {
 					delay(100);
 					return 0;
 				}
-			} else if (range < 4 && !Attack.validSpot(unit.x, unit.y)) {
+			} else if (untimedSkill !== 0 && range < 4 && !Attack.validSpot(unit.x, unit.y)) {
 				return 0;
 			} else if (Math.round(getDistance(me, unit)) > range || checkCollision(me, unit, 0x4)) {
-				walk = range < 4 && getDistance(me, unit) < 12 && !checkCollision(me, unit, 0x1);
+				walk = untimedSkill === 0 || (range < 4 && getDistance(me, unit) < 20 && !checkCollision(me, unit, 0x1));
 
 				if (!Attack.getIntoPosition(unit, range, 0x4, walk)) {
-					return 0;
+					if (untimedSkill === 0) {
+						Pather.walkTo(unit.x, unit.y, 3);
+					} else {
+						return 0;
+					}
 				}
 			}
 
@@ -850,7 +884,17 @@ var ClassAttack = {
 				hand = this.castHand(untimedSkill);
 
 				if (!Skill.cast(untimedSkill, hand, unit)) {
-					return 0;
+					if (untimedSkill > 0 && me.charlvl <= 12 && Skill.getManaCost(untimedSkill) > me.mp) {
+						if (getDistance(me, unit) > 3) {
+							Pather.walkTo(unit.x, unit.y, 3);
+						}
+
+						if (!Skill.cast(0, this.castHand(0), unit)) {
+							return 0;
+						}
+					} else {
+						return 0;
+					}
 				}
 
 				if (unit.classid === 243 && untimedSkill === 44 && me.diff === 0) {

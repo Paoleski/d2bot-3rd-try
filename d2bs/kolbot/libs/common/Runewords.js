@@ -157,6 +157,8 @@ var Runewords = {
 	},
 
 	// Config.Runewords bases are often "Bone Helm" strings — resolve to classid
+	// WARNING: LoD NTIPAliasClassID numbers can collide with PD2 live classids
+	// (e.g. spikedshield=365 LoD vs PD2 scythe at 365). Prefer baseMatchesConfig / configBaseCode.
 	resolveBaseClassid: function (base) {
 		var key;
 
@@ -175,6 +177,117 @@ var Runewords = {
 		}
 
 		return -1;
+	},
+
+	// LoD NTIP 3-letter item code for a Config.Runewords base name/number ("Spiked Shield" → "spk").
+	// Never use the numeric LoD classid against unit.classid on PD2.
+	configBaseCode: function (configBase) {
+		var key, lodId, k, code = "";
+
+		if (configBase === undefined || configBase === null) {
+			return "";
+		}
+
+		if (typeof configBase === "number") {
+			lodId = configBase;
+		} else if (typeof configBase === "string") {
+			key = configBase.replace(/\s+/g, "").toLowerCase();
+
+			if (typeof NTIPAliasClassID === "undefined") {
+				return "";
+			}
+
+			// Already a short code (spk, 9s8, kit, …)
+			if (/^[a-z0-9]{3}$/i.test(key) && NTIPAliasClassID.hasOwnProperty(key)) {
+				return key.toLowerCase();
+			}
+
+			if (!NTIPAliasClassID.hasOwnProperty(key)) {
+				return "";
+			}
+
+			lodId = NTIPAliasClassID[key];
+		} else {
+			return "";
+		}
+
+		if (typeof NTIPAliasClassID === "undefined") {
+			return "";
+		}
+
+		for (k in NTIPAliasClassID) {
+			if (!NTIPAliasClassID.hasOwnProperty(k)) {
+				continue;
+			}
+
+			if (NTIPAliasClassID[k] === lodId && /^[a-z0-9]{3}$/i.test(k)) {
+				code = k.toLowerCase();
+				break;
+			}
+		}
+
+		return code;
+	},
+
+	// True if live unit is the configured base — match item.code, never LoD classid.
+	// Fail closed when unit.code is empty (PD2 blank names / unid) so we don't grab a scythe as "spk".
+	baseMatchesConfig: function (unit, configBase) {
+		var want, have;
+
+		if (!unit) {
+			return false;
+		}
+
+		want = this.configBaseCode(configBase);
+
+		if (!want) {
+			return false;
+		}
+
+		have = unit.code ? String(unit.code).toLowerCase().replace(/\s+/g, "") : "";
+
+		if (!have) {
+			return false;
+		}
+
+		return have === want;
+	},
+
+	// Pretty name for a recipe array (Runeword.Rhyme → "Rhyme")
+	recipeName: function (recipe) {
+		var k, i, rw;
+
+		if (!recipe || !recipe.length) {
+			return "?";
+		}
+
+		for (k in Runeword) {
+			if (!Runeword.hasOwnProperty(k)) {
+				continue;
+			}
+
+			rw = Runeword[k];
+
+			if (rw === recipe) {
+				return k;
+			}
+
+			if (!rw || rw.length !== recipe.length) {
+				continue;
+			}
+
+			for (i = 0; i < recipe.length; i += 1) {
+				if (rw[i] !== recipe[i]) {
+					break;
+				}
+			}
+
+			if (i === recipe.length) {
+				return k;
+			}
+		}
+
+		return "RW";
 	},
 
 	// Inv (3) + stash (7) + cube (6).
@@ -1011,32 +1124,40 @@ var Runewords = {
 		return ready;
 	},
 
-	// Empty 2os Strength base + Amn/Tir ready — don't put bare spear on merc first
-	// (knives never — Strength is merc-only for PS)
-	shouldHoldForStrengthMake: function (unit) {
-		var socks;
+	// Empty white/grey NonEth 2os spear/polearm — Strength base (or Config name if PD2 type lies)
+	isEmptyStrengthBase: function (unit) {
+		var socks, i, rw, typed;
 
-		if (!unit || !Config.MakeRunewords || !this.hasStrengthRecipe()) {
+		if (!unit) {
 			return false;
 		}
 
-		if (!this.haveRunes(Runeword.Strength, false)) {
-			return false;
+		typed = (unit.itemType === 33 || unit.itemType === 34);
+
+		if (!typed) {
+			if (!Config.Runewords || !this.hasStrengthRecipe || !this.hasStrengthRecipe()) {
+				return false;
+			}
+
+			for (i = 0; i < Config.Runewords.length; i += 1) {
+				rw = Config.Runewords[i];
+
+				if (rw && rw[0] && this.isStrengthRecipe(rw[0]) && this.baseMatchesConfig(unit, rw[1])) {
+					typed = true;
+					break;
+				}
+			}
+
+			if (!typed) {
+				return false;
+			}
 		}
 
-		if (this.purityOutranksStrength && this.purityOutranksStrength()) {
-			return false;
-		}
-
-		if (unit.itemType !== 33 && unit.itemType !== 34) {
+		if (typeof Item !== "undefined" && Item.isRwBaseQuality && !Item.isRwBaseQuality(unit)) {
 			return false;
 		}
 
 		if (unit.getFlag(0x4000000) || unit.getFlag(0x400000) || unit.getItem()) {
-			return false;
-		}
-
-		if (typeof Item !== "undefined" && Item.isRwBaseQuality && !Item.isRwBaseQuality(unit)) {
 			return false;
 		}
 
@@ -1049,8 +1170,27 @@ var Runewords = {
 		return socks === 2;
 	},
 
+	// Empty 2os Strength base + Amn/Tir ready — don't put bare spear on merc first
+	// (knives never — Strength is merc-only for PS)
+	shouldHoldForStrengthMake: function (unit) {
+		if (!unit || !Config.MakeRunewords || !this.hasStrengthRecipe()) {
+			return false;
+		}
+
+		if (!this.haveRunes(Runeword.Strength, false)) {
+			return false;
+		}
+
+		if ((this.purityBasesDone && this.purityBasesDone()) ||
+				(this.purityOutranksStrength && this.purityOutranksStrength())) {
+			return false;
+		}
+
+		return this.isEmptyStrengthBase(unit);
+	},
+
 	getBestEmptyStrengthBaseNoPeel: function () {
-		var item, socks, score, best = null, bestScore = -1;
+		var item, score, best = null, bestScore = -1;
 
 		item = me.getItem(-1, -1);
 
@@ -1064,26 +1204,7 @@ var Runewords = {
 					continue;
 				}
 
-				// Merc Strength only — never necro knives
-				if (item.itemType !== 33 && item.itemType !== 34) {
-					continue;
-				}
-
-				if (typeof Item !== "undefined" && Item.isRwBaseQuality && !Item.isRwBaseQuality(item)) {
-					continue;
-				}
-
-				if (item.getFlag(0x4000000) || item.getFlag(0x400000) || item.getItem()) {
-					continue;
-				}
-
-				socks = item.getStat(194) || 0;
-
-				if (typeof item.getStatEx === "function") {
-					socks = Math.max(socks, item.getStatEx(194) || 0);
-				}
-
-				if (socks !== 2) {
+				if (!this.isEmptyStrengthBase(item)) {
 					continue;
 				}
 
@@ -1134,8 +1255,17 @@ var Runewords = {
 
 	// Purity: Prayer aura when equipped (skill 99) — or RW spear/polearm with 45 IAS
 	itemLooksLikePurity: function (item) {
+		var name;
+
 		if (!item || !item.getFlag(0x4000000)) {
 			return false;
+		}
+
+		name = ((item.fname || "") + " " + (item.name || "")).toLowerCase().replace(/ÿc[0-9a-z]/gi, "");
+
+		// PD2 itemType can shift — name "Purity" on a completed RW is enough
+		if (name.indexOf("purity") !== -1) {
+			return true;
 		}
 
 		if (item.itemType !== 33 && item.itemType !== 34) {
@@ -1163,10 +1293,44 @@ var Runewords = {
 		return false;
 	},
 
+	// Owned Purity anywhere (merc / inv / stash) — not just the merc slot.
+	// Otherwise every chores banks another 3os Battle Scythe after the first stick is made.
+	hasCompletedPurity: function () {
+		return this.memo("donePurity", this._hasCompletedPurityRaw);
+	},
+
+	_hasCompletedPurityRaw: function () {
+		var item;
+
+		if (this.mercHasPurity()) {
+			return true;
+		}
+
+		item = me.getItem(-1, -1);
+
+		if (!item) {
+			return false;
+		}
+
+		do {
+			if (this.itemLooksLikePurity(item)) {
+				return true;
+			}
+		} while (item.getNext());
+
+		return false;
+	},
+
+	// Done collecting/making empty 3os Purity bases
+	purityBasesDone: function () {
+		return !!(this.hasCompletedPurity() ||
+			(this.hasCompletedInsight && this.hasCompletedInsight()));
+	},
+
 	// True when Purity is worn OR makeable — Strength 2os bases should not be kept/made
 	purityOutranksStrength: function () {
 		// Worn Purity / Insight always obsolete Strength — even if recipe list drifted
-		if (this.mercHasPurity && this.mercHasPurity()) {
+		if (this.hasCompletedPurity && this.hasCompletedPurity()) {
 			return true;
 		}
 
@@ -1187,10 +1351,32 @@ var Runewords = {
 
 	// Empty white/grey NonEth 3os spear/polearm — Purity base candidate
 	isEmptyPurityBase: function (unit) {
-		var socks;
+		var socks, i, rw, typed;
 
-		if (!unit || (unit.itemType !== 33 && unit.itemType !== 34)) {
+		if (!unit) {
 			return false;
+		}
+
+		typed = (unit.itemType === 33 || unit.itemType === 34);
+
+		// PD2 itemType can lie — still a Purity candidate if Config names this code (e.g. 9s8 Battle Scythe)
+		if (!typed) {
+			if (!Config.Runewords || !this.hasPurityRecipe || !this.hasPurityRecipe()) {
+				return false;
+			}
+
+			for (i = 0; i < Config.Runewords.length; i += 1) {
+				rw = Config.Runewords[i];
+
+				if (rw && rw[0] && this.isPurityRecipe(rw[0]) && this.baseMatchesConfig(unit, rw[1])) {
+					typed = true;
+					break;
+				}
+			}
+
+			if (!typed) {
+				return false;
+			}
 		}
 
 		if (typeof Item !== "undefined" && Item.isRwBaseQuality && !Item.isRwBaseQuality(unit)) {
@@ -1294,8 +1480,7 @@ var Runewords = {
 			return false;
 		}
 
-		if ((this.mercHasPurity && this.mercHasPurity()) ||
-				(this.hasCompletedInsight && this.hasCompletedInsight())) {
+		if (this.purityBasesDone && this.purityBasesDone()) {
 			return false;
 		}
 
@@ -1322,8 +1507,7 @@ var Runewords = {
 	cullWorsePurityBases: function () {
 		var list, i, item, n = 0, start = 1, done;
 
-		done = (this.mercHasPurity && this.mercHasPurity()) ||
-			(this.hasCompletedInsight && this.hasCompletedInsight());
+		done = !!(this.purityBasesDone && this.purityBasesDone());
 		list = this.listEmptyPurityBases();
 
 		if (!list.length || (!done && list.length <= 1)) {
@@ -1376,7 +1560,7 @@ var Runewords = {
 			return false;
 		}
 
-		if (this.mercHasPurity() || (this.hasCompletedInsight && this.hasCompletedInsight())) {
+		if (this.purityBasesDone()) {
 			return false;
 		}
 
@@ -1714,9 +1898,9 @@ var Runewords = {
 
 	// Drop/sell empty 2os Strength bases once Purity is makeable or worn
 	cullObsoleteStrengthBases: function () {
-		var item, socks, n = 0, gids = [], i, cur;
+		var item, n = 0, gids = [], i, cur;
 
-		if (!this.purityOutranksStrength()) {
+		if (!(this.purityBasesDone() || this.purityOutranksStrength())) {
 			return 0;
 		}
 
@@ -1731,25 +1915,7 @@ var Runewords = {
 				continue;
 			}
 
-			if (item.itemType !== 33 && item.itemType !== 34) {
-				continue;
-			}
-
-			if (item.getFlag(0x4000000) || item.getFlag(0x400000) || item.getItem()) {
-				continue;
-			}
-
-			if (typeof Item !== "undefined" && Item.isRwBaseQuality && !Item.isRwBaseQuality(item)) {
-				continue;
-			}
-
-			socks = item.getStat(194) || 0;
-
-			if (typeof item.getStatEx === "function") {
-				socks = Math.max(socks, item.getStatEx(194) || 0);
-			}
-
-			if (socks === 2) {
+			if (this.isEmptyStrengthBase(item)) {
 				gids.push(item.gid);
 			}
 		} while (item.getNext());
@@ -2121,7 +2287,7 @@ var Runewords = {
 	},
 
 	isConfiguredInsightBase: function (unit) {
-		var i, rw, baseId, key;
+		var i, rw;
 
 		if (!unit || !this.hasInsightRecipe()) {
 			return false;
@@ -2134,19 +2300,7 @@ var Runewords = {
 				continue;
 			}
 
-			baseId = rw[1];
-
-			if (typeof baseId === "string") {
-				key = baseId.replace(/\s+/g, "").toLowerCase();
-
-				if (typeof NTIPAliasClassID !== "undefined" && NTIPAliasClassID.hasOwnProperty(key)) {
-					baseId = NTIPAliasClassID[key];
-				} else {
-					continue;
-				}
-			}
-
-			if (unit.classid === baseId) {
+			if (this.baseMatchesConfig(unit, rw[1])) {
 				return true;
 			}
 		}
@@ -2329,9 +2483,9 @@ var Runewords = {
 				}
 			}
 
-			// Purity already on merc (or Insight outranks it)
+			// Purity already owned (or Insight outranks it)
 			if (this.isPurityRecipe(rw[0])) {
-				if (this.mercHasPurity() || (this.hasCompletedInsight && this.hasCompletedInsight())) {
+				if (this.purityBasesDone()) {
 					continue;
 				}
 			}
@@ -2685,14 +2839,16 @@ var Runewords = {
 		bodyLoc = Item.getBodyLoc(live);
 
 		if (!bodyLoc || !bodyLoc.length) {
+			print("ÿc8RWÿc0 :: skip equip " + (madeName || this.runeLogLabel(live)) +
+				" (no bodyLoc)");
 			return false;
 		}
 
 		tier = NTIP.GetTier(live) || 0;
 
-		// Lore circlet/helm with no #tier line yet — still better than empty starter helms
-		if (tier < 1 && this.itemLooksLikeLoreHelm(live)) {
-			tier = 80;
+		// Lore — beat FHR/life/res junk (≤118); lose to IAS rares (125+) / Wormskull
+		if (this.itemLooksLikeLoreHelm(live)) {
+			tier = Math.max(tier, 120);
 		}
 
 		// Stealth armor with no #tier line yet (same nip-miss risk right after socket)
@@ -2711,6 +2867,8 @@ var Runewords = {
 		}
 
 		if (tier < 1) {
+			print("ÿc8RWÿc0 :: skip equip " + (madeName || this.runeLogLabel(live)) +
+				" (tier 0 / no nip)");
 			return false;
 		}
 
@@ -2737,6 +2895,12 @@ var Runewords = {
 					this.invalidateCache();
 					return true;
 				}
+
+				print("ÿc8RWÿc0 :: equip failed " + (madeName || live.name || "?") +
+					" bodyLoc=" + bodyLoc[j]);
+			} else {
+				print("ÿc8RWÿc0 :: skip equip " + (madeName || live.name || "?") +
+					" (tier " + tier + " <= worn " + eqTier + ")");
 			}
 		}
 
@@ -2887,7 +3051,7 @@ var Runewords = {
 
 	// Empty 2os staff that matches a configured Leaf recipe base
 	isConfiguredLeafBase: function (unit) {
-		var i, rw, baseId, key;
+		var i, rw;
 
 		if (!unit || !Config.Runewords || !Config.Runewords.length) {
 			return false;
@@ -2904,19 +3068,7 @@ var Runewords = {
 				continue;
 			}
 
-			baseId = rw[1];
-
-			if (typeof baseId === "string") {
-				key = baseId.replace(/\s+/g, "").toLowerCase();
-
-				if (typeof NTIPAliasClassID !== "undefined" && NTIPAliasClassID.hasOwnProperty(key)) {
-					baseId = NTIPAliasClassID[key];
-				} else {
-					continue;
-				}
-			}
-
-			if (unit.classid === baseId) {
+			if (this.baseMatchesConfig(unit, rw[1])) {
 				return true;
 			}
 		}
@@ -3080,7 +3232,7 @@ var Runewords = {
 	},
 
 	_hasEmptySpiritBaseRaw: function () {
-		var item = me.getItem(-1, -1), i, rw, socks, baseId;
+		var item = me.getItem(-1, -1), i, rw, socks;
 
 		if (!item) {
 			return false;
@@ -3110,13 +3262,7 @@ var Runewords = {
 						continue;
 					}
 
-					baseId = this.resolveBaseClassid(rw[1]);
-
-					if (baseId < 0 && typeof rw[1] === "number") {
-						baseId = rw[1];
-					}
-
-					if (baseId >= 0 && item.classid === baseId) {
+					if (this.baseMatchesConfig(item, rw[1])) {
 						return true;
 					}
 				}
@@ -3127,7 +3273,7 @@ var Runewords = {
 	},
 
 	isConfiguredSpiritBase: function (unit) {
-		var i, rw, baseId, key;
+		var i, rw;
 
 		if (!unit || !Runeword.Spirit || !Config.Runewords || !Config.Runewords.length) {
 			return false;
@@ -3140,19 +3286,7 @@ var Runewords = {
 				continue;
 			}
 
-			baseId = rw[1];
-
-			if (typeof baseId === "string") {
-				key = baseId.replace(/\s+/g, "").toLowerCase();
-
-				if (typeof NTIPAliasClassID !== "undefined" && NTIPAliasClassID.hasOwnProperty(key)) {
-					baseId = NTIPAliasClassID[key];
-				} else {
-					continue;
-				}
-			}
-
-			if (unit.classid === baseId) {
+			if (this.baseMatchesConfig(unit, rw[1])) {
 				return true;
 			}
 		}
@@ -3290,7 +3424,7 @@ var Runewords = {
 	},
 
 	_hasEmptyRhymeBaseRaw: function () {
-		var item = me.getItem(-1, -1), i, rw, socks, baseId;
+		var item = me.getItem(-1, -1), i, rw, socks;
 
 		if (!item) {
 			return false;
@@ -3321,13 +3455,7 @@ var Runewords = {
 						continue;
 					}
 
-					baseId = this.resolveBaseClassid(rw[1]);
-
-					if (baseId < 0 && typeof rw[1] === "number") {
-						baseId = rw[1];
-					}
-
-					if (baseId >= 0 && item.classid === baseId) {
+					if (this.baseMatchesConfig(item, rw[1])) {
 						return true;
 					}
 				}
@@ -3338,9 +3466,16 @@ var Runewords = {
 	},
 
 	isConfiguredRhymeBase: function (unit) {
-		var i, rw, baseId;
+		var i, rw;
 
 		if (!unit || !Runeword.Rhyme || !Config.Runewords || !Config.Runewords.length) {
+			return false;
+		}
+
+		// Rhyme only ever targets real shields (itemType 2/70). Classid-only matching can
+		// collide with an unrelated base on PD2's remapped item table (seen: a Scythe sharing
+		// a classid with a configured "shield" name) — never trust classid alone.
+		if (unit.itemType !== 2 && unit.itemType !== 70) {
 			return false;
 		}
 
@@ -3351,13 +3486,7 @@ var Runewords = {
 				continue;
 			}
 
-			baseId = this.resolveBaseClassid(rw[1]);
-
-			if (baseId < 0 && typeof rw[1] === "number") {
-				baseId = rw[1];
-			}
-
-			if (baseId >= 0 && unit.classid === baseId) {
+			if (this.baseMatchesConfig(unit, rw[1])) {
 				return true;
 			}
 		}
@@ -3480,7 +3609,7 @@ var Runewords = {
 
 	// True if unit is an empty socket base we still need for a configured RW we have runes for
 	wantBaseForRunes: function (unit) {
-		var i, rw, sockets, ethFlag, baseId;
+		var i, rw, sockets, ethFlag;
 
 		if (!unit || unit.getItem()) {
 			return false;
@@ -3557,7 +3686,8 @@ var Runewords = {
 
 	// Strength (Amn+Tir): spear / polearm only (merc) — never knives; skip if Purity preferred
 			if (this.isStrengthRecipe(rw[0])) {
-				if (this.purityOutranksStrength && this.purityOutranksStrength()) {
+				if ((this.purityBasesDone && this.purityBasesDone()) ||
+						(this.purityOutranksStrength && this.purityOutranksStrength())) {
 					continue;
 				}
 
@@ -3586,7 +3716,7 @@ var Runewords = {
 
 			// Purity (Amn+Eth+Thul): 3os spear/polearm — outranks Strength
 			if (this.isPurityRecipe(rw[0])) {
-				if (this.mercHasPurity() || (this.hasCompletedInsight && this.hasCompletedInsight())) {
+				if (this.purityBasesDone()) {
 					continue;
 				}
 
@@ -3633,13 +3763,7 @@ var Runewords = {
 				continue;
 			}
 
-			baseId = this.resolveBaseClassid(rw[1]);
-
-			if (baseId < 0 && typeof rw[1] === "number") {
-				baseId = rw[1];
-			}
-
-			if (baseId < 0 || unit.classid !== baseId) {
+			if (!this.baseMatchesConfig(unit, rw[1])) {
 				continue;
 			}
 
@@ -3707,8 +3831,7 @@ var Runewords = {
 				continue;
 			}
 
-			if (this.isPurityRecipe(Config.Runewords[i][0]) &&
-					(this.mercHasPurity() || (this.hasCompletedInsight && this.hasCompletedInsight()))) {
+			if (this.isPurityRecipe(Config.Runewords[i][0]) && this.purityBasesDone()) {
 				continue;
 			}
 
@@ -3921,8 +4044,7 @@ RuneTr:
 
 				purityTried = true;
 
-				if (me.charlvl < 25 || this.mercHasPurity() ||
-						(this.hasCompletedInsight && this.hasCompletedInsight())) {
+				if (me.charlvl < 25 || this.purityBasesDone()) {
 					continue;
 				}
 
@@ -3971,7 +4093,8 @@ RunePur:
 
 				strengthTried = true;
 
-				if (this.purityOutranksStrength && this.purityOutranksStrength()) {
+				if ((this.purityBasesDone && this.purityBasesDone()) ||
+						(this.purityOutranksStrength && this.purityOutranksStrength())) {
 					continue;
 				}
 
@@ -4037,6 +4160,16 @@ RuneStr:
 			itemList = []; // reset item list
 			recipe = Config.Runewords[i][0];
 			base = this.getBase(recipe, Config.Runewords[i][1], (Config.Runewords[i][2]||0)); // check base
+
+			// Rhyme base must actually be a shield (itemType 2/70) — getBase() only matches by
+			// classid resolved from the configured name (e.g. "Kite Shield"). If PD2's classid
+			// table has that name colliding with some other base (seen: an exceptional Scythe),
+			// getBase() would happily hand back a weapon here. Never trust classid alone.
+			if (base && this.isRhymeRecipe(recipe) && base.itemType !== 2 && base.itemType !== 70) {
+				print("ÿc1RWÿc0 :: Rhyme — rejected classid=" + base.classid + " itemType=" + base.itemType +
+					" (not a shield) — classid/name resolution mismatch, skipping");
+				base = false;
+			}
 
 			// Insight: only socket the best empty pole we own
 			if (base && this.isInsightRecipe(recipe)) {
@@ -4165,8 +4298,7 @@ RuneLoop:
 
 		// Empty 3os Purity spear/polearm — at most one (best), never after Purity/Insight
 		if (this.isEmptyPurityBase && this.isEmptyPurityBase(unit) && this.purityBaseScore(unit) > 0 &&
-				!(this.mercHasPurity && this.mercHasPurity()) &&
-				!(this.hasCompletedInsight && this.hasCompletedInsight())) {
+				!(this.purityBasesDone && this.purityBasesDone())) {
 			best = this.getBestEmptyPurityBase();
 
 			if ((best && best.gid === unit.gid) || (this.wantPurityBase && this.wantPurityBase(unit))) {
@@ -4184,13 +4316,11 @@ RuneLoop:
 			return true;
 		}
 
-		// Empty 2os Strength spear/polearm (merc) while Amn+Tir ready — not when Purity preferred
-		if (!(this.purityOutranksStrength && this.purityOutranksStrength()) &&
-				(this.shouldHoldForStrengthMake(unit) ||
-				(this.hasStrengthRecipe() && !unit.getItem() &&
-					(unit.itemType === 33 || unit.itemType === 34) &&
-					((unit.getStat(194) || 0) === 2 || (unit.getStatEx && unit.getStatEx(194) === 2)) &&
-					!unit.getFlag(0x4000000) && this.wantBaseForRunes(unit)))) {
+		// Empty 2os Strength spear/polearm (merc) while Amn+Tir ready — not when Purity/Insight exists
+		if (!((this.purityBasesDone && this.purityBasesDone()) ||
+				(this.purityOutranksStrength && this.purityOutranksStrength())) &&
+				this.isEmptyStrengthBase(unit) &&
+				(this.shouldHoldForStrengthMake(unit) || this.wantBaseForRunes(unit))) {
 			return true;
 		}
 
@@ -4202,33 +4332,35 @@ RuneLoop:
 		return false;
 	},
 
-	/* get the base item based on classid and runeword recipe
+	/* get the base item based on Config base name/code and runeword recipe
 		optional reroll argument = gets a runeword that needs rerolling
-		rigged to accept item or classid as 2nd arg
+		rigged to accept item or name/classid as 2nd arg
+		PD2: never me.getItem(LoDClassid) — classids collide (spk/365 = scythe on PD2).
+		Match via baseMatchesConfig (item.code vs NTIP 3-letter code).
 	*/
 	getBase: function (runeword, base, ethFlag, reroll) {
-		var item, socks, prefix, socketed, classid;
+		var item, socks, prefix, socketed, matchName;
 
 		if (typeof base === "object") {
 			item = base;
+			matchName = false;
 		} else {
-			classid = this.resolveBaseClassid(base);
-
-			if (classid < 0 && typeof base === "number") {
-				classid = base;
-			}
-
-			if (classid < 0) {
+			if (!this.configBaseCode(base)) {
 				return false;
 			}
 
-			// mode -1 covers inv + stash (mode 0 often misses stash)
-			item = me.getItem(classid, -1);
+			matchName = base;
+			// Scan all storage items — never me.getItem(lodClassid)
+			item = me.getItem(-1, -1);
 		}
 
 		if (item) {
 			do {
 				if (item.location !== 3 && item.location !== 7 && typeof base !== "object") {
+					continue;
+				}
+
+				if (matchName !== false && !this.baseMatchesConfig(item, matchName)) {
 					continue;
 				}
 
@@ -4516,7 +4648,7 @@ RuneLoop:
 		}
 
 		var i, items, stealthWanted, loreWanted, strengthWanted, baseGid, rune, sockOk, base,
-			baseName, runeLabel, madeName, prefix, asideN, made;
+			baseName, runeLabel, madeName, prefix, asideN, made, baseCode, baseSocks, recipeLabel, p;
 
 		// Storage may have changed since the last memo (pickups, stash moves) — start clean
 		this.invalidateCache();
@@ -4603,16 +4735,37 @@ RuneLoop:
 			}
 
 			baseGid = items[0].gid;
-			baseName = (items[0].name || items[0].classid || "?").toString().replace(/ÿc[0-9a-z]/gi, "").split("\n")[0];
+			baseName = (items[0].name || "").toString().replace(/ÿc[0-9a-z]/gi, "").split("\n")[0];
+			baseCode = items[0].code ? String(items[0].code).toLowerCase() : "?";
+			baseSocks = items[0].getStat(194) || 0;
+
+			if (typeof items[0].getStatEx === "function") {
+				baseSocks = Math.max(baseSocks, items[0].getStatEx(194) || 0);
+			}
+
 			prefix = 0;
+			recipeLabel = "?";
 
 			for (i = 0; i < Config.Runewords.length; i += 1) {
-				if (Config.Runewords[i][0]) {
-					prefix = Math.max(prefix, this.socketedRecipePrefix(items[0], Config.Runewords[i][0]));
+				if (!Config.Runewords[i][0]) {
+					continue;
+				}
+
+				p = this.socketedRecipePrefix(items[0], Config.Runewords[i][0]);
+				prefix = Math.max(prefix, p);
+
+				if (this.baseMatchesConfig(items[0], Config.Runewords[i][1]) &&
+						items.length - 1 === Config.Runewords[i][0].length - p) {
+					recipeLabel = this.recipeName(Config.Runewords[i][0]);
 				}
 			}
 
-			print("ÿc4RWÿc0 :: make " + baseName +
+			print("ÿc4RWÿc0 :: make " + recipeLabel +
+				" base=" + (baseName || baseCode) +
+				" code=" + baseCode +
+				" classid=" + items[0].classid +
+				" type=" + items[0].itemType +
+				" sock=" + baseSocks +
 				(prefix > 0 ? (" (" + prefix + " already in)") : "") +
 				" — need " + (items.length - 1) + " rune(s) in RECIPE order");
 

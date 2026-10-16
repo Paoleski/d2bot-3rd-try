@@ -186,6 +186,7 @@ var Config = {
 	StaminaBuffer: 0, // inventory stamina pots to keep while below StaminaUntilLevel
 	ManaPark: true, // false = belt-only mana (no inv mana organizer / top-right park)
 	PickRange: 40,
+	GoldPickSteps: 4, // Max walk path nodes for gold piles (never detour farther than this)
 	MakeRoom: true,
 	ReorganizeInventory: true, // shuffle inv items to clear a contiguous spot before town/mule
 	FastPick: false,
@@ -330,12 +331,16 @@ var Config = {
 	TeleStomp: false,
 	ClearType: false,
 	ClearPath: false,
-	// SoloPlay-style: stop walking to peel melee-range monsters (false = off)
+	// SoloPlay idea: walkers stop only for on-path priority mobs (shaman/nest/blocker), not Attack.clear every node
+	WalkerPriority: true,
+	// SoloPlay-style: stop walking to peel melee-range monsters during TeleDelay gaps.
+	// Off for pure walkers (no tele) unless WhileWalking — otherwise Act1 run-leveling stutters.
 	DangerClear: {
 		Range: 8,              // treat as "on me" within this distance
 		ClearRange: 12,        // Attack.clear range on danger interrupt
 		PollMs: 250,           // walkTo poll cadence; doubles when nothing within Range*2
-		WhileTeleporting: false // if false, skip checks when tele is ready
+		WhileTeleporting: false, // if false, skip checks when tele is ready
+		WhileWalking: false    // if false, skip entirely until char can teleport
 	},
 	BossPriority: false,
 	NecroShamanFocus: false, // necro Act1: peel fallen/fetish shamans first
@@ -346,7 +351,7 @@ var Config = {
 
 	// Sorceress specific
 	UseTelekinesis: true, // Sorc: TK pick (lvl 14+) gold/scrolls/keys/pots + Duriel orifice (never attack/chests)
-	MinGoldPile: -1, // -1 = scale with charlvl (Pickit.minGoldPile); >=0 = fixed minimum pile size
+	MinGoldPile: -1, // -1 = scale with charlvl (Pickit.minGoldPile, never ≤100); >=0 = fixed min (still floored at 101)
 	CastStatic: 55, // PD2: stop at max(this, 55/70/85 N/NM/H). 100 = disabled. Empty StaticList = act bosses+Izual only.
 	StaticList: [],
 
@@ -602,12 +607,14 @@ var Config = {
 		Save: 0,
 		UseUIClick: true, // PD2: packets broken — UI click only
 		UICalibrate: false, // unused; F9 always works via ToolsThread
+		Verbose: false, // true = per-click / cursor / skip chatter
 		UIClick: {
 			openButton: [711, 578],
 			tabs: {},
 			skills: {}
 		},
-		DumpSkill: 0 // optional dump while waiting on level gates
+		DumpSkill: 0, // optional dump while waiting on level gates
+		NmAct3LightningRespec: false // Act 3 Nightmare: Akara Den respec CB → Lightning-first (light sorc)
 	},
 	AutoStat: {
 		Enabled: false,

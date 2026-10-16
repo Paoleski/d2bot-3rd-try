@@ -55,7 +55,8 @@
 		Config.MakeRunewords = true;
 
 		if (isCasterBuild()) {
-			pushPickit("auto/leveling_rw_caster.nip"); // Stealth + Lore
+			pushPickit("auto/leveling_rw_caster.nip"); // Stealth
+			pushPickit("auto/leveling_rw_lore.nip"); // Lore helms/circlets
 
 			// Stealth — Breast Plate / Light Plate only (PD2: +20 FCR / +20 FHR)
 			bases = ["Breast Plate", "Light Plate"];
@@ -93,7 +94,18 @@
 			}
 		} else if (build === "poisonstrike") {
 			// PS knives = shop/drop +PS/+IAS only — merc sticks: Purity (3os) > Strength (2os)
+			// Lore helm mid (Ort+Sol) — same as casters; Stealth skipped (Treachery is mid armor)
 			pushPickit("auto/leveling_rw_poisonstrike.nip");
+			pushPickit("auto/leveling_rw_lore.nip");
+
+			bases = ["Cap", "Skull Cap", "Helm", "Full Helm", "Great Helm", "Crown", "Mask", "Bone Helm", "War Hat", "Sallet", "Casque", "Basinet",
+				"Circlet", "Coronet", "Tiara", "Diadem"];
+
+			for (i = 0; i < bases.length; i += 1) {
+				pushRW(Runeword.Lore, bases[i], Roll.NonEth);
+			}
+
+			Config.KeepRunewords.push("[type] == helm || [type] == circlet # [lightresist] >= 25");
 
 			bases = [
 				"Spear", "Trident", "Brandistock", "Spetum", "Pike",
@@ -512,7 +524,7 @@
 		+ (build ? " (build=" + build + (build === "fire" && me.charlvl < 12 ? "+earlyFB" : "") + ")" : "")
 		+ (isCasterBuild()
 			? (" [caster Stealth+Lore" + (build === "fire" ? "+Leaf" : (build === "cold" || build === "light" ? "+SpiritBases" : "")) + "]")
-			: (build === "poisonstrike" ? " [PS Purity>Strength+Treachery]" : (me.classid === 2 ? " [necro]" : " [melee Steel]"))));
+			: (build === "poisonstrike" ? " [PS Lore+Purity>Strength+Treachery]" : (me.classid === 2 ? " [necro]" : " [melee Steel]"))));
 	print("ÿc2AutoGearÿc0 :: PD2 knobs — ProtectRWBases=" + !!ag.ProtectRWBases
 		+ " CharmCaps=" + (caps && caps.Enabled ? "on" : "off")
 		+ " MidRW=" + !!ag.EnableMidRW

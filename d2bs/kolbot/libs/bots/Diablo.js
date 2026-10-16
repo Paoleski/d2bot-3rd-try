@@ -152,6 +152,21 @@ function Diablo() {
 		return false;
 	};
 
+	// True if a living seal boss with this name is still in the area
+	this.sealBossAlive = function (name) {
+		var u = getUnit(1, name);
+
+		if (u) {
+			do {
+				if (Attack.checkMonster(u)) {
+					return true;
+				}
+			} while (u.getNext());
+		}
+
+		return false;
+	};
+
 	this.chaosPreattack = function (name, amount) {
 		var i, n, target, positions;
 
@@ -194,7 +209,7 @@ function Diablo() {
 		}
 	};
 
-	this.getBoss = function (name, pullFight, holdX, holdY, baitX, baitY, walkBait) {
+	this.getBoss = function (name, pullFight, holdX, holdY, baitX, baitY) {
 		var i, boss, dist, waitTicks, engageDist, glow, mon, best, bestD, d,
 			idle, farIdle, outRange, engaged, sawBoss, baitPulses, deadPulses, giveUpDead, self = this;
 
@@ -209,7 +224,6 @@ function Diablo() {
 		baitPulses = 0;
 		deadPulses = 0;
 		giveUpDead = false;
-		walkBait = !!walkBait;
 
 		// Never personally saw the boss or any leftover pack after a bait pulse — he may
 		// already be dead (killed by a teammate, or this is a script-restart mid-Chaos-Sanctuary).
@@ -333,6 +347,7 @@ function Diablo() {
 			snapHold();
 		}
 
+		// TP to bait for LOS/aggro, cast, snap back — never walk
 		function pulseAggro() {
 			var bx, by;
 
@@ -360,48 +375,28 @@ function Diablo() {
 			snapHold();
 		}
 
-		function walkAggro() {
-			var bx, by, savedTele, j, saw;
+		// Only bait if nothing is already coming toward the hold
+		function needAggro() {
+			boss = getUnit(1, name);
 
-			bx = (baitX !== undefined) ? baitX : holdX;
-			by = (baitY !== undefined) ? baitY : (holdY - 16);
-
-			if (bx === undefined || by === undefined) {
+			if (boss && Attack.checkMonster(boss) && getDistance(me, boss) <= engageDist) {
 				return false;
 			}
 
-			baitPulses += 1;
-			saw = false;
-			print("Seal pull — walk aggro @ " + bx + "," + by);
-
-			savedTele = Pather.teleport;
-			Pather.teleport = false;
-			Pather.moveTo(bx, by, 2);
-			Pather.teleport = savedTele;
-			self.castOwnAttack(bx, by - 8);
-			delay(80);
-
-			for (j = 0; j < 18; j += 1) {
-				boss = getUnit(1, name);
-
-				if ((boss && Attack.checkMonster(boss) && getDistance(me, boss) <= 30) || packNear(22)) {
-					saw = true;
-					break;
-				}
-
-				delay(100);
+			if (packNear(22)) {
+				return false;
 			}
 
-			snapHold();
-			return saw;
+			return true;
 		}
 
 		function doAggro() {
-			if (walkBait) {
-				walkAggro();
-			} else {
-				pulseAggro();
+			if (!needAggro()) {
+				engaged = true;
+				return;
 			}
+
+			pulseAggro();
 		}
 
 		// This char's cast range — clamped 4..20
@@ -679,15 +674,36 @@ function Diablo() {
 					continue;
 				}
 
+				// Saw him earlier but he's gone — only leave if he's actually dead (not teles away)
 				if (engaged || sawBoss) {
-					snapHold();
-
-					if (typeof ClassAttack !== "undefined") {
-						ClassAttack._sealHoldX = undefined;
-						ClassAttack._sealHoldY = undefined;
+					if (bossCorpse()) {
+						releaseHold();
+						return true;
 					}
 
-					return true;
+					delay(200);
+					boss = getUnit(1, name);
+
+					if (!(boss && Attack.checkMonster(boss)) && !packNear(18)) {
+						// brief recheck — still gone and no pack
+						delay(250);
+						boss = getUnit(1, name);
+
+						if (!(boss && Attack.checkMonster(boss))) {
+							releaseHold();
+							return true;
+						}
+					}
+
+					farIdle += 1;
+
+					if (farIdle >= 6) {
+						doAggro();
+						farIdle = 0;
+					}
+
+					delay(100);
+					continue;
 				}
 
 				farIdle += 1;
@@ -764,9 +780,8 @@ function Diablo() {
 			dx, dy, dist, step, path;
 
 		print("Seis layout " + this.seisLayout);
-		this.followPath(this.seisLayout === 1 ? this.starToSeisA : this.starToSeisB);
 
-		// Clear corridor to pull hold before opening seal (stay south of nest)
+		// Walk-clear full corridor to pull hold before opening seal (tele hops skip packs)
 		if (this.seisLayout === 1) {
 			pullX = 7771;
 			pullY = 5196;
@@ -775,8 +790,11 @@ function Diablo() {
 			pullY = 5186;
 		}
 
-		Pather.moveTo(pullX, pullY, 3, true);
+		savedTele = Pather.teleport;
+		Pather.teleport = false;
+		this.followPath(this.seisLayout === 1 ? this.starToSeisA : this.starToSeisB);
 		Attack.clear(30, 0, false, this.sort);
+		Pather.teleport = savedTele;
 
 		savedTele = Pather.teleport;
 		savedDelay = (typeof Config !== "undefined") ? Config.TeleDelay : undefined;
@@ -906,17 +924,21 @@ function Diablo() {
 			throw new Error("Failed to open de Seis seal.");
 		}
 
-		print("Lord De Seis — TP pull @ " + pullX + "," + pullY + " (hold + walk aggro)");
+		print("Lord De Seis — TP pull @ " + pullX + "," + pullY + " (hold + TP aggro if needed)");
 
-		if (!this.getBoss(getLocaleString(2852), true, pullX, pullY, baitX, baitY, true)) {
+		if (!this.getBoss(getLocaleString(2852), true, pullX, pullY, baitX, baitY)) {
 			throw new Error("Failed to kill de Seis");
+		}
+
+		if (this.sealBossAlive(getLocaleString(2852))) {
+			throw new Error("de Seis still alive — not moving to Infector");
 		}
 
 		return true;
 	};
 
 	this.infectorSeal = function () {
-		var savedTele, pullX, pullY;
+		var savedTele, pullX, pullY, baitX, baitY, seal, dx, dy, dist, step;
 
 		print("Inf layout " + this.infLayout);
 		this.followPath(this.infLayout === 1 ? this.starToInfA : this.starToInfB);
@@ -938,8 +960,40 @@ function Diablo() {
 		Pather.moveTo(pullX, pullY, 3);
 		Pather.teleport = savedTele;
 
-		if (!this.getBoss(getLocaleString(2853), true, pullX, pullY)) {
+		// Bait east toward nest/seal — holdY-8 is useless (~same tile as hold)
+		seal = getUnit(2, 392) || getUnit(2, 393);
+
+		if (seal) {
+			dx = seal.x - pullX;
+			dy = seal.y - pullY;
+			dist = Math.sqrt(dx * dx + dy * dy);
+
+			if (dist > 1) {
+				step = Math.min(24, Math.max(16, dist * 0.45));
+				baitX = Math.round(pullX + dx * (step / dist));
+				baitY = Math.round(pullY + dy * (step / dist));
+
+				if (!Attack.validSpot(baitX, baitY)) {
+					step = Math.min(18, dist * 0.35);
+					baitX = Math.round(pullX + dx * (step / dist));
+					baitY = Math.round(pullY + dy * (step / dist));
+				}
+			}
+		}
+
+		if (baitX === undefined || !Attack.validSpot(baitX, baitY)) {
+			baitX = pullX + 22;
+			baitY = pullY;
+		}
+
+		print("Infector of Souls — TP pull @ " + pullX + "," + pullY + " bait " + baitX + "," + baitY);
+
+		if (!this.getBoss(getLocaleString(2853), true, pullX, pullY, baitX, baitY)) {
 			throw new Error("Failed to kill Infector");
+		}
+
+		if (this.sealBossAlive(getLocaleString(2853))) {
+			throw new Error("Infector still alive");
 		}
 
 		if (!this.openSeal(393)) {
@@ -1106,9 +1160,9 @@ function Diablo() {
 	this.entranceToStar = [7794, 5517, 7791, 5491, 7768, 5459, 7775, 5424, 7817, 5458, 7777, 5408, 7769, 5379, 7777, 5357, 7809, 5359, 7805, 5330, 7780, 5317, 7791, 5293];
 	this.starToVizA = [7759, 5295, 7734, 5295, 7716, 5295, 7718, 5276, 7697, 5292, 7678, 5293, 7665, 5276, 7662, 5314];
 	this.starToVizB = [7759, 5295, 7734, 5295, 7716, 5295, 7701, 5315, 7666, 5313, 7653, 5284];
-	// Seis: corridor mouth only — openSeal TPs to seal, pull holds on post-seal node (5196/5186)
-	this.starToSeisA = [7781, 5259, 7805, 5258];
-	this.starToSeisB = [7781, 5259, 7805, 5258];
+	// Seis: clear corridor down to pull hold (south of nest) — openSeal TPs to seal after
+	this.starToSeisA = [7781, 5259, 7805, 5258, 7802, 5237, 7776, 5228, 7775, 5205, 7804, 5193, 7771, 5196];
+	this.starToSeisB = [7781, 5259, 7805, 5258, 7802, 5237, 7776, 5228, 7811, 5218, 7807, 5194, 7779, 5193, 7798, 5186];
 	this.starToInfA = [7809, 5268, 7834, 5306, 7852, 5280, 7868, 5295];
 	this.starToInfB = [7809, 5268, 7834, 5306, 7852, 5280, 7870, 5286];
 	Pather._teleport = Pather.teleport;

@@ -78,6 +78,37 @@ var Attack = {
 		return 0;
 	},
 
+	// SoloPlay-style classid helpers (numbers — no sdk dependency)
+	shamanIds: [58, 59, 60, 61, 62, 101, 102, 103, 104, 105, 278, 279, 280, 281, 282, 298, 299, 300, 645, 646, 647, 662, 663, 664, 667, 668, 669, 670, 675, 676],
+	fallenIds: [19, 20, 21, 22, 23, 642, 643, 644],
+	// FoulCrow / BloodHawk / BlackVulture / CloudStalker / Sucker / Feeder / BloodHook / BloodWing nests
+	nestIds: [206, 207, 208, 209, 334, 335, 336, 337],
+
+	isShaman: function (unit) {
+		return !!(unit && this.shamanIds.indexOf(unit.classid) > -1);
+	},
+
+	isFallen: function (unit) {
+		return !!(unit && this.fallenIds.indexOf(unit.classid) > -1);
+	},
+
+	isMonsterNest: function (unit) {
+		return !!(unit && this.nestIds.indexOf(unit.classid) > -1);
+	},
+
+	isUnraveler: function (unit) {
+		if (!unit) {
+			return false;
+		}
+
+		try {
+			// monstats MonType Unraveler = 27
+			return getBaseStat("monstats", unit.classid, "MonType") === 27;
+		} catch (eU) {
+			return false;
+		}
+	},
+
 	/** Nearest attackable monster within range, or false. */
 	findNearestMonster: function (range) {
 		var mon, d, best = false, bestD;
@@ -105,9 +136,14 @@ var Attack = {
 		return best;
 	},
 
-	/** Configured melee-danger radius, or 0 if DangerClear is off. */
+	/** Configured melee-danger radius, or 0 if DangerClear is off / pure walker. */
 	dangerRange: function () {
 		if (!Config.DangerClear || typeof Config.DangerClear !== "object") {
+			return 0;
+		}
+
+		// Same gate as shouldDangerClear — lvl1 walk-leveling must not pay clear-loop tax
+		if (!(Config.DangerClear.WhileWalking) && typeof Pather !== "undefined" && !Pather.canTeleport()) {
 			return 0;
 		}
 
@@ -116,7 +152,7 @@ var Attack = {
 
 	/** Range used when clearing a danger interrupt. */
 	dangerClearRange: function () {
-		if (!Config.DangerClear || typeof Config.DangerClear !== "object") {
+		if (!this.dangerRange()) {
 			return 0;
 		}
 
@@ -124,11 +160,82 @@ var Attack = {
 	},
 
 	/**
+	 * Melee peel radius while already in Attack.clear / clearList.
+	 * DangerClear.WhileWalking=false skips mid-walk interrupts for pure walkers, but once we
+	 * choose to fight we must still peel trash before chasing shamans (else packs surround).
+	 */
+	clearPeelRange: function () {
+		var r = this.dangerRange();
+
+		if (r > 0) {
+			return r;
+		}
+
+		if (Config.DangerClear && typeof Config.DangerClear === "object" && Config.DangerClear.Range) {
+			return Config.DangerClear.Range;
+		}
+
+		return 8;
+	},
+
+	/** Count attackable monsters within range of me (no sort — travel surround checks). */
+	countNearMonsters: function (range) {
+		var mon, n;
+
+		if (range === undefined) {
+			range = this.clearPeelRange();
+		}
+
+		n = 0;
+		mon = getUnit(1);
+
+		if (!mon) {
+			return 0;
+		}
+
+		do {
+			if (getDistance(me, mon) > range) {
+				continue;
+			}
+
+			if (!this.checkMonster(mon) || !this.skipCheck(mon)) {
+				continue;
+			}
+
+			n += 1;
+		} while (mon.getNext());
+
+		return n;
+	},
+
+	/**
+	 * Pure-walker travel interrupt: 2+ hostiles in peel range (not a lone Fallen stutter).
+	 * Tele chars keep normal DangerClear; this only gates mid-walk peels for walkers.
+	 */
+	walkerTravelThreat: function () {
+		if (me.inTown || me.dead || this.clearing) {
+			return false;
+		}
+
+		if (typeof Pather !== "undefined" && Pather.canTeleport()) {
+			return false;
+		}
+
+		return this.countNearMonsters(this.clearPeelRange()) >= 2;
+	},
+
+	/**
 	 * True when we should interrupt walking to clear melee threats.
-	 * Skips town, nested clears, and tele-ready pathing unless WhileTeleporting.
+	 * Skips town, nested clears, pure walkers (no tele), and tele-ready pathing
+	 * unless WhileWalking / WhileTeleporting. Meant for TeleDelay gaps — not Act1 walk-leveling.
 	 */
 	shouldDangerClear: function () {
 		if (!Config.DangerClear || me.inTown || me.dead || this.clearing) {
+			return false;
+		}
+
+		// No teleport skill: continuous walk-leveling — never stop-mid-run to peel
+		if (!(Config.DangerClear.WhileWalking) && typeof Pather !== "undefined" && !Pather.canTeleport()) {
 			return false;
 		}
 
@@ -523,11 +630,17 @@ var Attack = {
 			throw new Error("Attack.clear: range must be a number.");
 		}
 
+		// Nested clear (moveTo → clear → moveTo → clear) blows the JS stack ("too much recursion")
+		if (this.clearing) {
+			return false;
+		}
+
 		var i, boss, orgx, orgy, target, result, monsterList, start, coord,
 			retry = 0,
 			gidAttack = [],
 			attackCount = 0,
-			dangerR = this.dangerRange(),
+			peelR = this.clearPeelRange(),
+			clearStart = getTickCount(),
 			distMe, sweeps, dm;
 
 		if (Config.AttackSkill[1] < 0 || Config.AttackSkill[3] < 0) {
@@ -571,10 +684,10 @@ var Attack = {
 
 					distMe = getDistance(me, target);
 
-					// Spectype filter (0 = all). Always include melee-danger threats even when
+					// Spectype filter (0 = all). Always include melee-peel threats even when
 					// seeking champs only (0x7) — otherwise trash on us is invisible to clear.
 					if (spectype && !(target.spectype & spectype)) {
-						if (!(dangerR > 0 && distMe <= dangerR)) {
+						if (!(peelR > 0 && distMe <= peelR)) {
 							continue;
 						}
 					}
@@ -585,8 +698,8 @@ var Attack = {
 						start = true;
 					}
 
-					// Also start if a melee-danger mob is already on us
-					if (!start && dangerR && distMe <= dangerR) {
+					// Also start if a melee peel mob is already on us
+					if (!start && peelR && distMe <= peelR) {
 						start = true;
 					}
 
@@ -595,6 +708,10 @@ var Attack = {
 			}
 
 			while (start && monsterList.length > 0 && attackCount < 300) {
+				if (getTickCount() - clearStart > ((range <= 20 && !bossId) ? 25000 : 90000)) {
+					print("ÿc1Attackÿc0 :: clear abort — timeout");
+					break;
+				}
 				if (boss) {
 					orgx = boss.x;
 					orgy = boss.y;
@@ -604,24 +721,28 @@ var Attack = {
 					return false;
 				}
 
-				// Precompute distMe once per monster — sortMonsters reads it (no getDistance in comparator)
-				for (i = 0; i < monsterList.length; i += 1) {
-					if (monsterList[i].x !== undefined) {
-						monsterList[i].distMe = getDistance(me, monsterList[i]);
+				if (peelR > 0) {
+					// Peel-first: re-sort every swing so shamans never outrank trash on us
+					for (i = 0; i < monsterList.length; i += 1) {
+						if (monsterList[i].x !== undefined) {
+							monsterList[i].distMe = getDistance(me, monsterList[i]);
+						}
 					}
+
+					monsterList.sort(function (a, b) {
+						var aThreat = a.distMe <= peelR,
+							bThreat = b.distMe <= peelR;
+
+						if (aThreat !== bThreat) {
+							return aThreat ? -1 : 1;
+						}
+
+						return sortfunc(a, b);
+					});
+				} else if (attackCount === 0 || attackCount % 5 === 0) {
+					// No peel radius: cheap re-sort only every few casts
+					monsterList.sort(sortfunc);
 				}
-
-				// Peel what's on us before chasing distant champs/specials
-				monsterList.sort(function (a, b) {
-					var aThreat = dangerR > 0 && a.distMe <= dangerR,
-						bThreat = dangerR > 0 && b.distMe <= dangerR;
-
-					if (aThreat !== bThreat) {
-						return aThreat ? -1 : 1;
-					}
-
-					return sortfunc(a, b);
-				});
 
 				target = copyUnit(monsterList[0]);
 				distMe = target.x !== undefined ? getDistance(me, target) : 999;
@@ -629,14 +750,16 @@ var Attack = {
 				if (target.x !== undefined &&
 						(getDistance(target, orgx, orgy) <= range ||
 							(this.getScarinessLevel(target) > 7 && distMe <= range) ||
-							(dangerR > 0 && distMe <= dangerR)) &&
+							(peelR > 0 && distMe <= peelR)) &&
 						this.checkMonster(target)) {
 					if (Config.Dodge && me.hp * 100 / me.hpmax <= Config.DodgeHP) {
 						this.deploy(target, Config.DodgeRange, 5, 9);
 					}
 
-					Misc.townCheck(true);
-					//me.overhead("attacking " + target.name + " spectype " + target.spectype + " id " + target.classid);
+					// townCheck every 10 swings — every cast added large gaps between Fire Bolts
+					if (attackCount % 10 === 0) {
+						Misc.townCheck(true);
+					}
 
 					result = ClassAttack.doAttack(target, attackCount % 15 === 0);
 
@@ -699,9 +822,15 @@ var Attack = {
 					// Shaman / high-scariness: try walk-in a few times, then drop (never rotate forever)
 					if (this.getScarinessLevel(target) > 7 && this.checkMonster(target) &&
 							getDistance(me, target) <= range + 25 && retry < 5) {
-						Pather.moveToUnit(target);
-						retry += 1;
-						monsterList.push(monsterList.shift());
+						// Never dive for a shaman while trash is already on us
+						if (peelR > 0 && this.findNearestMonster(peelR)) {
+							monsterList.push(monsterList.shift());
+							retry += 1;
+						} else {
+							Pather.moveToUnit(target);
+							retry += 1;
+							monsterList.push(monsterList.shift());
+						}
 					} else {
 						monsterList.shift();
 						retry = 0;
@@ -716,13 +845,13 @@ var Attack = {
 		}
 
 		// Adjacent mob arrived mid-fight — peel it before pickit (only if we actually fought)
-		if (attackCount > 0 && dangerR > 0) {
+		if (attackCount > 0 && peelR > 0) {
 			this._dangerCache = null;
 			sweeps = 0;
 			this.clearing = true;
 
 			try {
-				while (sweeps < 40 && (dm = this.inDanger(dangerR))) {
+				while (sweeps < 40 && (dm = this.inDanger(peelR))) {
 					this._dangerCache = null;
 
 					if (!ClassAttack.doAttack(dm, sweeps % 15 === 0)) {
@@ -800,7 +929,8 @@ var Attack = {
 		var i, target, result, monsterList, coord,
 			retry = 0,
 			gidAttack = [],
-			attackCount = 0;
+			attackCount = 0,
+			peelR = this.clearPeelRange();
 
 		switch (typeof mainArg) {
 		case "function":
@@ -821,6 +951,10 @@ var Attack = {
 			sortFunc = this.sortMonsters;
 		}
 
+		if (this.clearing) {
+			return false;
+		}
+
 		this.clearing = true;
 		this._dangerCache = null;
 
@@ -834,13 +968,17 @@ var Attack = {
 					return false;
 				}
 
-				for (i = 0; i < monsterList.length; i += 1) {
-					if (monsterList[i].x !== undefined) {
-						monsterList[i].distMe = getDistance(me, monsterList[i]);
+				if (peelR > 0) {
+					for (i = 0; i < monsterList.length; i += 1) {
+						if (monsterList[i].x !== undefined) {
+							monsterList[i].distMe = getDistance(me, monsterList[i]);
+						}
 					}
-				}
 
-				monsterList.sort(sortFunc);
+					monsterList.sort(sortFunc);
+				} else if (attackCount === 0 || attackCount % 5 === 0) {
+					monsterList.sort(sortFunc);
+				}
 
 				target = copyUnit(monsterList[0]);
 
@@ -849,8 +987,9 @@ var Attack = {
 						this.deploy(target, Config.DodgeRange, 5, 9);
 					}
 
-					Misc.townCheck(true);
-					//me.overhead("attacking " + target.name + " spectype " + target.spectype + " id " + target.classid);
+					if (attackCount % 10 === 0) {
+						Misc.townCheck(true);
+					}
 
 					result = ClassAttack.doAttack(target, attackCount % 15 === 0);
 
@@ -911,9 +1050,15 @@ var Attack = {
 					// Shaman / high-scariness: try walk-in a few times, then drop (never rotate forever)
 					if (target.x !== undefined && this.getScarinessLevel(target) > 7 && this.checkMonster(target) &&
 							getDistance(me, target) <= 55 && retry < 5) {
-						Pather.moveToUnit(target);
-						retry += 1;
-						monsterList.push(monsterList.shift());
+						// Never dive for a shaman while trash is already on us
+						if (peelR > 0 && this.findNearestMonster(peelR)) {
+							monsterList.push(monsterList.shift());
+							retry += 1;
+						} else {
+							Pather.moveToUnit(target);
+							retry += 1;
+							monsterList.push(monsterList.shift());
+						}
 					} else {
 						monsterList.shift();
 						retry = 0;
@@ -1582,34 +1727,18 @@ var Attack = {
 		this.ignoredGids = [];
 	},
 
-	// Any live, quest-counting monster within range of a point — gates clearLevel's room walk so it
-	// doesn't hike to rooms with nothing in them. Range is intentionally generous (checkMonster already
-	// excludes dead/friendly/neverCount units) — a missed room costs an extra clearLevel retry; a falsely
-	// skipped room with a real monster in it can strand a full-clear quest (e.g. Den of Evil) unfinished.
-	roomHasMonsters: function (x, y, range, spectype) {
-		var mon = getUnit(1);
-
-		if (!mon) {
-			return false;
-		}
-
-		do {
-			if ((!spectype || (mon.spectype & spectype)) && this.checkMonster(mon) && getDistance(x, y, mon.x, mon.y) <= range) {
-				return true;
-			}
-		} while (mon.getNext());
-
-		return false;
-	},
-
-	// Clear an entire area based on monster spectype
+	// Clear an entire area based on monster spectype.
+	// Always walk every room — getUnit only sees loaded monsters, so "empty room" checks
+	// falsely skip distant tiles and strand full-clear quests (Den of Evil).
 	clearLevel: function (spectype) {
 		if (Config.MFLeader) {
 			Pather.makePortal();
 			say("clearlevel " + getArea().name);
 		}
 
-		var room, result, rooms, myRoom, currentArea, previousArea, skipped;
+		var room, result, rooms, myRoom, currentArea, previousArea,
+			levelStart = getTickCount(),
+			moveFails = 0;
 
 		function RoomSort(a, b) {
 			return getDistance(myRoom[0], myRoom[1], a[0], a[1]) - getDistance(myRoom[0], myRoom[1], b[0], b[1]);
@@ -1634,6 +1763,11 @@ var Attack = {
 		} while (room.getNext());
 
 		while (rooms.length > 0) {
+			if (getTickCount() - levelStart > 120000) {
+				print("ÿc1Attackÿc0 :: clearLevel abort — timeout (area " + me.area + ")");
+				break;
+			}
+
 			// get the first room + initialize myRoom var
 			if (!myRoom) {
 				room = getRoom(me.x, me.y);
@@ -1650,18 +1784,21 @@ var Attack = {
 			rooms.sort(RoomSort);
 			room = rooms.shift();
 
-			// Empty room — nothing within clear range of its center. Don't walk over there hunting for
-			// mobs that aren't there; just drop it and move on to the next candidate room.
-			skipped = !this.roomHasMonsters(room[0], room[1], 45, spectype);
-
-			if (skipped) {
-				continue;
-			}
-
 			result = Pather.getNearestWalkable(room[0], room[1], 18, 3);
 
 			if (result) {
-				Pather.moveTo(result[0], result[1], 3, spectype);
+				if (!Pather.moveTo(result[0], result[1], 3, spectype)) {
+					moveFails += 1;
+
+					if (moveFails >= 3) {
+						print("ÿc1Attackÿc0 :: clearLevel abort — path stuck (area " + me.area + ")");
+						break;
+					}
+
+					continue;
+				}
+
+				moveFails = 0;
 				previousArea = result;
 				//this.countUniques();
 
@@ -1684,13 +1821,14 @@ var Attack = {
 	sortMonsters: function (unitA, unitB) {
 		var distA = unitA.distMe !== undefined ? unitA.distMe : getDistance(me, unitA),
 			distB = unitB.distMe !== undefined ? unitB.distMe : getDistance(me, unitB),
-			dangerR = Attack.dangerRange(),
+			peelR = Attack.clearPeelRange(),
 			aAdj, bAdj;
 
-		// Melee-danger: peel whatever is already hitting us before chasing shamans/bosses
-		if (dangerR > 0) {
-			aAdj = distA <= dangerR;
-			bAdj = distB <= dangerR;
+		// Melee peel: whatever is already on us before chasing shamans/bosses
+		// (clearPeelRange works even when DangerClear.WhileWalking is off)
+		if (peelR > 0) {
+			aAdj = distA <= peelR;
+			bAdj = distB <= peelR;
 
 			if (aAdj && !bAdj) {
 				return -1;
@@ -1721,7 +1859,7 @@ var Attack = {
 			}
 		}
 
-		var ids = [58, 59, 60, 61, 62, 101, 102, 103, 104, 105, 278, 279, 280, 281, 282, 298, 299, 300, 645, 646, 647, 662, 663, 664, 667, 668, 669, 670, 675, 676],
+		var ids = Attack.shamanIds,
 			aShaman, bShaman, aNear, bNear, focusRange;
 
 		// Shamans: only prioritize ones near us. Far shamans sorted first used to get
@@ -1799,6 +1937,10 @@ var Attack = {
 			return false;
 		}
 
+		if (typeof Pickit !== "undefined" && Pickit.unsafeToPick && Pickit.unsafeToPick()) {
+			return false;
+		}
+
 		if (x === undefined || y === undefined) {
 			x = me.x;
 			y = me.y;
@@ -1819,6 +1961,10 @@ var Attack = {
 		}
 
 		while (list.length) {
+			if (typeof Pickit !== "undefined" && Pickit.unsafeToPick && Pickit.unsafeToPick()) {
+				return false;
+			}
+
 			list.sort(Sort.units);
 
 			if (Misc.openChest(list.shift())) {
@@ -2415,7 +2561,9 @@ AuraLoop: // Skip monsters with auras
 			//me.overhead("Short range");
 
 			if (walk) {
-				if (getDistance(me, unit) > 8 || checkCollision(me, unit, coll)) {
+				// Walk whenever outside the requested melee range (was hardcoded >8,
+				// so dist 4–8 never closed in — OOM normal-attack stood and whiffed).
+				if (getDistance(me, unit) > distance || checkCollision(me, unit, coll)) {
 					Pather.walkTo(unit.x, unit.y, 3);
 				}
 			} else {

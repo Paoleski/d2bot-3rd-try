@@ -1,0 +1,26 @@
+---
+description: Keep Farm and Watch PD2 clients on the same window resolution for AutoSkill and screen-coord scripts
+alwaysApply: true
+---
+
+# Same client resolution (Farm + Watch)
+
+`ProjectD2-Realm` (Farm) and `ProjectD2-Watch` (Watch) must use the **same** `ddraw.ini` / launcher `width` and `height`.
+
+## Why
+
+AutoSkill UI clicks (`Config.AutoSkill.UIClick`), F9 calibration, and other screen/window coord scripts break if resolution differs between clients.
+
+## Current shared size
+
+- `width=1068`
+- `height=600`
+
+(Change both folders together if you ever resize.)
+
+## Hard rules
+
+- Never shrink Farm resolution for “performance” while leaving Watch larger (or vice versa).
+- When editing `ddraw.ini` or `AppData\launcherSettings.json` DdrawOptions, keep `Width`/`Height` identical across Realm and Watch.
+- Lean Farm via `maxfps`, empty `shader`, `-sleepy` — **not** via a different resolution.
+- Never use `-ns` on Farm/Watch profiles here — it crashes this PD2 client stack.

@@ -71,9 +71,12 @@
 [type] == shield && [type] != auricshields && [quality] <= rare # [enhanceddamage] >= 40 && [fireresist]+[lightresist] >= 30 # [tier] == 120
 
 // =============================================================================
-// HELM — IAS over plain life/res; Wormskull still strong (Shael for FHR)
+// HELM — Wormskull / rare IAS > Lore > FHR-only / life / res rares
 // =============================================================================
-[name] == bonehelm && [quality] == unique # [necromancerskills] >= 1 && [lifeleech] >= 5 # [maxquantity] == 1 && [tier] == 135 // Wormskull
+[name] == bonehelm && [quality] == unique # [necromancerskills] >= 1 && [lifeleech] >= 5 # [maxquantity] == 1 && [tier] == 170 // Wormskull
+// Lore (Ort+Sol) — beat FHR/life/res junk (≤118); lose to IAS rares (125+) and Wormskull
+[type] == helm && [flag] == runeword # [LightResist] >= 25 # [tier] == 120 // Lore
+[type] == circlet && [flag] == runeword # [LightResist] >= 25 # [tier] == 120 // Lore circlet
 // Rare floor — pick yellows even unid / without matching IAS/res lines
 [type] == helm && [quality] == rare # # [tier] == 55
 [type] == helm && [quality] <= rare # [ias] >= 10 # [tier] == 125
@@ -129,7 +132,7 @@
 [type] == gloves && [quality] == unique # [ias] >= 10 && [fcr] == 0 # [tier] == 150
 [type] == gloves && [quality] == unique # [ias] >= 20 && [fcr] == 0 # [tier] == 160
 [type] == gloves && [quality] == rare # # [tier] == 55
-// Continuous: base 120 + ias*1.2 so more IAS always wins; res/life/str as sauce
+// Continuous IAS — flat bands; Item.gloveTier in GetTier fills when [ias] eval misses
 [type] == gloves && [quality] <= rare # [ias] >= 5 # [tier] == 120 + [ias]*1.2 + ([fireresist]+[lightresist]+[coldresist])/40 + [maxhp]/25 + ([strength]+[dexterity])/30
 [type] == gloves && [quality] <= rare # [ias] >= 10 # [tier] == 130 + [ias]*1.2 + ([fireresist]+[lightresist]+[coldresist])/40 + [maxhp]/25
 [type] == gloves && [quality] <= rare # [ias] >= 20 # [tier] == 145 + [ias]*1.0 + ([fireresist]+[lightresist]+[coldresist])/35 + [maxhp]/20
@@ -139,6 +142,8 @@
 [type] == gloves && [quality] <= rare # [maxhp] >= 10 # [tier] == 70
 // Demote FCR gloves (Magefist etc.) hard — only wins when no floor line matches (ID'd fcr>0)
 [type] == gloves && [quality] == unique # [fcr] > 0 # [tier] == 25
+// Catch-all magic/rare — JS scorer when no IAS/res line matched (shop blues with unread [ias])
+[type] == gloves && ([quality] == magic || [quality] == rare) # # [tier] == (typeof Item!=='undefined'&&Item.gloveTier?Item.gloveTier(item):5)
 
 // =============================================================================
 // BOOTS — IAS first (Sigon's Sabot); FHR second

@@ -17,8 +17,10 @@ function AutoSmurf() {
  // USER SETTINGS
  // -------- Normal Difficulty -------------
 	var stonyLvl = 7, // farm Stony Field until this level, then Cain
-		bloodLvl = 12, // Blood Raven after lvl 12
-		tristLvl = 14, // Tristram quit-farm until this, then straight to Catacombs toward Andy
+		countessLvl = 12, // Countess + Smith after Cain (Tristram fills the gap under this)
+		bloodLvl = 14, // Blood Raven after Tristram stop — don't steal 12–13 Tristram games
+		tristRetryLvl = 13, // after Countess/Smith fail, Tristram until this then retry
+		tristLvl = 14, // hard stop — no more Tristram (then Catacombs toward Andy)
 		andyLvl = 17, // Normal Andy once party hits this (Teleport still unlocks at 18)
 		jailFarmUntil = 16, // unused for Normal XP path (kept for reference; post-Trist → Cata only)
 		tombsLvl = 22, // stop tomb clears / start Duriel at this level
@@ -1484,6 +1486,21 @@ function AutoSmurf() {
 					if (!Pather.moveToExit(areaIDs[nextAreaIndex], true, Config.ClearType)) {
 						this.status("travel exit failed → " + areaIDs[nextAreaIndex] + " (still area " + me.area + ")");
 
+						// Jail/Barracks/Cathedral: one explore + door retry before abandoning the game push
+						if (!me.inTown && [28, 29, 30, 31, 32, 33].indexOf(me.area) > -1) {
+							this.status("Monastery exit retry — doors + explore");
+							Pather.openDoors(me.x, me.y);
+							Attack.clear(20, 0);
+							this.nudgeUnexploredRoom();
+
+							if (Pather.moveToExit(areaIDs[nextAreaIndex], true, true)) {
+								break;
+							}
+
+							this.status("travel exit retry failed → " + areaIDs[nextAreaIndex] +
+								" (still area " + me.area + ")");
+						}
+
 						if (!me.inTown) {
 							Town.goToTown(homeTown === 40 ? 2 : (homeTown === 1 ? 1 : undefined));
 						}
@@ -1542,6 +1559,11 @@ function AutoSmurf() {
 					}
 				} else if (wpAreas.indexOf(areaIDs[nextAreaIndex]) > -1 && me.area !== areaIDs[nextAreaIndex]) {
 					this.status("skip WP — wanted area " + areaIDs[nextAreaIndex] + " but in " + me.area);
+				}
+
+				// Cathedral has no WP — kill Bone Ash before continuing to Catacombs
+				if (goal === 1 && me.area === 33) {
+					this.killBoneAsh();
 				}
 			}
 			try {
@@ -2792,6 +2814,183 @@ function AutoSmurf() {
 		return Item.hasDefianceMerc();
 	};
 
+	// Act 3 Nightmare: Akara Den respec → Lightning-first (Charged Bolt range too short for NM jungle)
+	// Manual wipe: if already reset with unspent points (not CB-heavy), skip Akara and rebuild Lightning.
+	this.akaraLightningRespec = function () {
+		var akara, lines, i, t, preSkillPts, postSkillPts, clicked, lightBuild, applyLightning,
+			cbHard = me.getSkill(38, 0) || 0,
+			ltHard = me.getSkill(49, 0) || 0,
+			unspent = me.getStat(5) || 0,
+			savePts = (Config.AutoSkill.Save || 0),
+			manualRespec;
+
+		if (me.diff !== 1 || !Config.AutoSkill || !Config.AutoSkill.NmAct3LightningRespec) {
+			return false;
+		}
+
+		// Already rebuilt this difficulty (Lightning invested over Charged Bolt)
+		if (ltHard > cbHard) {
+			// Still ensure Build stays Lightning-first for future spends
+			lightBuild = Config.AutoSkill.LightningFirstBuild;
+
+			if (lightBuild && lightBuild.length) {
+				Config.AutoSkill.Build = lightBuild;
+				Config.AutoSkill.DumpSkill = 49;
+				Config.AttackSkill[1] = 49;
+				Config.AttackSkill[3] = 49;
+			}
+
+			if (Config.AutoStat && Config.AutoStat.LightningFirstBuild && Config.AutoStat.LightningFirstBuild.length) {
+				Config.AutoStat.Build = Config.AutoStat.LightningFirstBuild;
+			}
+
+			return false;
+		}
+
+		lightBuild = Config.AutoSkill.LightningFirstBuild;
+
+		if (!lightBuild || !lightBuild.length) {
+			this.status("No LightningFirstBuild configured — skip rebuild");
+			return false;
+		}
+
+		applyLightning = function () {
+			Config.AutoSkill.Build = lightBuild;
+			Config.AutoSkill.DumpSkill = 49;
+			Config.AttackSkill[1] = 49;
+			Config.AttackSkill[3] = 49;
+
+			// Rebuild stats without energy (leveling Build keeps energy bumps)
+			if (Config.AutoStat && Config.AutoStat.LightningFirstBuild && Config.AutoStat.LightningFirstBuild.length) {
+				Config.AutoStat.Build = Config.AutoStat.LightningFirstBuild;
+			}
+
+			print("ÿc2AutoSmurfÿc0 :: Rebuilding skills/stats — Lightning primary");
+			me.overhead("Lightning rebuild");
+			Town.spendSkillStatPoints();
+
+			if ((me.getSkill(49, 0) || 0) > 0) {
+				Config.AttackSkill[1] = 49;
+				Config.AttackSkill[3] = 49;
+			}
+
+			Town.goToTown(3);
+			print("ÿc2AutoSmurfÿc0 :: Lightning rebuild done (CB hard=" + (me.getSkill(38, 0) || 0) +
+				" Light hard=" + (me.getSkill(49, 0) || 0) + ")");
+
+			return true;
+		};
+
+		// Manual Akara already done: not CB-heavy + still have points → Lightning rebuild (no Akara)
+		// Also treat near-empty attack skills + any unspent as a wipe (chores may have put 1 Warmth/TK).
+		manualRespec = (unspent > savePts) && (cbHard <= ltHard || (cbHard <= 3 && ltHard <= 3 && unspent >= 10));
+
+		if (manualRespec) {
+			this.status("Act 3 NM — respec already done (" + unspent + " unspent, CB=" + cbHard +
+				" Light=" + ltHard + ") → Lightning rebuild");
+
+			if (!me.inTown) {
+				Town.goToTown();
+			}
+
+			return applyLightning();
+		}
+
+		// Still CB-heavy and no banked points → need Akara wipe first
+		if (cbHard <= ltHard) {
+			return false;
+		}
+
+		this.status("Act 3 NM — Akara respec Charged Bolt → Lightning");
+
+		if (!me.getQuest(1, 0)) {
+			this.status("Den of Evil not done — clearing for respec reward");
+			this.den();
+		}
+
+		if (!Town.goToTown(1)) {
+			this.status("Failed to reach Act 1 for Akara respec");
+			return false;
+		}
+
+		Town.move("akara");
+		akara = getUnit(1, "akara") || getUnit(1, NPC.Akara);
+
+		if (!akara) {
+			this.status("Akara not found — skip respec");
+			return false;
+		}
+
+		preSkillPts = me.getStat(5) || 0;
+		clicked = false;
+
+		for (i = 0; i < 3 && !clicked; i += 1) {
+			akara.openMenu();
+			delay(500 + me.ping);
+
+			// LoD string id 0x2BA0 = 11168 ("Reset Stat/Skill Points")
+			if (Misc.useMenu(11168)) {
+				clicked = true;
+			} else {
+				lines = getDialogLines();
+
+				if (lines) {
+					for (t = 0; t < lines.length; t += 1) {
+						if (lines[t].selectable && lines[t].text &&
+								(/reset/i.test(lines[t].text) || /respec/i.test(lines[t].text))) {
+							getDialogLines()[t].handler();
+							delay(750 + me.ping);
+							clicked = true;
+							break;
+						}
+					}
+				}
+			}
+
+			// Confirm Yes / OK if a second dialog appears
+			if (clicked) {
+				delay(400 + me.ping);
+				lines = getDialogLines();
+
+				if (lines) {
+					for (t = 0; t < lines.length; t += 1) {
+						if (lines[t].selectable && lines[t].text &&
+								(/^(yes|ok|okay|accept)/i.test(lines[t].text.trim()) ||
+								/reset/i.test(lines[t].text) || /respec/i.test(lines[t].text))) {
+							getDialogLines()[t].handler();
+							delay(750 + me.ping);
+							break;
+						}
+					}
+				}
+			}
+
+			me.cancel();
+			delay(300 + me.ping);
+			sendPacket(1, 0x40);
+			delay(250 + me.ping);
+			postSkillPts = me.getStat(5) || 0;
+
+			if (postSkillPts > preSkillPts + 5 || (me.getSkill(38, 0) || 0) <= 1) {
+				clicked = true;
+				break;
+			}
+
+			clicked = false; // retry if skills didn't wipe
+		}
+
+		me.cancel();
+		delay(250 + me.ping);
+
+		if ((me.getSkill(38, 0) || 0) > 1 && (me.getStat(5) || 0) <= preSkillPts + 5) {
+			this.status("Akara respec option missing or failed — continuing on Charged Bolt");
+			Town.goToTown(3);
+			return false;
+		}
+
+		return applyLightning();
+	};
+
 //QUESTS
 	this.den = function () {
 		var i, akara, moorTick;
@@ -2887,8 +3086,8 @@ function AutoSmurf() {
 					this.waitForPartyMembers();
 					this.Bo();
 
-					for (i = 0; i < 3; i += 1) {
-						this.status("Clearing Den of Evil (try " + (i + 1) + "/3)");
+					for (i = 0; i < 5; i += 1) {
+						this.status("Clearing Den of Evil (try " + (i + 1) + "/5)");
 						this.teamInGame();
 						Attack.clearLevel();
 						sendPacket(1, 0x40);
@@ -2900,18 +3099,22 @@ function AutoSmurf() {
 					}
 				}
 
-				// Prefer TP if we have a scroll/tome; walk Blood Moor only as fallback
+				// Only leave Den for town when quest is done (or exhausted retries)
 				if (!me.inTown) {
-					var tpTome = me.findItem("tbk", 0, 3),
-						tpOk = (tpTome && tpTome.getStat(70) > 0) || !!me.findItem("tsc", 0, 3);
+					if (me.getQuest(1, 1)) {
+						var tpTome = me.findItem("tbk", 0, 3),
+							tpOk = (tpTome && tpTome.getStat(70) > 0) || !!me.findItem("tsc", 0, 3);
 
-					if (tpOk) {
-						try {
-							this.status("Den cleared — using TP to town");
-							Town.goToTown();
-						} catch (eTp) {
-							print("ÿc8AutoSmurfÿc0 :: Den TP failed (" + eTp + ") — walking to town");
+						if (tpOk) {
+							try {
+								this.status("Den cleared — using TP to town");
+								Town.goToTown();
+							} catch (eTp) {
+								print("ÿc8AutoSmurfÿc0 :: Den TP failed (" + eTp + ") — walking to town");
+							}
 						}
+					} else {
+						this.status("Den still not clear — walking to town to retry next game");
 					}
 				}
 
@@ -2957,8 +3160,8 @@ function AutoSmurf() {
 					this.Bo();
 					this.enableTeleport();
 				}
-				for (i = 0; i < 3; i += 1) {
-					this.status("Clearing Den of Evil (try " + (i + 1) + "/3)");
+				for (i = 0; i < 5; i += 1) {
+					this.status("Clearing Den of Evil (try " + (i + 1) + "/5)");
 					this.teamInGame();
 					Attack.clearLevel();
 					sendPacket(1, 0x40); // Refresh quest status
@@ -2968,21 +3171,26 @@ function AutoSmurf() {
 					}
 				}
 				this.enableTeleport();
-				this.status("Going to town");
+				this.status(me.getQuest(1, 1) ? "Going to town" : "Den not clear — going to town");
 				Town.goToTown();
 			}
 		}
 
 		if (me.inTown) {
-			if (!me.getQuest(1, 1)) {
+			if (!me.getQuest(1, 1) && !me.getQuest(1, 0)) {
 				var j = 0;
+				// Team wait only — solo must not hang forever on a flag that will never set
 				this.status("Waiting for Den clear (quest flag)");
-				while (!me.getQuest(1, 1) && !me.getQuest(1, 0)) { // Meant to make sorc wait for all the immune monsters to be killed before talking to Akara in hell difficulty.
+				while (!me.getQuest(1, 1) && !me.getQuest(1, 0) && j < 120) { // ~30s max
 					delay(250);
-					if (j % 20 == 0) { // Check for Team Members every 5 seconds.
+					if (j % 20 === 0) {
 						this.teamInGame();
 					}
 					j += 1;
+				}
+				if (!me.getQuest(1, 1) && !me.getQuest(1, 0)) {
+					this.status("Den quest still incomplete — will retry");
+					return false;
 				}
 			}
 			this.status("Talking to Akara (Den reward)");
@@ -3025,12 +3233,13 @@ function AutoSmurf() {
 		for (i = 0; i < legs.length; i += 1) {
 			leg = legs[i];
 
-			// Reveal spine so packs load — clear only what's on the path
+			// Reveal spine so packs load — don't clearPath every node (that stutter-stops
+			// walkers). Clear once after the reveal leg, then hunt packs.
 			if (leg === "rakanishu") {
 				this.status("Reveal → Rakanishu");
 
 				try {
-					Pather.moveToRakanishu(true);
+					Pather.moveToRakanishu(false);
 					Attack.clear(25, 0);
 				} catch (eRak) {
 					print("ÿc8AutoSmurfÿc0 :: Rakanishu path fail — " + eRak);
@@ -3038,7 +3247,7 @@ function AutoSmurf() {
 			} else {
 				this.status("Reveal → " + Pather.getAreaName(leg) + " exit");
 
-				if (!Pather.moveToExit(leg, false, true)) {
+				if (!Pather.moveToExit(leg, false, false)) {
 					this.status("Reveal failed toward " + Pather.getAreaName(leg) + " — local clear only");
 				}
 
@@ -3056,7 +3265,7 @@ function AutoSmurf() {
 				this.status("Pack hunt ×" + pack.count + " (" + (hunts + 1) + "/" + maxHunts + ")");
 
 				if (getDistance(me, pack.unit) > 10) {
-					Pather.moveTo(pack.unit.x, pack.unit.y, 3, true);
+					Pather.moveTo(pack.unit.x, pack.unit.y, 3, false);
 				}
 
 				Attack.clear(clearRange, 0);
@@ -3145,6 +3354,57 @@ function AutoSmurf() {
 		return null;
 	};
 
+	// Cathedral (33) — Bone Ash sits near 20047,4898; pack hunt / travel often path past him
+	this.killBoneAsh = function () {
+		var name, boss, i;
+
+		if (me.area !== 33) {
+			return false;
+		}
+
+		name = getLocaleString(2878); // Bone Ash
+		boss = getUnit(1, name);
+
+		if (!boss || !Attack.checkMonster(boss)) {
+			// Classic spawn — walk there so he loads / we don't skip the alcove
+			Pather.moveTo(20047, 4898, 3, true);
+			delay(200 + me.ping);
+
+			for (i = 0; i < 5; i += 1) {
+				boss = getUnit(1, name);
+
+				if (boss && Attack.checkMonster(boss)) {
+					break;
+				}
+
+				delay(150);
+			}
+		}
+
+		if (!boss || !Attack.checkMonster(boss)) {
+			this.status("Bone Ash already dead / not found");
+
+			return false;
+		}
+
+		this.status("Cathedral — kill Bone Ash");
+
+		if (getDistance(me, boss) > 8) {
+			Pather.moveToUnit(boss, 0, 0, true);
+		}
+
+		try {
+			Attack.clear(35, 0, name);
+		} catch (eAsh) {
+			print("ÿc8AutoSmurfÿc0 :: Bone Ash clear: " + eAsh);
+			Attack.clear(35, 0);
+		}
+
+		Pickit.pickItems();
+
+		return true;
+	};
+
 	// Indoor Jail / Cathedral / Catacombs — pack hunt ALONG the way to next exit (not only at stairs)
 	this.dungeonPackFarm = function (nextArea) {
 		var tryN, exitDest, path, n, nodeBudget,
@@ -3157,6 +3417,10 @@ function AutoSmurf() {
 
 		if (!nextArea) {
 			return false;
+		}
+
+		if (me.area === 33) {
+			this.killBoneAsh();
 		}
 
 		function huntNearby(budget) {
@@ -3688,6 +3952,7 @@ function AutoSmurf() {
 		}
 
 		Pather.useWaypoint(5); // Dark Wood
+
 		this.waitForPartyMembers();
 		Precast.doPrecast(true);
 		this.Bo();
@@ -4031,6 +4296,20 @@ function AutoSmurf() {
 
 		return true;
 	};
+
+	// One Tristram clear then quit — next game retries Countess/Smith. Never at lvl 14+.
+	this.tristFarmAndQuit = function (why) {
+		if (this.partyLevel(tristLvl)) {
+			this.status("Lvl " + me.charlvl + " >= " + tristLvl + " — no more Tristram");
+			return false;
+		}
+
+		this.status(why || ("Tristram XP (now " + me.charlvl + ")"));
+		this.trist();
+		delay(1000);
+		quit();
+		return true;
+	};
 	
 	// After Tristram (14+): Jail → Inner Cloister → Catacombs pack farm, then try Andy.
 	// If too hard, chicken / die and rerun — don't gate Andy on lvl.
@@ -4120,6 +4399,10 @@ function AutoSmurf() {
 
 			this.status(Pather.getAreaName(path[i]) + " pack farm");
 
+			if (me.area === 33) {
+				this.killBoneAsh();
+			}
+
 			if (i + 1 < path.length) {
 				this.dungeonPackFarm(path[i + 1]);
 			} else {
@@ -4150,8 +4433,14 @@ function AutoSmurf() {
 
 		this.status("Catacombs XP for Andy — need lvl " + andyLvl + " (now " + me.charlvl + ")");
 
-		// Already on Barracks→Catacombs path (e.g. after Smith TP return) — don't reset via town WP
-		if (!me.inTown && me.area >= 28 && me.area <= 36) {
+		// Barracks forge wing → Jail times out constantly — never continue from 28
+		if (!me.inTown && me.area === 28) {
+			this.status("In Barracks — town → Outer Cloister (skip forge→Jail maze)");
+			Town.goToTown(1);
+		}
+
+		// Already on Jail→Catacombs path — don't reset via town WP
+		if (!me.inTown && me.area >= 29 && me.area <= 36) {
 			this.status("Continuing from area " + me.area + " toward Catacombs");
 			this.teamInGame();
 			Pather.teleport = Pather.teleSkill() > 0;
@@ -4163,6 +4452,11 @@ function AutoSmurf() {
 			}
 
 			for (i = idx + 1; i < path.length; i += 1) {
+				// Cathedral mini-boss before leaving for Catacombs
+				if (me.area === 33) {
+					this.killBoneAsh();
+				}
+
 				// Catacombs: hunt packs while pathing to the next stairs (not only after arriving)
 				if (me.area >= 34 && me.area <= 36) {
 					this.dungeonPackFarm(path[i]);
@@ -7529,6 +7823,20 @@ function AutoSmurf() {
 
 			return !!(unit && (unit.classid === 704 || unit.classid === 705));
 		};
+		// True if a living seal boss with this name is still in the area
+		this.sealBossAlive = function (name) {
+			var u = getUnit(1, name);
+
+			if (u) {
+				do {
+					if (Attack.checkMonster(u)) {
+						return true;
+					}
+				} while (u.getNext());
+			}
+
+			return false;
+		};
 		// Cast THIS char's configured attack at a spot — never a hardcoded skill (no FN on light sorc etc.)
 		// Prefers AttackSkill[1] (timed) if off cooldown, else AttackSkill[2] (untimed). Skips melee (0).
 		this.castOwnAttack = function (x, y) {
@@ -7605,9 +7913,8 @@ function AutoSmurf() {
 		};
 		// pullFight: TP to hold, cast in place — never Attack.clear / walk toward pack
 		// baitX/baitY: re-aggro closer to spawn if nothing comes, then snapHold
-		// walkBait: walk to bait (Seis) instead of TP pulse (Infector)
 		// If boss is visible but won't come — TP onto him and re-anchor hold there (no bait loop)
-		this.getBoss = function (name, pullFight, holdX, holdY, baitX, baitY, walkBait) {
+		this.getBoss = function (name, pullFight, holdX, holdY, baitX, baitY) {
 			var i, boss, dist, waitTicks, engageDist, glow, mon, best, bestD, d,
 				idle, farIdle, outRange, engaged, sawBoss, baitPulses, deadPulses, giveUpDead, self = this;
 
@@ -7622,7 +7929,6 @@ function AutoSmurf() {
 			baitPulses = 0;
 			deadPulses = 0;
 			giveUpDead = false;
-			walkBait = !!walkBait;
 
 			// Never personally saw the boss or any leftover pack after a bait pulse — he may
 			// already be dead (killed by a teammate, or this is a script-restart mid-Chaos-Sanctuary).
@@ -7747,7 +8053,7 @@ function AutoSmurf() {
 				snapHold();
 			}
 
-			// Brief TP toward spawn for LOS/aggro, then immediately back to hold
+			// TP to bait for LOS/aggro, cast, snap back — never walk
 			function pulseAggro() {
 				var bx, by;
 
@@ -7780,54 +8086,28 @@ function AutoSmurf() {
 				snapHold();
 			}
 
-			// Walk toward spawn for LOS/aggro (Seis), poll briefly, then TP back to hold
-			function walkAggro() {
-				var bx, by, savedTele, j, saw;
+			// Only bait if nothing is already coming toward the hold
+			function needAggro() {
+				boss = getUnit(1, name);
 
-				bx = (baitX !== undefined) ? baitX : holdX;
-				by = (baitY !== undefined) ? baitY : (holdY - 16);
-
-				if (bx === undefined || by === undefined) {
+				if (boss && Attack.checkMonster(boss) && getDistance(me, boss) <= engageDist) {
 					return false;
 				}
 
-				baitPulses += 1;
-				saw = false;
-
-				if (typeof self.status === "function") {
-					self.status("Seal pull — walk aggro @ " + bx + "," + by);
-				} else {
-					print("Seal pull — walk aggro @ " + bx + "," + by);
+				if (packNear(22)) {
+					return false;
 				}
 
-				savedTele = Pather.teleport;
-				Pather.teleport = false;
-				Pather.moveTo(bx, by, 2);
-				Pather.teleport = savedTele;
-				self.castOwnAttack(bx, by - 8);
-				delay(80);
-
-				for (j = 0; j < 18; j += 1) {
-					boss = getUnit(1, name);
-
-					if ((boss && Attack.checkMonster(boss) && getDistance(me, boss) <= 30) || packNear(22)) {
-						saw = true;
-						break;
-					}
-
-					delay(100);
-				}
-
-				snapHold();
-				return saw;
+				return true;
 			}
 
 			function doAggro() {
-				if (walkBait) {
-					walkAggro();
-				} else {
-					pulseAggro();
+				if (!needAggro()) {
+					engaged = true;
+					return;
 				}
+
+				pulseAggro();
 			}
 
 			// This char's cast range (Charged Bolt 6, Lightning ~15, FO 15, …) — clamped 4..20
@@ -8119,15 +8399,35 @@ function AutoSmurf() {
 						continue;
 					}
 
+					// Saw him earlier but he's gone — only leave if he's actually dead (not teles away)
 					if (engaged || sawBoss) {
-						snapHold();
-
-						if (typeof ClassAttack !== "undefined") {
-							ClassAttack._sealHoldX = undefined;
-							ClassAttack._sealHoldY = undefined;
+						if (bossCorpse()) {
+							releaseHold();
+							return true;
 						}
 
-						return true;
+						delay(200);
+						boss = getUnit(1, name);
+
+						if (!(boss && Attack.checkMonster(boss)) && !packNear(18)) {
+							delay(250);
+							boss = getUnit(1, name);
+
+							if (!(boss && Attack.checkMonster(boss))) {
+								releaseHold();
+								return true;
+							}
+						}
+
+						farIdle += 1;
+
+						if (farIdle >= 6) {
+							doAggro();
+							farIdle = 0;
+						}
+
+						delay(100);
+						continue;
 					}
 
 					farIdle += 1;
@@ -8199,9 +8499,8 @@ function AutoSmurf() {
 				dx, dy, dist, step, path;
 
 			this.status("Seis layout " + this.seisLayout);
-			this.followPath(this.seisLayout === 1 ? this.starToSeisA : this.starToSeisB);
 
-			// Clear corridor to pull hold before opening seal (stay south of nest)
+			// Walk-clear full corridor to pull hold before opening seal (tele hops skip packs)
 			if (this.seisLayout === 1) {
 				pullX = 7771;
 				pullY = 5196;
@@ -8210,8 +8509,11 @@ function AutoSmurf() {
 				pullY = 5186;
 			}
 
-			Pather.moveTo(pullX, pullY, 3, true);
+			savedTele = Pather.teleport;
+			Pather.teleport = false;
+			this.followPath(this.seisLayout === 1 ? this.starToSeisA : this.starToSeisB);
 			Attack.clear(30, 0, false, this.sort);
+			Pather.teleport = savedTele;
 
 			savedTele = Pather.teleport;
 			savedDelay = (typeof Config !== "undefined") ? Config.TeleDelay : undefined;
@@ -8342,17 +8644,22 @@ function AutoSmurf() {
 				this.status("Lord De Seis — seal may be closed, fighting from pull anyway");
 			}
 
-			this.status("Lord De Seis — TP pull @ " + pullX + "," + pullY + " (hold + walk aggro)");
+			this.status("Lord De Seis — TP pull @ " + pullX + "," + pullY + " (hold + TP aggro if needed)");
 
-			if (!this.getBoss(getLocaleString(2852), true, pullX, pullY, baitX, baitY, true)) {
-				// stay on hold — no clear chase
-				//throw new Error("Failed to kill de Seis");
+			if (!this.getBoss(getLocaleString(2852), true, pullX, pullY, baitX, baitY) || this.sealBossAlive(getLocaleString(2852))) {
+				this.status("Lord De Seis — still alive, retrying hold fight");
+
+				if (!this.getBoss(getLocaleString(2852), true, pullX, pullY, baitX, baitY) || this.sealBossAlive(getLocaleString(2852))) {
+					this.status("Lord De Seis — failed to confirm kill, not moving to Infector");
+					return false;
+				}
 			}
 
 			return true;
 		};
 		this.infectorSeal = function () {
-			var savedTele, pullX, pullY, infName = getLocaleString(2853);
+			var savedTele, pullX, pullY, baitX, baitY, seal, dx, dy, dist, step,
+				infName = getLocaleString(2853);
 
 			this.status("Inf layout " + this.infLayout);
 			this.followPath(this.infLayout === 1 ? this.starToInfA : this.starToInfB);
@@ -8361,7 +8668,6 @@ function AutoSmurf() {
 				//throw new Error("Failed to open Infector seals.");
 			}
 
-			// TP west toward star — Infector / pit lords walk to us
 			if (this.infLayout === 1) {
 				pullX = 7868;
 				pullY = 5295;
@@ -8375,11 +8681,37 @@ function AutoSmurf() {
 			Pather.moveTo(pullX, pullY, 3);
 			Pather.teleport = savedTele;
 
-			this.status("Infector of Souls — TP pull (hold, he comes to us)");
+			// Bait east toward nest/seal — holdY-8 is useless (~same tile as hold)
+			seal = getUnit(2, 392) || getUnit(2, 393);
 
-			if (!this.getBoss(infName, true, pullX, pullY)) {
-				Attack.clear(25, 0, false, this.sort);
-				//throw new Error("Failed to kill Infector");
+			if (seal) {
+				dx = seal.x - pullX;
+				dy = seal.y - pullY;
+				dist = Math.sqrt(dx * dx + dy * dy);
+
+				if (dist > 1) {
+					step = Math.min(24, Math.max(16, dist * 0.45));
+					baitX = Math.round(pullX + dx * (step / dist));
+					baitY = Math.round(pullY + dy * (step / dist));
+
+					if (!Attack.validSpot(baitX, baitY)) {
+						step = Math.min(18, dist * 0.35);
+						baitX = Math.round(pullX + dx * (step / dist));
+						baitY = Math.round(pullY + dy * (step / dist));
+					}
+				}
+			}
+
+			if (baitX === undefined || !Attack.validSpot(baitX, baitY)) {
+				baitX = pullX + 22;
+				baitY = pullY;
+			}
+
+			this.status("Infector of Souls — TP pull @ " + pullX + "," + pullY + " bait " + baitX + "," + baitY);
+
+			if (!this.getBoss(infName, true, pullX, pullY, baitX, baitY) || this.sealBossAlive(infName)) {
+				this.status("Infector — still alive, retrying");
+				this.getBoss(infName, true, pullX, pullY, baitX, baitY);
 			}
 
 			if (!this.openSeal(393)) {
@@ -8487,9 +8819,9 @@ function AutoSmurf() {
 		this.entranceToStar = [7794, 5517, 7791, 5491, 7768, 5459, 7775, 5424, 7817, 5458, 7777, 5408, 7769, 5379, 7777, 5357, 7809, 5359, 7805, 5330, 7780, 5317, 7791, 5293];
 		this.starToVizA = [7759, 5295, 7734, 5295, 7716, 5295, 7718, 5276, 7697, 5292, 7678, 5293, 7665, 5276, 7662, 5314];
 		this.starToVizB = [7759, 5295, 7734, 5295, 7716, 5295, 7701, 5315, 7666, 5313, 7653, 5284];
-		// Seis: stop at corridor mouth — openSeal TPs to seal, then pull holds on post-seal node (5196/5186)
-		this.starToSeisA = [7781, 5259, 7805, 5258];
-		this.starToSeisB = [7781, 5259, 7805, 5258];
+		// Seis: clear corridor down to pull hold (south of nest) — openSeal TPs to seal after
+		this.starToSeisA = [7781, 5259, 7805, 5258, 7802, 5237, 7776, 5228, 7775, 5205, 7804, 5193, 7771, 5196];
+		this.starToSeisB = [7781, 5259, 7805, 5258, 7802, 5237, 7776, 5228, 7811, 5218, 7807, 5194, 7779, 5193, 7798, 5186];
 		// Infector: stop west of pit — openSeal + pull node handle the rest
 		this.starToInfA = [7809, 5268, 7834, 5306, 7852, 5280, 7868, 5295];
 		this.starToInfB = [7809, 5268, 7834, 5306, 7852, 5280, 7870, 5286];
@@ -8571,7 +8903,10 @@ function AutoSmurf() {
 		Pather.teleport = false;
 		Pather.moveTo(7770, 5285);
 		Pather.teleport = true;
-		this.seisSeal();
+		if (!this.seisSeal()) {
+			this.status("Aborting Chaos — de Seis not confirmed dead");
+			return false;
+		}
 		this.infectorSeal();
 		Precast.doPrecast(true);
 		if(me.classid === 1)
@@ -9753,11 +10088,11 @@ function AutoSmurf() {
 		Pather.teleport = Pather.teleSkill() > 0;
 
 		if (teleportingSorc || Config.AutoSmurf.TeamSize === 1) {
-			if (!Pather.useWaypoint(6, true)) {
+			if (me.area !== 6 && !Pather.useWaypoint(6, true)) {
 				// No Black Marsh WP yet — walk from Dark Wood / Outer Cloister path
 				Pather.useWaypoint(5);
-				Pather.moveToExit(6, true, forceFarm ? clearSpec : true);
-				Pather.getWP(6, true);
+				Pather.moveToExit(6, true, forceFarm ? clearSpec : false);
+				Pather.getWP(6, !!forceFarm);
 			}
 
 			Precast.doPrecast(true);
@@ -9835,6 +10170,13 @@ function AutoSmurf() {
 		}
 
 		sendPacket(1, 0x40);
+		delay(300 + me.ping);
+
+		if (!forceFarm && !me.getQuest(5, 0)) {
+			this.status("Countess not complete");
+			return false;
+		}
+
 		this.status("Countess done");
 		return true;
 	};	
@@ -10027,13 +10369,29 @@ function AutoSmurf() {
 		}
 
 		this.status("Barracks — kill Smith, take Malus");
-		Pather.moveToExit(28, true, true);
+
+		if (!Pather.moveToExit(28, true, true) || me.area !== 28) {
+			this.status("Barracks entry failed — town, retry next game");
+
+			if (!me.inTown) {
+				Town.goToTown(1);
+			}
+
+			return false;
+		}
 
 		try {
-			Pather.moveToPreset(28, 2, 108, 0, 0, true);
+			if (!Pather.moveToPreset(28, 2, 108, 0, 0, true)) {
+				throw new Error("forge path failed");
+			}
 		} catch (eForge) {
-			this.status("Smith forge preset missing — clearing Barracks");
-			Attack.clearLevel(0);
+			this.status("Smith forge path stuck — town, retry next game");
+
+			if (!me.inTown) {
+				Town.goToTown(1);
+			}
+
+			return false;
 		}
 
 		try {
@@ -10073,9 +10431,7 @@ function AutoSmurf() {
 			this.status("Got Horadric Malus (hdm)");
 		}
 
-		// Portal to town for Charsi, then take the same TP back and continue
-		var smithArea = me.area;
-
+		// Portal to town for Charsi turn-in
 		if (!me.inTown) {
 			if (!Pather.makePortal()) {
 				this.status("No TP for Smith turn-in — walking/towning");
@@ -10097,27 +10453,38 @@ function AutoSmurf() {
 			this.status("Smith / Malus quest turned in (imbue ready OK)");
 		} else if (!malus) {
 			this.status("Smith incomplete — need Malus in bag then Charsi");
+			return false;
 		} else {
 			this.status("Smith done — talk to Charsi if quest still open");
+
+			if (!this.isSmithQuestDone()) {
+				return false;
+			}
 		}
 
-		// Same TP back to Barracks — next objective continues from here
-		Town.move("portalspot");
+		// After Charsi — do NOT portal back to the forge and walk Barracks→Jail.
+		// TP drops us deep in the forge wing; doors + 40s move timeout fail every game.
+		// Outer Cloister WP → Barracks entrance → Jail is the short side.
+		this.status("Smith done — Outer Cloister → Jail (skip forge maze)");
 
-		if (!Pather.usePortal(smithArea, me.name) && !Pather.usePortal(28, me.name) && !Pather.usePortal(null, me.name)) {
-			this.status("Could not return via Smith TP — staying in town");
-
-			return true;
+		if (!me.inTown) {
+			Town.goToTown(1);
 		}
 
-		this.status("Back in Barracks via TP — continuing toward Jail / Catacombs");
 		Pather.teleport = Pather.teleSkill() > 0;
 
-		if (Pather.moveToExit(29, true, true) && me.area === 29) {
-			this.clickWP();
-		} else {
-			this.status("Jail exit after Smith failed (area " + me.area + ") — town, next run uses Outer Cloister WP");
-			Town.goToTown(1);
+		if (getWaypoint(5)) {
+			Pather.useWaypoint(27);
+			this.waitForPartyMembers();
+			Precast.doPrecast(true);
+			this.Bo();
+
+			if (Pather.moveToExit([28, 29], true, true) && me.area === 29) {
+				this.clickWP();
+			} else {
+				this.status("Jail after Smith failed (area " + me.area + ") — town, next run retries");
+				Town.goToTown(1);
+			}
 		}
 
 		return true;
@@ -10801,7 +11168,15 @@ function AutoSmurf() {
 		
 //MAIN
 	addEventListener("copydata", (id, data) => {
-		let { msg, nick } = JSON.parse(data);
+		let parsed, msg, nick;
+
+		try {
+			parsed = JSON.parse(data);
+			msg = parsed.msg;
+			nick = parsed.nick;
+		} catch (eCopy) {
+			return; // malformed team message — ignore
+		}
 // Here is modified by Dark-f 2018-2-21
 		if ( iAmReady && Config.AutoSmurf.TeamSize === 1 ) {
 			teamIsReady = true;
@@ -11022,10 +11397,14 @@ function AutoSmurf() {
 				}
 				this.stonyField();
             }
-            //cain (before Blood Raven while under bloodLvl)
+            //cain (before Blood Raven while under bloodLvl) — Tristram clear then next game
             if (!me.getQuest(4, 0) && this.partyLevel(stonyLvl) &&
 					(!this.partyLevel(bloodLvl) || me.getQuest(2, 0))) {
-				this.cain();
+				if (this.cain() && me.getQuest(4, 0)) {
+					this.status("Cain + Tristram done — next game for Countess/Smith");
+					delay(1000);
+					quit();
+				}
             }
             //blood raven — only at bloodLvl+
             if (!me.getQuest(2, 0) && me.getQuest(1, 0) && this.partyLevel(bloodLvl)) {
@@ -11037,17 +11416,56 @@ function AutoSmurf() {
             }
             //cain leftover if Blood Raven ran first in a later game
             if (!me.getQuest(4, 0) && this.partyLevel(stonyLvl)) {
-				this.cain();
+				if (this.cain() && me.getQuest(4, 0)) {
+					this.status("Cain + Tristram done — next game for Countess/Smith");
+					delay(1000);
+					quit();
+				}
             }
-            // After Cain: Countess → Smith → Tristram XP (to tristLvl) → Catacombs → Andy
-            if (me.getQuest(4, 0)) {
-				if (!me.getQuest(5, 0)) {
-					this.status("Post-Cain: Countess");
-					this.countess();
+            // After Cain: lvl 12+ Countess + Smith. Fail → Tristram until 13, retry. No Trist at 14+.
+            if (me.getQuest(4, 0) && (!me.getQuest(5, 0) || !this.isSmithQuestDone())) {
+				var questFail = false;
+
+				if (this.partyLevel(countessLvl)) {
+					if (!me.getQuest(5, 0)) {
+						this.status("Post-Cain: Countess (lvl " + me.charlvl + ")");
+
+						try {
+							this.countess();
+						} catch (eCountess) {
+							this.status("Countess error — " + eCountess);
+						}
+
+						if (!me.getQuest(5, 0)) {
+							questFail = true;
+							this.status("Countess failed — Tristram then retry");
+						}
+					}
+
+					if (!questFail && !this.isSmithQuestDone()) {
+						this.status("Post-Cain: Smith (lvl " + me.charlvl + ")");
+
+						try {
+							this.smith();
+						} catch (eSmithQ) {
+							this.status("Smith error — " + eSmithQ);
+						}
+
+						if (!this.isSmithQuestDone()) {
+							questFail = true;
+							this.status("Smith failed — Tristram then retry");
+						}
+					}
 				}
 
-				if (!this.isSmithQuestDone()) {
-					this.smith();
+				if (!me.getQuest(5, 0) || !this.isSmithQuestDone()) {
+					if (!this.partyLevel(countessLvl)) {
+						this.tristFarmAndQuit("Under lvl " + countessLvl + " — Tristram, then Countess/Smith");
+					} else if (questFail && !this.partyLevel(tristRetryLvl)) {
+						this.tristFarmAndQuit("Quest fail — Tristram until lvl " + tristRetryLvl + ", then retry");
+					} else if (questFail && !this.partyLevel(tristLvl)) {
+						this.tristFarmAndQuit("Quest fail — Tristram (under " + tristLvl + "), then retry");
+					}
 				}
 			}
         }		
@@ -11212,6 +11630,12 @@ function AutoSmurf() {
 	if (!me.getQuest(23, 0) && this.isAct2Done()) { // Act4 not open yet; Act2/Duriel done (quest 15 flaky on PD2)
 		Town.goToTown(3);
 		this.status(this.nextAct3Objective());
+
+		// Nightmare light sorc: Akara Den respec CB → Lightning before jungle/Travincal
+		if (me.diff === 1 && teleportingSorc) {
+			this.akaraLightningRespec();
+		}
+
 		if (teleportingSorc || (Config.AutoSmurf && Config.AutoSmurf.TeamSize <= 1)) { // Leader / solo
 			this.travel(6); // Travel to all waypoints up to and including Travincal if I don't have them.
 			if (teamFigurine) { // Someone has the Jade Figurine!

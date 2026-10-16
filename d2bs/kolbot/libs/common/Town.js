@@ -358,6 +358,8 @@ var Town = {
 	// MiniShop is a soft need: right away when a RW base hunt is active, otherwise only with
 	// gold to spend (Config.MiniShopMinGold) and not more often than every 4 min.
 	miniShopWanted: function () {
+		var eq, eqTier;
+
 		if (!Config.MiniShopBot) {
 			return false;
 		}
@@ -373,6 +375,24 @@ var Town = {
 
 		if (me.gold < (Config.MiniShopMinGold || 2000)) {
 			return false;
+		}
+
+		// Starter gloves (white/superior / junk floor) — hunt IAS (melee) or FCR/res (caster)
+		if (typeof Item !== "undefined" && Item.getEquippedItem) {
+			eq = Item.getEquippedItem(10);
+			eqTier = (eq && eq.tier >= 0) ? eq.tier : 0;
+
+			if (!eq || eq.classid === -1) {
+				return true;
+			}
+
+			if (Item.isCasterGloveBuild && Item.isCasterGloveBuild()) {
+				if (eqTier < 10) {
+					return true;
+				}
+			} else if (eqTier < 50) {
+				return true;
+			}
 		}
 
 		return !this.lastFullChores || (getTickCount() - this.lastFullChores) >= 4 * 60 * 1000;
@@ -454,11 +474,25 @@ var Town = {
 		this.clearBeltStamina();
 		this.refillBeltIfNeeded();
 
-		// Heal at a different NPC first (e.g. Act2 Fara vs Drognan)
+		// Heal at a different NPC first (e.g. Act2 Fara vs Drognan).
+		// Act2: Fara is Heal+Repair — open trade while healing and run MiniShop (already walking there).
 		if (tasks.Heal !== tasks.Shop && this.needHealing()) {
-			this.heal();
-			me.cancel();
-			delay(150 + me.ping);
+			if (Config.MiniShopBot && tasks.Heal === tasks.Repair) {
+				// openMenu heals; Repair trade exposes Fara stock for MiniShop / RW bases
+				if (this.initNPC("Repair", "healMiniShop")) {
+					this.shopItems();
+					me.cancel();
+					delay(150 + me.ping);
+				} else {
+					this.heal();
+					me.cancel();
+					delay(150 + me.ping);
+				}
+			} else {
+				this.heal();
+				me.cancel();
+				delay(150 + me.ping);
+			}
 		}
 
 		// Same NPC as Shop (Akara/Jamella/Malah): ONE openMenu+trade heals — never init Heal then Shop.
@@ -510,8 +544,8 @@ var Town = {
 		this.buyMercWeapon();
 		this.applyCharmInventoryLock();
 		this.buyPoisonStrikeDagger();
-		// Spirit / Stealth RW bases on Repair: only scanned inside Town.repair() when durability
-		// actually needed a Repair visit — never open Charsi/Fara just to hunt bases.
+		// Spirit / Stealth RW bases on Repair: scanned inside Town.repair() when durability
+		// needs a visit, and on Act2 heal at Fara (Heal===Repair). Never open Repair just to hunt.
 		Item.autoEquip(); // equip MiniShop / dagger buys
 
 		// MiniShop runs AFTER clearInventory — replaced staff/armor sits in inv until we sell again.
@@ -2507,9 +2541,25 @@ var Town = {
 
 	// Spend banked skill/stat points while in town (AutoSkill UI-click + AutoStat)
 	spendSkillStatPoints: function () {
-		var spent = false;
+		var spent = false, lightBuild;
 
 		try {
+			// Act 3+ NM light sorc: never spend the pre-respec Charged Bolt Build
+			// (chores often run before AutoSmurf.akaraLightningRespec)
+			if (Config.AutoSkill && Config.AutoSkill.NmAct3LightningRespec && me.diff === 1 &&
+					(me.act >= 3 || (Pather.accessToAct && Pather.accessToAct(3)))) {
+				lightBuild = Config.AutoSkill.LightningFirstBuild;
+
+				if (lightBuild && lightBuild.length) {
+					Config.AutoSkill.Build = lightBuild;
+					Config.AutoSkill.DumpSkill = 49;
+				}
+
+				if (Config.AutoStat && Config.AutoStat.LightningFirstBuild && Config.AutoStat.LightningFirstBuild.length) {
+					Config.AutoStat.Build = Config.AutoStat.LightningFirstBuild;
+				}
+			}
+
 			if (Config.AutoSkill && Config.AutoSkill.Enabled && me.getStat(5) > (Config.AutoSkill.Save || 0)) {
 				if (!isIncluded("common/AutoSkill.js")) {
 					include("common/AutoSkill.js");
@@ -3176,8 +3226,10 @@ var Town = {
 
 	// How many pots of type we still want (belt columns + inv buffer). Stash does not count.
 	// Optional snap from potionSnapshot()
+	// With buffer 0: inv pots still count against belt capacity so we don't vacuum extras into inv
+	// while the belt looks "empty" (picks land in inv before belt refill).
 	potionNeedCount: function (type, snap) {
-		var i, beltSize, col, need = 0, inv, buf;
+		var i, beltSize, col, need = 0, inv, buf, capacity = 0, beltEmpty = 0;
 
 		if (type !== "hp" && type !== "mp") {
 			return 0;
@@ -3194,15 +3246,19 @@ var Town = {
 		}
 
 		for (i = 0; i < 4; i += 1) {
-			if (Config.BeltColumn[i] === type && col[i] > 0) {
-				need += col[i];
+			if (Config.BeltColumn[i] === type) {
+				capacity += beltSize;
+				beltEmpty += col[i] > 0 ? col[i] : 0;
 			}
 		}
 
 		buf = type === "hp" ? (Config.HPBuffer || 0) : (Config.MPBuffer || 0);
 
-		if (inv < buf) {
-			need += (buf - inv);
+		// Target owned = belt capacity + inv buffer. Count belt + inv toward that.
+		need = capacity + buf - (capacity - beltEmpty) - inv;
+
+		if (need < 0) {
+			need = 0;
 		}
 
 		return need;
@@ -4047,6 +4103,10 @@ MainLoop:
 					continue;
 				}
 
+				if (typeof Pickit.isPd2Currency === "function" && Pickit.isPd2Currency(item)) {
+					continue;
+				}
+
 				if (item.itemType === 74 || (item.code && /^r\d{2}$/i.test(item.code))) {
 					continue;
 				}
@@ -4105,6 +4165,10 @@ MainLoop:
 					}
 
 					if (typeof QuestItems !== "undefined" && QuestItems.isQuestItem(item)) {
+						break;
+					}
+
+					if (typeof Pickit.isPd2Currency === "function" && Pickit.isPd2Currency(item)) {
 						break;
 					}
 
@@ -6265,6 +6329,12 @@ MainLoop:
 			return false;
 		}
 
+		// PD2 currency (WSS, Demonic Cube, Puzzlebox, …) — always bank, never leftover-sell
+		if (typeof Pickit !== "undefined" && typeof Pickit.isPd2Currency === "function" &&
+				Pickit.isPd2Currency(item)) {
+			return true;
+		}
+
 		// Never bank magic/rare socketed "fake" RW bases (only white/grey are runewordable)
 		if (this.isFakeRwBase(item)) {
 			return false;
@@ -6287,6 +6357,26 @@ MainLoop:
 		// Empty RW bases must bank even if nip miss / result 0
 		if (!result && protectedBase) {
 			result = true;
+		}
+
+		// 3os poles: poisonstrike nip keeps every Battle Scythe. After Purity exists
+		// (stash/merc) or this isn't the best empty base, do not bank it again.
+		if (typeof Runewords !== "undefined" && Runewords.isEmptyPurityBase &&
+				Runewords.isEmptyPurityBase(item)) {
+			if ((Runewords.purityBasesDone && Runewords.purityBasesDone()) ||
+					(Runewords.wantPurityBase && !Runewords.wantPurityBase(item))) {
+				result = false;
+				protectedBase = false;
+			}
+		}
+
+		// 2os poles: same nip — dump once Purity or Insight exists (Strength obsolete)
+		if (typeof Runewords !== "undefined" && Runewords.isEmptyStrengthBase &&
+				Runewords.isEmptyStrengthBase(item) &&
+				((Runewords.purityBasesDone && Runewords.purityBasesDone()) ||
+					(Runewords.purityOutranksStrength && Runewords.purityOutranksStrength()))) {
+			result = false;
+			protectedBase = false;
 		}
 
 		// Tiered autoequip leftovers stay in inv — BUT empty Stealth/Lore bases match armor
@@ -6391,6 +6481,17 @@ MainLoop:
 		if (items) {
 			for (i = 0; i < items.length; i += 1) {
 				if (this.shouldStashItem(items[i])) {
+					if (items[i].quality <= 3 && !items[i].getItem() &&
+							((items[i].getStat(194) || 0) >= 2 ||
+								(items[i].getStatEx && items[i].getStatEx(194) >= 2))) {
+						print("ÿc2Townÿc0 :: stash empty " +
+							(items[i].getStat(194) || (items[i].getStatEx && items[i].getStatEx(194)) || "?") +
+							"os code=" + (items[i].code || "?") +
+							" classid=" + items[i].classid +
+							" type=" + items[i].itemType +
+							" name=" + ((items[i].name || "").toString().replace(/ÿc[0-9a-z]/gi, "").split("\n")[0] || "(blank)"));
+					}
+
 					Misc.itemLogger("Stashed", items[i]);
 					Storage.Stash.MoveTo(items[i]);
 				}
@@ -6848,6 +6949,12 @@ MainLoop:
 			return false;
 		}
 
+		// Unsellable PD2 currency (Demonic Cube / WSS / Puzzlebox) — never sell or drop
+		if (typeof Pickit !== "undefined" && typeof Pickit.isPd2Currency === "function" &&
+				Pickit.isPd2Currency(item)) {
+			return false;
+		}
+
 		// Never sell empty Stealth/Lore/Leaf bases we're still banking for RW
 		if (typeof Item !== "undefined" && Item.isProtectedRWBase && Item.isProtectedRWBase(item)) {
 			return false;
@@ -7020,6 +7127,12 @@ MainLoop:
 			return false;
 		}
 
+		// Empty neck / ring — never sell wearable jewelry while that slot is bare
+		if (typeof Item.fillsEmptyJewelrySlot === "function" && Item.fillsEmptyJewelrySlot(item) &&
+				Item.isWearableJewelry(item)) {
+			return false;
+		}
+
 		// Real player autoequip upgrade only
 		if (Item.hasTier(item) && Item.autoEquipCheck(item)) {
 			return false;
@@ -7070,6 +7183,16 @@ MainLoop:
 		if (Config.AutoEquip && NTIP.GetTier(item) > 0 && !Item.autoEquipCheck(item)) {
 			// Exception: valued PS heads stay in inv even if not beating current offhand yet
 			if (typeof Item.isValuedPsNecroHead === "function" && Item.isValuedPsNecroHead(item)) {
+				return false;
+			}
+
+			// Caster: never sell FCR jewelry while a ring/amulet slot still has 0 FCR
+			if (typeof Item.isNeededCasterFcrJewelry === "function" && Item.isNeededCasterFcrJewelry(item)) {
+				return false;
+			}
+
+			if (typeof Item.fillsEmptyJewelrySlot === "function" && Item.fillsEmptyJewelrySlot(item) &&
+					Item.isWearableJewelry(item)) {
 				return false;
 			}
 
@@ -7188,27 +7311,18 @@ MainLoop:
 			}
 		}
 
-		// Obsolete 2os Strength bases once Purity is makeable/worn — sell
-		if (typeof Runewords !== "undefined" && Runewords.purityOutranksStrength &&
-				Runewords.purityOutranksStrength() &&
-				(item.itemType === 33 || item.itemType === 34) && !item.getItem() &&
-				!item.getFlag(0x4000000) && Item.isRwBaseQuality(item)) {
-			socks = item.getStat(194) || 0;
-
-			if (typeof item.getStatEx === "function") {
-				socks = Math.max(socks, item.getStatEx(194) || 0);
-			}
-
-			if (socks === 2) {
-				return true;
-			}
+		// Obsolete 2os Strength bases once Purity/Insight exists (or Purity makeable) — sell
+		if (typeof Runewords !== "undefined" && Runewords.isEmptyStrengthBase &&
+				Runewords.isEmptyStrengthBase(item) &&
+				((Runewords.purityBasesDone && Runewords.purityBasesDone()) ||
+					(Runewords.purityOutranksStrength && Runewords.purityOutranksStrength()))) {
+			return true;
 		}
 
 		// Empty 3os Purity bases once worn/Insight, or worse than best banked — sell
 		if (typeof Runewords !== "undefined" && Runewords.isEmptyPurityBase &&
 				Runewords.isEmptyPurityBase(item)) {
-			if ((Runewords.mercHasPurity && Runewords.mercHasPurity()) ||
-					(Runewords.hasCompletedInsight && Runewords.hasCompletedInsight())) {
+			if (Runewords.purityBasesDone && Runewords.purityBasesDone()) {
 				return true;
 			}
 

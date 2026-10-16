@@ -57,8 +57,8 @@ var Skill = {
 		case 245: // Tornado
 		case 370: // Gust (PD2)
 			return 5;
-		case 38: // Charged Bolt — short bolts early; close in until 15
-			return me.charlvl < 15 ? 3 : 6;
+		case 38: // Charged Bolt
+			return 6;
 		case 48: // Nova
 		case 151: // Whirlwind
 			return 7;
@@ -319,11 +319,6 @@ var Skill = {
 		}
 
 		if (!item && skillId !== 0 && this.getManaCost(skillId) > me.mp) {
-			// Maybe delay on ALL skills that we don't have enough mana for?
-			if (Config.AttackSkill.concat([42, 54, 367]).concat(Config.LowManaSkill).indexOf(skillId) > -1) {
-				delay(300);
-			}
-
 			return false;
 		}
 
@@ -331,7 +326,7 @@ var Skill = {
 			throw new Error("Skill.cast: Must supply a skill ID");
 		}
 
-		var i, n, clickType, shift;
+		var i, n, clickType, shift, castT0, started, waitStartMs, waitAnimMs, gap;
 
 		if (hand === undefined) {
 			hand = 0;
@@ -404,8 +399,12 @@ var Skill = {
 				break;
 			}
 
+			castT0 = getTickCount();
+			started = false;
+
 MainLoop:
-			for (n = 0; n < 3; n += 1) {
+			// 2 attempts max — 3×160ms empty waits felt like huge gaps between Fire Bolts
+			for (n = 0; n < 2; n += 1) {
 				if (typeof x === "object") {
 					clickMap(clickType, shift, x);
 				} else {
@@ -422,6 +421,7 @@ MainLoop:
 
 				for (i = 0; i < 8; i += 1) {
 					if (me.attacking) {
+						started = true;
 						break MainLoop;
 					}
 
@@ -429,9 +429,29 @@ MainLoop:
 				}
 			}
 
+			waitStartMs = getTickCount() - castT0;
+
 			// Cap wait — me.attacking stuck true freezes both sorc and necro with no logs
 			for (i = 0; i < 100 && me.attacking; i += 1) {
 				delay(10);
+			}
+
+			waitAnimMs = getTickCount() - castT0 - waitStartMs;
+
+			if (typeof StutterLog !== "undefined") {
+				gap = StutterLog._lastCastEnd ? (castT0 - StutterLog._lastCastEnd) : 0;
+
+				if (!started || waitStartMs >= 100 || gap >= 80) {
+					StutterLog.write("castWait", {
+						skill: skillId,
+						started: started,
+						waitStartMs: waitStartMs,
+						waitAnimMs: waitAnimMs,
+						gapSinceLast: gap
+					});
+				}
+
+				StutterLog._lastCastEnd = getTickCount();
 			}
 		}
 
@@ -681,8 +701,16 @@ var Item = {
 
 		tier = NTIP.GetTier(item);
 
+		if (this.fillsEmptyJewelrySlot(item) && this.isWearableJewelry(item)) {
+			return true;
+		}
+
 		if (tier <= 0) {
 			return false;
+		}
+
+		if (this.isNeededCasterFcrJewelry(item)) {
+			return true;
 		}
 
 		bodyLoc = this.getBodyLoc(item);
@@ -700,6 +728,11 @@ var Item = {
 			}
 
 			if (eq.classid === -1 || tier > eqTier) {
+				return true;
+			}
+
+			if (me.classid === 1 && typeof AutoGearScore !== "undefined" && AutoGearScore.beatsEquipped &&
+					tier < 80 && eqTier < 80 && AutoGearScore.beatsEquipped(item, bodyLoc[i])) {
 				return true;
 			}
 		}
@@ -956,6 +989,238 @@ var Item = {
 		}
 
 		return tier;
+	},
+
+	// PD2 getStat often 0 on inv/shop blues — tooltip still lists the mods.
+	itemDescText: function (item) {
+		var d;
+
+		if (!item) {
+			return "";
+		}
+
+		if (item._agDescText !== undefined) {
+			return item._agDescText;
+		}
+
+		try {
+			d = item.description || "";
+		} catch (eDesc) {
+			d = "";
+		}
+
+		item._agDescText = String(d).replace(/ÿc[0-9a-z;:"+<]/gi, " ");
+
+		return item._agDescText;
+	},
+
+	statFromDesc: function (item, id) {
+		var desc, m, i, pats;
+
+		if (!item || !item.getFlag(0x10)) {
+			return 0;
+		}
+
+		desc = this.itemDescText(item);
+
+		if (!desc) {
+			return 0;
+		}
+
+		switch (id) {
+		case 7: // life
+			pats = [/\+(\d+)\s*(?:to\s+)?(?:life|max(?:imum)?\s*life)/i];
+			break;
+		case 9: // mana
+			pats = [/\+(\d+)\s*(?:to\s+)?mana/i];
+			break;
+		case 16: // enhanced defense
+			pats = [/(\d+)\s*%\s*enhanced\s*defen[cs]e/i];
+			break;
+		case 36: // all resist
+			pats = [/(\d+)\s*%?\s*(?:to\s+)?all\s*(?:resistan(?:ce|ces)|resist)/i];
+			break;
+		case 39: // fire resist
+			pats = [/(\d+)\s*%?\s*(?:to\s+)?fire\s*resist/i];
+			break;
+		case 41: // lightning resist
+			pats = [/(\d+)\s*%?\s*(?:to\s+)?lightning\s*resist/i];
+			break;
+		case 43: // cold resist
+			pats = [/(\d+)\s*%?\s*(?:to\s+)?cold\s*resist/i];
+			break;
+		case 45: // poison resist
+			pats = [/(\d+)\s*%?\s*(?:to\s+)?poison\s*resist/i];
+			break;
+		case 93: // IAS
+			pats = [/(\d+)\s*%\s*(?:increased\s*attack\s*speed|ias)/i];
+			break;
+		case 96: // FRW
+			pats = [/(\d+)\s*%\s*(?:faster\s*run(?:\/walk)?|frw)/i];
+			break;
+		case 99: // FHR
+			pats = [/(\d+)\s*%\s*(?:faster\s*hit\s*recovery|fhr)/i];
+			break;
+		case 105: // FCR
+			pats = [/(\d+)\s*%\s*(?:faster\s*cast\s*rate|fcr)/i];
+			break;
+		default:
+			return 0;
+		}
+
+		for (i = 0; i < pats.length; i += 1) {
+			m = desc.match(pats[i]);
+
+			if (m) {
+				return parseInt(m[1], 10) || 0;
+			}
+		}
+
+		return 0;
+	},
+
+	// Gloves JS floor — nip [ias]/[fcr] formulas often miss on PD2; MiniShop needs GetTier > 0.
+	// Melee/PS: IAS is king (~100 + ias*2). Caster: FCR >> resist; resist still beats whites.
+	// Caps below identity band (Sigon's 165 / Bloodfist ~158 / Magefist nip 40–82).
+	itemStat: function (item, id) {
+		var v;
+
+		if (!item) {
+			return 0;
+		}
+
+		v = item.getStat(id) || 0;
+
+		if (typeof item.getStatEx === "function") {
+			v = Math.max(v, item.getStatEx(id) || 0);
+		}
+
+		if (v <= 0) {
+			v = Math.max(v, this.statFromDesc(item, id) || 0);
+		}
+
+		return v;
+	},
+
+	gloveStat: function (item, id) {
+		return this.itemStat(item, id);
+	},
+
+	isCasterGloveBuild: function () {
+		if (me.classid === 1) {
+			return true;
+		}
+
+		if (me.classid === 2 && !this.isPoisonStrikeBuild()) {
+			return true;
+		}
+
+		return false;
+	},
+
+	gloveTier: function (item) {
+		var ias, fcr, fr, lr, cr, pr, hp, str, dex, res, tier;
+
+		if (!item || item.itemType !== 16) {
+			return 0;
+		}
+
+		// Unid magic+ — bank/ID; small positive so Pickit keeps candidates
+		if (!item.getFlag(0x10) && item.quality > 2) {
+			return 4 + (item.quality === 6 ? 1 : 0);
+		}
+
+		ias = this.gloveStat(item, 93);
+		fcr = this.gloveStat(item, 105);
+		fr = this.gloveStat(item, 39);
+		lr = this.gloveStat(item, 41);
+		cr = this.gloveStat(item, 43);
+		pr = this.gloveStat(item, 45);
+		hp = this.gloveStat(item, 7);
+		str = this.gloveStat(item, 0);
+		dex = this.gloveStat(item, 2);
+		res = fr + lr + cr;
+
+		if (this.isCasterGloveBuild()) {
+			// FCR dominates when present (Magefist / Apprentice +10 / craft)
+			if (fcr >= 10) {
+				tier = 95 + fcr * 2.5 + Math.min(res, 60) / 20 + Math.min(hp, 40) / 30;
+			} else if (res >= 10 || hp >= 10 || pr >= 15) {
+				// Resist/life only — always beat white/superior (tier 1–3), lose to FCR
+				tier = 12 + Math.min(res, 80) * 0.35 + Math.min(hp, 40) * 0.15 + Math.min(pr, 30) * 0.08;
+			} else {
+				tier = 0; // identified junk — don't displace superior
+			}
+
+			if (tier > 155) {
+				tier = 155;
+			}
+
+			return Math.round(tier * 100) / 100;
+		}
+
+		// Melee / poisonstrike — IAS king; FCR does not help
+		if (ias >= 5) {
+			tier = 100 + ias * 2 + Math.min(res, 60) / 40 + Math.min(hp, 40) / 25 +
+				(str + dex) / 30;
+		} else if (res >= 15 || hp >= 10 || (str + dex) >= 10) {
+			tier = 20 + Math.min(res, 60) * 0.4 + Math.min(hp, 30) * 0.2 + (str + dex) / 20;
+		} else {
+			// Identified junk blue/yellow — do not displace superior whites (nip tier 3)
+			tier = 0;
+		}
+
+		// Identified FCR gloves with no IAS — trash for melee (below any real IAS pair)
+		if (fcr > 0 && ias < 5 && item.getFlag(0x10)) {
+			tier = Math.min(tier > 0 ? tier : 25, 25);
+		}
+
+		if (tier > 160) {
+			tier = 160;
+		}
+
+		return Math.round(tier * 100) / 100;
+	},
+
+	// Boots JS floor — same PD2 getStat miss as gloves. Stamina/replenish-only blues stay 0
+	// so they lose to any resist/FRW/FHR/life/ED pair. Cap below unique floors (Hotspur 40).
+	bootTier: function (item) {
+		var frw, fhr, fr, lr, cr, pr, hp, mana, ed, res, tier;
+
+		if (!item || item.itemType !== 15) {
+			return 0;
+		}
+
+		if (!item.getFlag(0x10) && item.quality > 2) {
+			return 4 + (item.quality === 6 ? 1 : 0);
+		}
+
+		frw = this.itemStat(item, 96);
+		fhr = this.itemStat(item, 99);
+		fr = this.itemStat(item, 39);
+		lr = this.itemStat(item, 41);
+		cr = this.itemStat(item, 43);
+		pr = this.itemStat(item, 45);
+		hp = this.itemStat(item, 7);
+		mana = this.itemStat(item, 9);
+		ed = this.itemStat(item, 16);
+		res = fr + lr + cr;
+
+		if (frw >= 10) {
+			tier = 20 + frw * 1.6 + Math.min(res, 80) * 0.35 + Math.min(hp, 40) * 0.2 + fhr * 0.08;
+		} else if (res >= 5 || hp > 0 || fhr > 0 || mana > 0 || ed >= 10) {
+			// 5/5 + 18% ED leather ≈ 15 — beats magic junk floor 2 / heal-stamina
+			tier = 8 + Math.min(res, 80) * 0.45 + hp * 0.22 + mana * 0.15 + fhr * 0.08 +
+				Math.min(ed, 50) * 0.12 + Math.min(pr, 30) * 0.08;
+		} else {
+			tier = 0; // stamina / heal-stamina / defense-only junk
+		}
+
+		if (tier > 28) {
+			tier = 28;
+		}
+
+		return Math.round(tier * 100) / 100;
 	},
 
 	// Lore/Stealth/Spirit identity floors when nip #tier misses (PD2 stat lag / Flag Runeword).
@@ -1749,6 +2014,78 @@ var Item = {
 		return true;
 	},
 
+	// Caster sorc: FCR jewelry we still need on body (empty / resist-only rings or amulet)
+	isNeededCasterFcrJewelry: function (item) {
+		var fcr, worn, loc, i, have;
+
+		if (!item || me.classid !== 1) {
+			return false;
+		}
+
+		if (this.isPoisonStrikeBuild()) {
+			return false;
+		}
+
+		if (item.itemType !== 10 && item.itemType !== 12) {
+			return false;
+		}
+
+		fcr = this.itemStat(item, 105);
+
+		if (fcr < 10) {
+			return false;
+		}
+
+		if (item.itemType === 12) {
+			worn = this.getEquippedItemUnit(2);
+
+			return !worn || this.itemStat(worn, 105) < 10;
+		}
+
+		have = 0;
+
+		for (i = 0; i < 2; i += 1) {
+			loc = i === 0 ? 6 : 7;
+			worn = this.getEquippedItemUnit(loc);
+
+			if (worn && this.itemStat(worn, 105) >= 10) {
+				have += 1;
+			}
+		}
+
+		return have < 2;
+	},
+
+	// Magic+ jewelry that can go on the body (not white junk / melee-FCR trash)
+	isWearableJewelry: function (item) {
+		if (!item || (item.itemType !== 10 && item.itemType !== 12)) {
+			return false;
+		}
+
+		if (this.isBroken(item) || this.isMeleeJunkFcrJewelry(item)) {
+			return false;
+		}
+
+		return item.quality >= 4;
+	},
+
+	// Ring or amulet slot still empty — fill it before selling anything that fits
+	fillsEmptyJewelrySlot: function (item) {
+		if (!item) {
+			return false;
+		}
+
+		if (item.itemType === 12) {
+			return !this.getEquippedItemUnit(2);
+		}
+
+		if (item.itemType === 10) {
+			return !this.getEquippedItemUnit(6) || !this.getEquippedItemUnit(7);
+		}
+
+		return false;
+	},
+
 	getBodyLoc: function (item) {
 		var bodyLoc;
 
@@ -1886,10 +2223,11 @@ var Item = {
 			return false;
 		}
 
-		// Purity preferred — don't protect obsolete 2os Strength spears
-		if (sockets === 2 && (item.itemType === 33 || item.itemType === 34) &&
-				typeof Runewords !== "undefined" && Runewords.purityOutranksStrength &&
-				Runewords.purityOutranksStrength()) {
+		// Purity/Insight preferred — don't protect obsolete 2os Strength spears
+		if (typeof Runewords !== "undefined" && Runewords.isEmptyStrengthBase &&
+				Runewords.isEmptyStrengthBase(item) &&
+				((Runewords.purityBasesDone && Runewords.purityBasesDone()) ||
+					(Runewords.purityOutranksStrength && Runewords.purityOutranksStrength()))) {
 			return false;
 		}
 
@@ -1906,29 +2244,34 @@ var Item = {
 				continue;
 			}
 
-			baseId = rw[1];
-
-			if (typeof baseId === "string") {
-				key = baseId.replace(/\s+/g, "").toLowerCase();
-
-				if (typeof NTIPAliasClassID !== "undefined" && NTIPAliasClassID.hasOwnProperty(key)) {
-					baseId = NTIPAliasClassID[key];
-				} else {
-					continue;
+			// PD2: match item.code to NTIP short code — never LoD classid (spk/365 ≠ PD2 scythe)
+			if (typeof Runewords !== "undefined" && Runewords.baseMatchesConfig) {
+				if (!Runewords.baseMatchesConfig(item, rw[1])) {
+					// Lore: accept any white/grey helm or circlet (PD2 classid / alias miss)
+					if (Runewords.isLoreRecipe && Runewords.isLoreRecipe(rw[0]) &&
+							Runewords.isConfiguredLoreBase && Runewords.isConfiguredLoreBase(item)) {
+						// ok
+					} else if (Runewords.isTreacheryRecipe && Runewords.isTreacheryRecipe(rw[0]) &&
+							Runewords.isConfiguredTreacheryBase && Runewords.isConfiguredTreacheryBase(item)) {
+						// ok — any 3os NonEth armor def>120
+					} else {
+						continue;
+					}
 				}
-			}
+			} else {
+				baseId = rw[1];
 
-			if (item.classid !== baseId) {
-				// Lore: accept any white/grey helm or circlet (PD2 classid / alias miss)
-				if (typeof Runewords !== "undefined" && Runewords.isLoreRecipe &&
-						Runewords.isLoreRecipe(rw[0]) && Runewords.isConfiguredLoreBase &&
-						Runewords.isConfiguredLoreBase(item)) {
-					// ok
-				} else if (typeof Runewords !== "undefined" && Runewords.isTreacheryRecipe &&
-						Runewords.isTreacheryRecipe(rw[0]) && Runewords.isConfiguredTreacheryBase &&
-						Runewords.isConfiguredTreacheryBase(item)) {
-					// ok — any 3os NonEth armor def>120
-				} else {
+				if (typeof baseId === "string") {
+					key = baseId.replace(/\s+/g, "").toLowerCase();
+
+					if (typeof NTIPAliasClassID !== "undefined" && NTIPAliasClassID.hasOwnProperty(key)) {
+						baseId = NTIPAliasClassID[key];
+					} else {
+						continue;
+					}
+				}
+
+				if (item.classid !== baseId) {
 					continue;
 				}
 			}
@@ -2005,8 +2348,7 @@ var Item = {
 			// Purity: don't protect empty 3os once worn/Insight, or worse than best banked
 			if (typeof Runewords !== "undefined" && Runewords.isPurityRecipe &&
 					Runewords.isPurityRecipe(rw[0])) {
-				if ((Runewords.mercHasPurity && Runewords.mercHasPurity()) ||
-						(Runewords.hasCompletedInsight && Runewords.hasCompletedInsight())) {
+				if (Runewords.purityBasesDone && Runewords.purityBasesDone()) {
 					continue;
 				}
 
@@ -2110,6 +2452,12 @@ var Item = {
 			return false;
 		}
 
+		// Empty neck / ring — wear any magic+ jewelry (don't vendor while the slot is bare)
+		if (this.fillsEmptyJewelrySlot(item) && this.isWearableJewelry(item) &&
+				(this.canEquip(item) || !item.getFlag(0x10))) {
+			return true;
+		}
+
 		// Sorc: allow orb to replace 2H staff when orb has real mods (same-stat orb > staff in nips)
 		if (tier > 0 && me.classid === 1 && this.isOrbItem(item) && this.hasTwoHandedEquipped()) {
 			eq = this.getEquippedItem(4);
@@ -2153,6 +2501,11 @@ var Item = {
 					eqTier = 0;
 				}
 
+				// First FCR ring/amulet while that slot has none — always an upgrade
+				if (this.isNeededCasterFcrJewelry(item) && (this.canEquip(item) || !item.getFlag(0x10))) {
+					return true;
+				}
+
 				// Phase 3: sorc context compare (FCR BP / res fill) when scorer is loaded
 				if (me.classid === 1 && typeof AutoGearScore !== "undefined" && AutoGearScore.beatsEquipped) {
 					// Identity keepers (Lore 80 / Stealth 85 / Spirit 100 / …) — raw tier, not scorer
@@ -2165,6 +2518,12 @@ var Item = {
 					}
 
 					if (AutoGearScore.beatsEquipped(item, bodyLoc[i]) && (this.canEquip(item) || !item.getFlag(0x10))) {
+						return true;
+					}
+
+					// Scorer can miss PD2 stats (heal-stamina 0.5 vs unread 5/5 res 0.5).
+					// nip/JS GetTier (bootTier/gloveTier) still says upgrade — keep it.
+					if (tier > eqTier && (this.canEquip(item) || !item.getFlag(0x10))) {
 						return true;
 					}
 
@@ -2187,13 +2546,15 @@ var Item = {
 
 	// MiniShopBot: don't spend gold on defense-formula starters (1.xxx) that only beat equipped by +1 AC
 	worthShopBuy: function (item) {
-		var i, tier, bodyLoc, eq, eqTier;
+		var i, tier, bodyLoc, eq, eqTier, ret, passedEquip;
 
 		if (!Config.AutoEquip || !item) {
 			return false;
 		}
 
-		if (!this.autoEquipCheck(item)) {
+		passedEquip = this.autoEquipCheck(item);
+
+		if (!passedEquip) {
 			return false;
 		}
 
@@ -2203,6 +2564,13 @@ var Item = {
 		if (!bodyLoc || tier <= 0) {
 			return false;
 		}
+
+		// Gloves/boots: autoEquipCheck already confirmed upgrade — buy even if both sit on quality floor 2
+		if (item.itemType === 16 || item.itemType === 15) {
+			return true;
+		}
+
+		ret = false;
 
 		for (i = 0; i < bodyLoc.length; i += 1) {
 			eq = this.getEquippedItem(bodyLoc[i]);
@@ -2214,7 +2582,8 @@ var Item = {
 
 			// Empty slot — buy to fill
 			if (eq.classid === -1) {
-				return true;
+				ret = true;
+				break;
 			}
 
 			if (tier <= eqTier) {
@@ -2226,10 +2595,11 @@ var Item = {
 				continue;
 			}
 
-			return true;
+			ret = true;
+			break;
 		}
 
-		return false;
+		return ret;
 	},
 
 	// returns true if the item should be kept+logged, false if not
@@ -2238,7 +2608,7 @@ var Item = {
 			return true;
 		}
 
-		var i, j, tier, bodyLoc, tome, gid, eqTier, orbSwitch, worn, locs,
+		var i, j, tier, bodyLoc, tome, gid, eqTier, orbSwitch, scoreUpgrade, worn, locs,
 			items;
 
 		// Ethereal gear can't be NPC-repaired — pull broken eth off the body so we can replace it
@@ -2351,7 +2721,8 @@ var Item = {
 				print("ÿc8AutoEquipÿc0 :: skip broken (0 dur) " + (items[i].name || items[i].classid));
 				items.splice(i, 1);
 				i -= 1;
-			} else if (NTIP.GetTier(items[i]) === 0) {
+			} else if (NTIP.GetTier(items[i]) === 0 &&
+					!(this.fillsEmptyJewelrySlot(items[i]) && this.isWearableJewelry(items[i]))) {
 				items.splice(i, 1);
 				i -= 1;
 			}
@@ -2363,7 +2734,8 @@ var Item = {
 			tier = NTIP.GetTier(items[0]);
 			bodyLoc = this.getBodyLoc(items[0]);
 
-			if (tier > 0 && bodyLoc) {
+			if (bodyLoc && (tier > 0 ||
+					(this.fillsEmptyJewelrySlot(items[0]) && this.isWearableJewelry(items[0])))) {
 				for (j = 0; j < bodyLoc.length; j += 1) {
 					if (this.isShieldItem(items[0]) && !this.wantsShieldSlot()) {
 						if (me.classid === 1) {
@@ -2401,7 +2773,25 @@ var Item = {
 					orbSwitch = me.classid === 1 && this.isOrbItem(items[0]) && this.hasTwoHandedEquipped() &&
 						tier >= 10 && eqTier < 45;
 
-					if ([3, 7].indexOf(items[0].location) > -1 && (tier > eqTier || orbSwitch) && this.getEquippedItem(bodyLoc[j]).classid !== 174) {
+					scoreUpgrade = false;
+
+					if (me.classid === 1 && typeof AutoGearScore !== "undefined" && AutoGearScore.beatsEquipped &&
+							tier < 80 && eqTier < 80) {
+						scoreUpgrade = AutoGearScore.beatsEquipped(items[0], bodyLoc[j]);
+					}
+
+					// Fill a 0-FCR ring/amulet slot — don't swap off a ring that already has FCR
+					if (this.isNeededCasterFcrJewelry(items[0])) {
+						worn = this.getEquippedItemUnit(bodyLoc[j]);
+
+						if (worn && this.itemStat(worn, 105) >= 10) {
+							continue;
+						}
+
+						scoreUpgrade = true;
+					}
+
+					if ([3, 7].indexOf(items[0].location) > -1 && (tier > eqTier || orbSwitch || scoreUpgrade) && this.getEquippedItem(bodyLoc[j]).classid !== 174) {
 						if (!items[0].getFlag(0x10)) { // unid
 							tome = me.findItem("ibk", 0, 3) || me.findItem(536, 0, 3);
 
@@ -2427,10 +2817,13 @@ var Item = {
 						worn = this.getEquippedItemUnit(bodyLoc[j]);
 
 						if (this.equip(items[0], bodyLoc[j], {
-								why: orbSwitch ? "orb replaces 2H staff" : (eqTier <= 0 ? "empty slot / higher tier" : "higher tier on tierlist"),
+								why: orbSwitch ? "orb replaces 2H staff" : (eqTier <= 0 ? "empty slot / higher tier" :
+									(scoreUpgrade && !(tier > eqTier) ? "AutoGearScore upgrade" : "higher tier on tierlist")),
 								reason: orbSwitch ?
 									("orb switch: tier " + tier + " vs staff tier " + eqTier) :
-									("higher tier on tierlist (" + tier + " > " + eqTier + ")"),
+									(scoreUpgrade && !(tier > eqTier) ?
+										("AutoGearScore beats equipped (tier " + tier + " vs " + eqTier + ")") :
+										("higher tier on tierlist (" + tier + " > " + eqTier + ")")),
 								tier: tier,
 								replacedTier: eqTier,
 								replacedName: worn ? String(worn.name || worn.classid).replace(/ÿc[0-9a-z]/gi, "") : ""
@@ -4916,6 +5309,219 @@ var Misc = {
 
 	// gid -> times used this game (cap so pathing doesn't spam the same well)
 	_wellUseCount: {},
+
+	/**
+	 * Walker Phase 2: click an inactive Config.ScanShrines shrine already within range.
+	 * No 15-yard list build, no moveTo detours.
+	 */
+	grabNearShrine: function (range) {
+		var shrine, i, best, bestPri, pri;
+
+		if (!Config.ScanShrines || !Config.ScanShrines.length || me.inTown) {
+			return false;
+		}
+
+		if (!range) {
+			range = 5;
+		}
+
+		best = null;
+		bestPri = 999;
+		shrine = getUnit(2, "shrine");
+
+		if (!shrine) {
+			return false;
+		}
+
+		do {
+			if (shrine.mode !== 0 || getDistance(me, shrine) > range) {
+				continue;
+			}
+
+			if (checkCollision(me, shrine, 0x4)) {
+				continue;
+			}
+
+			pri = Config.ScanShrines.indexOf(shrine.objtype);
+
+			if (pri < 0) {
+				continue;
+			}
+
+			if (pri < bestPri) {
+				bestPri = pri;
+				best = copyUnit(shrine);
+			}
+		} while (shrine.getNext());
+
+		if (!best) {
+			return false;
+		}
+
+		// Only click — never path. getShrine would moveTo if >4.
+		if (getDistance(me, best) > 4) {
+			return false;
+		}
+
+		if (typeof StutterLog !== "undefined") {
+			StutterLog.write("walker.nearShrine", {type: best.objtype, d: Math.round(getDistance(me, best))});
+		}
+
+		for (i = 0; i < 3; i += 1) {
+			Misc.click(0, 0, best);
+			delay(me.ping + 50);
+
+			if (best.mode) {
+				print("ÿc2Shrineÿc0 :: near-grab type " + best.objtype);
+				return true;
+			}
+
+			delay(40);
+		}
+
+		return !!best.mode;
+	},
+
+	/**
+	 * Walker Phase 2: drink a well already within click range (no moveTo).
+	 */
+	grabNearWell: function (range) {
+		var hpPct, mpPct, stamPct, needHP, needMP, needStam,
+			unit, name, wellIds, used, maxClicks;
+
+		if (Config.UseWells === false || me.inTown) {
+			return false;
+		}
+
+		if (!range) {
+			range = 5;
+		}
+
+		hpPct = me.hpmax > 0 ? (me.hp * 100 / me.hpmax) : 100;
+		mpPct = me.mpmax > 0 ? (me.mp * 100 / me.mpmax) : 100;
+		stamPct = me.staminamax > 0 ? (me.stamina * 100 / me.staminamax) : 100;
+		needHP = hpPct <= (Config.UseWellHP || 65);
+		needMP = mpPct <= (Config.UseWellMP || 40);
+		needStam = stamPct <= 35;
+
+		if (!needHP && !needMP && !needStam) {
+			return false;
+		}
+
+		wellIds = [84, 111, 113, 115, 118, 130, 132, 137, 138, 322, 426, 493];
+		maxClicks = 2;
+		unit = getUnit(2);
+
+		if (!unit) {
+			return false;
+		}
+
+		do {
+			if (getDistance(me, unit) > Math.min(range, 4)) {
+				continue;
+			}
+
+			if (unit.mode > 2) {
+				continue;
+			}
+
+			name = (unit.name || "").toLowerCase();
+
+			if (wellIds.indexOf(unit.classid) === -1 &&
+					name.indexOf("well") === -1 &&
+					name.indexOf("fountain") === -1) {
+				continue;
+			}
+
+			used = this._wellUseCount[unit.gid] || 0;
+
+			if (used >= maxClicks) {
+				continue;
+			}
+
+			if (checkCollision(me, unit, 0x4)) {
+				continue;
+			}
+
+			Misc.click(0, 0, unit);
+			delay(me.ping + 150);
+			this._wellUseCount[unit.gid] = used + 1;
+
+			if (typeof StutterLog !== "undefined") {
+				StutterLog.write("walker.nearWell", {d: Math.round(getDistance(me, unit))});
+			}
+
+			print("ÿc2Wellÿc0 :: near-grab (hp " + Math.floor(hpPct) + "% / mp " + Math.floor(mpPct) + "%)");
+
+			return true;
+		} while (unit.getNext());
+
+		return false;
+	},
+
+	/**
+	 * Walker Phase 2: pick gold / pots already within range (no hike).
+	 */
+	grabNearEssentials: function (range) {
+		var item, picked, code, t;
+
+		if (me.inTown || me.dead) {
+			return false;
+		}
+
+		if (typeof Pickit !== "undefined" && Pickit.unsafeToPick && Pickit.unsafeToPick()) {
+			return false;
+		}
+
+		if (!range) {
+			range = 5;
+		}
+
+		picked = false;
+		item = getUnit(4);
+
+		if (!item) {
+			return false;
+		}
+
+		do {
+			if (item.mode !== 3 && item.mode !== 5) {
+				continue;
+			}
+
+			if (getDistance(me, item) > range) {
+				continue;
+			}
+
+			t = item.itemType;
+			code = item.code ? String(item.code).toLowerCase() : "";
+
+			// Gold / hp / mp / rejuv / stamina only
+			if (!(Pickit.isGoldPile(item) || Pickit.isPotion(item) || Pickit.isRejuv(item) ||
+					(t >= 76 && t <= 79) || code === "vps" ||
+					/^hp[1-5]$/.test(code) || /^mp[1-5]$/.test(code))) {
+				continue;
+			}
+
+			if (Pickit.isGoldPile(item)) {
+				if (Pickit.goldPileAmount(item) < Pickit.minGoldPile()) {
+					continue;
+				}
+			} else if (!Storage.Inventory.CanFit(item) && !Pickit.canPick(item)) {
+				continue;
+			}
+
+			if (checkCollision(me, item, 0x1)) {
+				continue;
+			}
+
+			if (Pickit.pickItem(item)) {
+				picked = true;
+			}
+		} while (item.getNext());
+
+		return picked;
+	},
 
 	// Click nearby wells when low on life/mana/stamina (wells are not shrines)
 	scanWells: function (range) {

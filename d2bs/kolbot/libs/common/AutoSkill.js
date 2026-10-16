@@ -6,6 +6,9 @@
 *
 *				Calibrate coords: pause bot → open skill tree → hover → F9
 *				(F9 lives in tools/ToolsThread.js case 120 — NOT here).
+*
+*				Logging: quiet by default (spend OK / real errors).
+*				Set Config.AutoSkill.Verbose = true for click/cursor/skip chatter.
 */
 
 var AutoSkill = new function () {
@@ -13,12 +16,38 @@ var AutoSkill = new function () {
 	this.save = 0;
 	this.uiClick = null; // { openButton, tabs, skills }
 	this._lastTab = null;
+	this._lastStatus = "";
+	this._lastStatusTick = 0;
+	this._spentThisRun = 0;
 
+	this.isVerbose = function () {
+		return !!(Config.AutoSkill && Config.AutoSkill.Verbose);
+	};
+
+	/** Important line — print + overhead. Dedup identical msg within 4s. */
 	this.status = function (msg) {
+		var now = getTickCount();
+
+		if (msg === this._lastStatus && now - this._lastStatusTick < 4000) {
+			return;
+		}
+
+		this._lastStatus = msg;
+		this._lastStatusTick = now;
 		print("ÿc2AutoSkillÿc0 :: ÿc8" + msg + "ÿc0");
+
 		try {
 			me.overhead(msg);
 		} catch (e) {}
+	};
+
+	/** Verbose-only chatter (no overhead, no dedup). */
+	this.debug = function (msg) {
+		if (!this.isVerbose()) {
+			return;
+		}
+
+		print("ÿc2AutoSkillÿc0 :: ÿc8" + msg + "ÿc0");
 	};
 
 	this.hasSendClick = function () {
@@ -44,7 +73,7 @@ var AutoSkill = new function () {
 
 		for (i = 0; i < flags.length; i += 1) {
 			if (getUIFlag(flags[i])) {
-				this.status("UI flag 0x" + flags[i].toString(16) + " still open — cancel");
+				this.debug("UI flag 0x" + flags[i].toString(16) + " still open — cancel");
 				try {
 					me.cancel();
 				} catch (e2) {}
@@ -133,7 +162,7 @@ var AutoSkill = new function () {
 
 		for (i = 0; i < inputArray.length; i += 1) {
 			if (inputArray[i][1] > 20) {
-				print("AutoSkill: Skill build index " + i + " capped to 20 (was " + inputArray[i][1] + ")");
+				print("ÿc1AutoSkillÿc0 :: build index " + i + " capped to 20 (was " + inputArray[i][1] + ")");
 				inputArray[i][1] = 20;
 			}
 
@@ -148,16 +177,16 @@ var AutoSkill = new function () {
 
 				if (hard < inputArray[i - 1][1]) {
 					if (prevMin && me.charlvl < prevMin) {
-						this.status("Skill " + inputArray[i - 1][0] + " delayed until lvl " + prevMin + " — trying next");
+						this.debug("Skill " + inputArray[i - 1][0] + " delayed until lvl " + prevMin + " — trying next");
 					} else if (this.skillCheck(inputArray[i - 1][0], inputArray[i - 1][1])) {
 						if (!this.hasSkillCoords(inputArray[i - 1][0])) {
-							this.status("Need coords for skill " + inputArray[i - 1][0] + " (previous satisfy) — F9 calibrate");
+							this.status("Need coords for skill " + inputArray[i - 1][0] + " — F9 calibrate");
 							return false;
 						}
 
 						return inputArray[i - 1][0];
 					} else {
-						this.status("Skill " + inputArray[i - 1][0] + " not available yet (hard=" + hard + " charlvl=" + me.charlvl + ") — trying next");
+						this.debug("Skill " + inputArray[i - 1][0] + " not available yet (hard=" + hard + " charlvl=" + me.charlvl + ")");
 					}
 				}
 			}
@@ -184,11 +213,11 @@ var AutoSkill = new function () {
 		}
 
 		if (dumpId && this.skillCheck(dumpId, 20) && this.hasSkillCoords(dumpId)) {
-			this.status("Dump → skill " + dumpId + " (until next Build skill unlocks)");
+			this.debug("Dump → skill " + dumpId);
 			return dumpId;
 		}
 
-		this.status("No skill in Build needs a point right now (or all missing coords)");
+		this.debug("No skill in Build needs a point right now");
 		return false;
 	};
 
@@ -216,7 +245,7 @@ var AutoSkill = new function () {
 			before = [-1, -1];
 		}
 
-		this.status("sendClick(" + x + "," + y + ")  cursor was " + before[0] + "," + before[1]);
+		this.debug("sendClick(" + x + "," + y + ")  cursor was " + before[0] + "," + before[1]);
 		sendClick(x, y);
 		delay(afterMs + me.ping);
 
@@ -226,7 +255,7 @@ var AutoSkill = new function () {
 			after = [-1, -1];
 		}
 
-		this.status("cursor now " + after[0] + "," + after[1]);
+		this.debug("cursor now " + after[0] + "," + after[1]);
 		me.blockMouse = false;
 		return true;
 	};
@@ -236,7 +265,7 @@ var AutoSkill = new function () {
 			configured = (this.uiClick && this.uiClick.openButton) ? [this.uiClick.openButton] : [];
 
 		if (getUIFlag(0x04)) {
-			this.status("Skill tree already open");
+			this.debug("Skill tree already open");
 			return true;
 		}
 
@@ -253,17 +282,17 @@ var AutoSkill = new function () {
 
 		for (i = 0; i < candidates.length; i += 1) {
 			btn = candidates[i];
-			this.status("Click New Skill (open tree) @ " + btn[0] + "," + btn[1]);
+			this.debug("Click New Skill (open tree) @ " + btn[0] + "," + btn[1]);
 			this.screenClick(btn[0], btn[1], 400); // available-skill button → 400ms
 
 			if (getUIFlag(0x04)) {
-				this.status("Skill tree open");
+				this.debug("Skill tree open");
 				this._lastTab = null;
 				return true;
 			}
 		}
 
-		this.status("Skill tree still closed — hover NEW SKILL button, F9 → openButton");
+		this.debug("Skill tree still closed after open click");
 		return false;
 	};
 
@@ -300,9 +329,13 @@ var AutoSkill = new function () {
 			return false;
 		}
 
+		if (this._lastTab === tabName && getUIFlag(0x04)) {
+			return true;
+		}
+
 		pt = [tabs[tabName][0], tabs[tabName][1]];
 
-		this.status("Click spell tab: " + tabName + " @ " + pt[0] + "," + pt[1]);
+		this.debug("Click spell tab: " + tabName + " @ " + pt[0] + "," + pt[1]);
 		this.screenClick(pt[0], pt[1], 400); // tab → 400ms
 		this._lastTab = tabName;
 		return true;
@@ -319,14 +352,12 @@ var AutoSkill = new function () {
 			return false;
 		}
 
-		this.status("PLAN → spend 1 pt on skill " + skillId +
-			" | tab=" + entry.tab +
-			" | icon=[" + entry.x + "," + entry.y + "]" +
-			" | pts=" + beforePts + " hard=" + beforeHard);
-		this.status("Steps: 1) New Skill (400ms) → 2) tab " + entry.tab + " (400ms) → 3) skill icon (400ms)");
+		this.debug("PLAN → skill " + skillId + " tab=" + entry.tab +
+			" icon=[" + entry.x + "," + entry.y + "] pts=" + beforePts + " hard=" + beforeHard);
 
 		if (!this.openSkillTree()) {
-			this.status("Could not open skill tree");
+			// Transient: first open click often fails; allocate() retries — only complain when Verbose
+			this.debug("Could not open skill tree");
 			return false;
 		}
 
@@ -336,7 +367,10 @@ var AutoSkill = new function () {
 		}
 
 		if (!this.clickTab(entry.tab)) {
-			this.closeSkillTree();
+			// Keep tree open if points remain so the next cycle can retry without reopen
+			if (me.getStat(5) <= this.save) {
+				this.closeSkillTree();
+			}
 			return false;
 		}
 
@@ -345,13 +379,16 @@ var AutoSkill = new function () {
 			return false;
 		}
 
-		this.status("Click skill icon " + skillId + " @ " + entry.x + "," + entry.y);
+		this.debug("Click skill icon " + skillId + " @ " + entry.x + "," + entry.y);
 		this.screenClick(entry.x, entry.y, 400); // skill → 400ms
 
 		for (wait = 0; wait < 20; wait += 1) {
 			if (me.getStat(5) < beforePts || (me.getSkill(skillId, 0) || 0) > beforeHard) {
-				this.status("Spent OK → skill " + skillId + " hard=" + (me.getSkill(skillId, 0) || 0));
+				this.status("spent skill " + skillId + " → hard=" + (me.getSkill(skillId, 0) || 0) +
+					" (pts left=" + me.getStat(5) + ")");
+				this._spentThisRun += 1;
 				delay(100);
+				// Only close when no more points to spend — keep tree open between cycles
 				if (me.getStat(5) <= this.save) {
 					this.closeSkillTree();
 				}
@@ -361,7 +398,9 @@ var AutoSkill = new function () {
 		}
 
 		this.status("UI click did not spend (skill " + skillId + ") — F9 recalibrate icon");
-		this.closeSkillTree();
+		if (me.getStat(5) <= this.save) {
+			this.closeSkillTree();
+		}
 		delay(100);
 		return false;
 	};
@@ -373,7 +412,10 @@ var AutoSkill = new function () {
 
 		this.remaining = me.getStat(5);
 
-		this.clearBlockingUI();
+		// Don't cancel/close an already-open skill tree between spends
+		if (!getUIFlag(0x04)) {
+			this.clearBlockingUI();
+		}
 
 		if (getUIFlag(0x17) || getUIFlag(0x01) || getUIFlag(0x19)) {
 			this.status("Blocked by open UI (trade/inv/other) — cannot spend yet");
@@ -388,11 +430,11 @@ var AutoSkill = new function () {
 
 		// Hard stop: never click a skill the character cannot learn yet
 		if (!this.skillCheck(addTo, (me.getSkill(addTo, 0) || 0) + 1)) {
-			this.status("Refuse skill " + addTo + " — charlvl " + me.charlvl + " too low (skillCheck)");
+			this.status("Refuse skill " + addTo + " — charlvl " + me.charlvl + " too low");
 			return false;
 		}
 
-		this.status("Chosen skill to allocate: " + addTo + " (remaining pts=" + this.remaining + ")");
+		this.debug("Chosen skill " + addTo + " (remaining pts=" + this.remaining + ")");
 		delay(100);
 
 		ok = this.spendViaUIClick(addTo);
@@ -412,6 +454,8 @@ var AutoSkill = new function () {
 	this.count = 0;
 
 	this.init = function (skillBuildOrder, save) {
+		var startPts;
+
 		if (save === undefined) {
 			save = 0;
 		}
@@ -420,6 +464,9 @@ var AutoSkill = new function () {
 		this.save = save;
 		this.count = 0;
 		this._lastTab = null;
+		this._spentThisRun = 0;
+		this._lastStatus = "";
+		this._lastStatusTick = 0;
 
 		if (Config.AutoSkill) {
 			this.uiClick = Config.AutoSkill.UIClick || null;
@@ -439,16 +486,17 @@ var AutoSkill = new function () {
 		}
 
 		if (!this.skillBuildOrder || !this.skillBuildOrder.length) {
-			print("AutoSkill: No build array specified");
+			print("ÿc1AutoSkillÿc0 :: No build array specified");
 			return false;
 		}
 
-		print("ÿc2AutoSkillÿc0 :: UI-click spend only | points=" + me.getStat(5) + " save=" + this.save);
+		startPts = me.getStat(5);
 
-		if (me.getStat(5) <= this.save) {
-			print("ÿc2AutoSkillÿc0 :: nothing to spend");
-			return true;
+		if (startPts <= this.save) {
+			return true; // silent — no points (avoids town-chore spam)
 		}
+
+		print("ÿc2AutoSkillÿc0 :: spending " + startPts + " pt(s) (save=" + this.save + ")");
 
 		this.clearBlockingUI();
 
@@ -471,7 +519,23 @@ var AutoSkill = new function () {
 		}
 
 		this.closeSkillTree();
-		print("AutoSkill: Finished allocating skill points");
+
+		if (this._spentThisRun > 0) {
+			print("ÿc2AutoSkillÿc0 :: done — spent " + this._spentThisRun + " pt(s), left=" + me.getStat(5));
+		}
+
 		return true;
 	};
+};
+
+};
+};
+};
+};
+};
+};
+};
+};
+};
+};
 };

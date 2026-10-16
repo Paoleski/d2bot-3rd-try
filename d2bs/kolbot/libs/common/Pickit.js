@@ -66,23 +66,53 @@ var Pickit = {
 	},
 
 	// Skip tiny piles as you level (TK was vacuuming filter-hidden gold after every kill).
-	// lvl <10: any; 10→50, 20→200, 30→450, 40→800, cap 2000. Config.MinGoldPile >=0 overrides.
+	// Never pick piles ≤100. Scale: 15→250, 20→400, 30→700, 40→1000, cap 2000.
+	// Config.MinGoldPile >=0 overrides (still floored at 101 so ≤100 never picks).
 	minGoldPile: function () {
-		var lvl, cfg;
+		var lvl, cfg, min;
 
 		cfg = (typeof Config !== "undefined") ? Config.MinGoldPile : undefined;
 
 		if (cfg !== undefined && cfg !== null && cfg >= 0) {
-			return cfg;
+			return Math.max(101, cfg);
 		}
 
 		lvl = me.charlvl || 1;
+		min = 30 * lvl - 200; // 15→250, 20→400, 30→700, 40→1000
 
-		if (lvl < 10) {
-			return 1;
+		return Math.max(101, Math.min(2000, min));
+	},
+
+	// Only pick gold if it's within ~GoldPickSteps walk nodes (default 4) — never hike for piles.
+	goldInWalkRange: function (unit) {
+		var path, dist, maxSteps, nodeDist;
+
+		if (!unit || unit.x === undefined) {
+			return false;
 		}
 
-		return Math.min(2000, Math.floor(lvl * lvl / 2));
+		maxSteps = (typeof Config !== "undefined" && Config.GoldPickSteps > 0) ? Config.GoldPickSteps : 4;
+		dist = getDistance(me, unit);
+
+		// Already in click range
+		if (dist <= 4) {
+			return true;
+		}
+
+		// Farther than maxSteps of ~5-yard walk nodes — skip without pathing
+		if (dist > maxSteps * 6) {
+			return false;
+		}
+
+		nodeDist = 5;
+		path = getPath(me.area, unit.x, unit.y, me.x, me.y, 0, nodeDist);
+
+		if (!path || !path.length) {
+			return dist <= 4;
+		}
+
+		// path[0] is near the pile; length ≈ walk clicks along the route
+		return path.length <= maxSteps + 1;
 	},
 
 	// PD2: prefer code/classid. Never trust itemType 75 alone — that's also LoD circlets (ci0–ci3).
@@ -148,22 +178,23 @@ var Pickit = {
 			return true;
 		}
 
-		// NTItemAlias types: puzzlebox=127, puzzlepiece=206, malus=210 (not classid 127 / dacian falx)
-		if (unit.itemType === 127 || unit.itemType === 206 || unit.itemType === 210) {
+		// NTItemAlias types: puzzlebox=127, puzzlepiece=206, malus=210, demonic cube=120
+		if (unit.itemType === 127 || unit.itemType === 206 || unit.itemType === 210 ||
+				unit.itemType === 120) {
 			return true;
 		}
 
 		cid = unit.classid;
 
-		// Current MPQ: lbox=687, lpp=781, lmal=785, wss=677; older labs used lbox=684
-		if (cid === 687 || cid === 684 || cid === 781 || cid === 785 || cid === 677) {
+		// Current MPQ: lbox=687, lpp=781, lmal=785, wss=677, imrn/demoniccube=679; older lbox=684
+		if (cid === 687 || cid === 684 || cid === 781 || cid === 785 || cid === 677 || cid === 679) {
 			return true;
 		}
 
 		name = unit.name ? String(unit.name).toLowerCase().replace(/ÿc[0-9a-z]/gi, "") : "";
 
 		if (name.indexOf("puzzlebox") > -1 || name.indexOf("puzzlepiece") > -1 ||
-				name.indexOf("puzzle piece") > -1 ||
+				name.indexOf("puzzle piece") > -1 || name.indexOf("demonic cube") > -1 ||
 				(name.indexOf("larzuk") > -1 && name.indexOf("malus") > -1)) {
 			return true;
 		}
@@ -183,7 +214,7 @@ var Pickit = {
 
 		// Gold BEFORE nip — PD2 piles often share classid 538 with vip (Quest.nip false-hit)
 		if (this.isGoldPile(unit)) {
-			if (this.goldPileAmount(unit) < this.minGoldPile()) {
+			if (this.goldPileAmount(unit) < this.minGoldPile() || !this.goldInWalkRange(unit)) {
 				return {
 					result: 0,
 					line: null
@@ -351,30 +382,21 @@ var Pickit = {
 			};
 		}
 
-		// Strength 2os spear/polearm: ignore nip keep once Purity is worn/makeable (or Insight done)
+		// Strength 2os spear/polearm: ignore nip keep once Purity/Insight exists (or Purity makeable)
 		if (rval.result === 1 && typeof Runewords !== "undefined" &&
-				Runewords.purityOutranksStrength && Runewords.purityOutranksStrength() &&
-				(unit.itemType === 33 || unit.itemType === 34) && unit.quality <= 3 &&
-				!unit.getItem() && !unit.getFlag(0x4000000)) {
-			n = unit.getStat(194) || 0;
-
-			if (typeof unit.getStatEx === "function") {
-				n = Math.max(n, unit.getStatEx(194) || 0);
-			}
-
-			if (n === 2) {
-				rval = {
-					result: 0,
-					line: null
-				};
-			}
+				Runewords.isEmptyStrengthBase && Runewords.isEmptyStrengthBase(unit) &&
+				((Runewords.purityBasesDone && Runewords.purityBasesDone()) ||
+					(Runewords.purityOutranksStrength && Runewords.purityOutranksStrength()))) {
+			rval = {
+				result: 0,
+				line: null
+			};
 		}
 
 		// Purity 3os spear/polearm: ignore nip if Purity/Insight done, or worse than banked
 		if (rval.result === 1 && typeof Runewords !== "undefined" &&
 				Runewords.isEmptyPurityBase && Runewords.isEmptyPurityBase(unit)) {
-			if ((Runewords.mercHasPurity && Runewords.mercHasPurity()) ||
-					(Runewords.hasCompletedInsight && Runewords.hasCompletedInsight()) ||
+			if ((Runewords.purityBasesDone && Runewords.purityBasesDone()) ||
 					(Runewords.wantPurityBase && !Runewords.wantPurityBase(unit) &&
 						Runewords.getBestEmptyPurityBase && Runewords.getBestEmptyPurityBase())) {
 				rval = {
@@ -480,9 +502,9 @@ var Pickit = {
 			};
 		}
 
-		// Gold piles — size gated in checkItem / canPick (not LowGold white/blue vacuum)
+		// Gold piles — size + walk-range gated in checkItem / canPick (not LowGold white/blue vacuum)
 		if (rval.result === 0 && this.isGoldPile(unit)) {
-			if (this.goldPileAmount(unit) < this.minGoldPile()) {
+			if (this.goldPileAmount(unit) < this.minGoldPile() || !this.goldInWalkRange(unit)) {
 				return {
 					result: 0,
 					line: null
@@ -621,9 +643,9 @@ var Pickit = {
 			return false;
 		}
 
-		// Potions always — even if nip/check returned 0 (PD2 classid shifts break nip / old isc-id collision)
+		// Potions: belt/buffer only — never force-keep when canPick would reject
 		if (this.isPotion(unit) || this.isRejuv(unit)) {
-			return true;
+			return this.canPick(unit);
 		}
 
 		// Jewels always — stash/cube/sell in town
@@ -1164,6 +1186,26 @@ var Pickit = {
 		return n;
 	},
 
+	/**
+	 * True when melee threats are on us — do not loot / walk to drops (fight first).
+	 * Uses Attack.clearPeelRange so walkers and tele chars share the same peel radius.
+	 */
+	unsafeToPick: function () {
+		var peel;
+
+		if (me.inTown || me.dead) {
+			return false;
+		}
+
+		if (typeof Attack === "undefined" || typeof Attack.findNearestMonster !== "function") {
+			return false;
+		}
+
+		peel = (typeof Attack.clearPeelRange === "function") ? Attack.clearPeelRange() : 8;
+
+		return !!Attack.findNearestMonster(peel);
+	},
+
 	pickItems: function () {
 		var status, item, canFit,
 			needMule = false,
@@ -1173,6 +1215,10 @@ var Pickit = {
 		// do NOT clearBelt here (full storage walk + delays after every Attack.clear)
 
 		if (me.dead) {
+			return false;
+		}
+
+		if (this.unsafeToPick()) {
 			return false;
 		}
 
@@ -1192,6 +1238,11 @@ var Pickit = {
 
 		while (pickList.length > 0) {
 			if (me.dead) {
+				return false;
+			}
+
+			// Pack closed in mid-loot — abort; travel/clear will peel then pick again
+			if (this.unsafeToPick()) {
 				return false;
 			}
 
@@ -1386,8 +1437,8 @@ var Pickit = {
 			return false;
 		}
 
-		// Tiny gold piles — don't TK (often filter-hidden; looks like casting at nothing)
-		if (this.isGoldPile(unit) && this.goldPileAmount(unit) < this.minGoldPile()) {
+		// Tiny / far gold piles — don't TK (filter-hidden or out of walk range)
+		if (this.isGoldPile(unit) && (this.goldPileAmount(unit) < this.minGoldPile() || !this.goldInWalkRange(unit))) {
 			return false;
 		}
 
@@ -1414,6 +1465,10 @@ var Pickit = {
 
 	pickItem: function (unit, status, keptLine) {
 		if (!unit) {
+			return false;
+		}
+
+		if (this.unsafeToPick()) {
 			return false;
 		}
 
@@ -1468,6 +1523,10 @@ MainLoop:
 				return false;
 			}
 
+			if (this.unsafeToPick()) {
+				return false;
+			}
+
 			while (!me.idle) {
 				delay(40);
 			}
@@ -1484,6 +1543,10 @@ MainLoop:
 				}
 			} else {
 				if (getDistance(me, item) > (Config.FastPick === 2 && i < 1 ? 6 : 4) || checkCollision(me, item, 0x1)) {
+					if (this.unsafeToPick()) {
+						return false;
+					}
+
 					if (Pather.useTeleport) {
 						Pather.moveToUnit(item);
 					} else if (!Pather.moveTo(item.x, item.y, 0)) {
@@ -1744,7 +1807,7 @@ MainLoop:
 				return false;
 			}
 
-			return this.goldPileAmount(unit) >= this.minGoldPile();
+			return this.goldPileAmount(unit) >= this.minGoldPile() && this.goldInWalkRange(unit);
 		}
 
 		switch (unit.classid) {
@@ -1800,13 +1863,58 @@ MainLoop:
 			return false;
 		}
 
+		// HP / MP: belt holes + HPBuffer / MPBuffer only. Do not key off itemType
+		// (PD2 healing pots often are not type 76 — those used to pick without a cap).
+		potKind = (typeof Town !== "undefined" && typeof Town.potionKind === "function") ?
+			Town.potionKind(unit) : false;
+
+		if (!potKind && unit) {
+			code = unit.code ? String(unit.code).toLowerCase() : "";
+
+			if (/^hp[1-5]$/.test(code)) {
+				potKind = "hp";
+			} else if (/^mp[1-5]$/.test(code)) {
+				potKind = "mp";
+			}
+		}
+
+		if (potKind === "hp" || potKind === "mp") {
+			needPots = (typeof Town !== "undefined" && typeof Town.potionNeedCount === "function") ?
+				Town.potionNeedCount(potKind) : 0;
+
+			if (needPots < 1) {
+				potion = me.getItem(-1, -1);
+
+				if (potion) {
+					do {
+						if (((potion.mode === 0 && potion.location === 3) || potion.mode === 2 || potion.location === 2) &&
+								Town.potionKind(potion) === potKind) {
+							if ((potion.code && unit.code && String(potion.code) < String(unit.code)) ||
+									potion.classid < unit.classid) {
+								potion.interact();
+								needPots = Town.potionNeedCount(potKind);
+								break;
+							}
+						}
+					} while (potion.getNext());
+				}
+			}
+
+			return needPots >= 1;
+		}
+
+		// Healing/mana by type but potionKind missed — still never uncapped pick
+		if (unit.itemType === 76 || unit.itemType === 77) {
+			return false;
+		}
+
 		switch (unit.itemType) {
 		case 4: // Gold
 			if (me.getStat(14) === me.getStat(12) * 10000) { // Check current gold vs max capacity (cLvl*10000)
 				return false; // Skip gold if full
 			}
 
-			if (this.goldPileAmount(unit) < this.minGoldPile()) {
+			if (this.goldPileAmount(unit) < this.minGoldPile() || !this.goldInWalkRange(unit)) {
 				return false;
 			}
 
@@ -1881,85 +1989,9 @@ MainLoop:
 			}
 
 			break;
-		case 76: // PD2 Healing (hpot)
-		case 77: // PD2 Mana (mpot)
-			needPots = 0;
-			code = unit.code ? String(unit.code).toLowerCase() : "";
-			potKind = (typeof Town !== "undefined" && typeof Town.potionKind === "function") ?
-				Town.potionKind(unit) :
-				(/^hp[1-5]$/.test(code) ? "hp" : (/^mp[1-5]$/.test(code) ? "mp" : false));
-
-			if (potKind !== "hp" && potKind !== "mp") {
-				return false;
-			}
-
-			for (i = 0; i < 4; i += 1) {
-				if (Config.BeltColumn[i] === potKind) {
-					needPots += this.beltSize;
-				}
-			}
-
-			potion = me.getItem(-1, -1);
-
-			if (potion) {
-				do {
-					if ((potion.mode === 2 || potion.location === 2) &&
-							typeof Town !== "undefined" && Town.potionKind(potion) === potKind) {
-						needPots -= 1;
-					}
-				} while (potion.getNext());
-			}
-
-			if (needPots < 1 && this.checkBelt()) {
-				buffers = ["HPBuffer", "MPBuffer"];
-
-				for (i = 0; i < buffers.length; i += 1) {
-					if (Config[buffers[i]] && ((buffers[i] === "HPBuffer" && potKind === "hp") ||
-							(buffers[i] === "MPBuffer" && potKind === "mp"))) {
-						if (!Storage.Inventory.CanFit(unit)) {
-							return false;
-						}
-
-						needPots = Config[buffers[i]];
-						potion = me.getItem(-1, -1);
-
-						if (potion) {
-							do {
-								if (potion.location === 3 && potion.mode !== 2 &&
-										typeof Town !== "undefined" && Town.potionKind(potion) === potKind) {
-									needPots -= 1;
-								}
-							} while (potion.getNext());
-						}
-					}
-				}
-			}
-
-			if (needPots < 1) {
-				potion = me.getItem(-1, -1);
-
-				if (potion) {
-					do {
-						if (((potion.mode === 0 && potion.location === 3) || potion.mode === 2 || potion.location === 2) &&
-								typeof Town !== "undefined" && Town.potionKind(potion) === potKind) {
-							// Prefer drinking lower-tier by code digit when classid is unreliable
-							if ((potion.code && unit.code && String(potion.code) < String(unit.code)) ||
-									potion.classid < unit.classid) {
-								potion.interact();
-								needPots += 1;
-
-								break;
-							}
-						}
-					} while (potion.getNext());
-				}
-			}
-
-			if (needPots < 1) {
-				return false;
-			}
-
-			break;
+		case 76: // PD2 Healing — handled above via potionKind / potionNeedCount
+		case 77: // PD2 Mana
+			return false;
 		case 78: // PD2 Rejuv (rpot) — handled by isRejuv above; never treat as stamina
 			if (this.isRejuv(unit)) {
 				break;
@@ -2057,6 +2089,10 @@ MainLoop:
 		var item, gid, status, ignored,
 			itemList = [];
 
+		if (this.unsafeToPick()) {
+			return false;
+		}
+
 		while (this.gidList.length > 0) {
 			gid = this.gidList.shift();
 			item = getUnit(4, -1, -1, gid);
@@ -2076,6 +2112,10 @@ MainLoop:
 		}
 
 		while (itemList.length > 0) {
+			if (this.unsafeToPick()) {
+				return false;
+			}
+
 			itemList.sort(this.sortFastPickItems);
 
 			item = copyUnit(itemList.shift());

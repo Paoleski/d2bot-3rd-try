@@ -1,4 +1,4 @@
-﻿[name] == gold // pile size gated in Pickit.minGoldPile (level-scaled; ignores tiny stacks)
+﻿[name] == gold // pile size gated in Pickit.minGoldPile (never ≤100; scales with charlvl)
 [Name] == hp1
 [Name] == hp2
 [Name] == hp3
@@ -28,12 +28,12 @@
 
 // --- gloves ---
 [type] == gloves && [quality] < magic && [Flag] != Ethereal # # [tier] == 1
-[type] == gloves && [quality] == magic && [Flag] != Ethereal # # [tier] == 2
-[type] == gloves && [quality] == rare && [Flag] != Ethereal # # [tier] == (typeof AutoGearScore!=='undefined'?AutoGearScore.forItem(item):5)
-[type] == gloves && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 10 || [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 10 || [maxhp] > 10 # [tier] == (typeof AutoGearScore!=='undefined'?AutoGearScore.forItem(item):5)
+[type] == gloves && [quality] == magic && [Flag] != Ethereal # # [tier] == (typeof AutoGearScore!=='undefined'?Math.max(2,AutoGearScore.forItem(item)):(typeof Item!=='undefined'&&Item.gloveTier?Item.gloveTier(item):2))
+[type] == gloves && [quality] == rare && [Flag] != Ethereal # # [tier] == (typeof AutoGearScore!=='undefined'?AutoGearScore.forItem(item):(typeof Item!=='undefined'&&Item.gloveTier?Item.gloveTier(item):5))
+[type] == gloves && [quality] <= rare && [Flag] != Ethereal # [fcr] >= 10 || [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 10 || [maxhp] > 10 # [tier] == (typeof AutoGearScore!=='undefined'?AutoGearScore.forItem(item):(typeof Item!=='undefined'&&Item.gloveTier?Item.gloveTier(item):5))
 [name] == lgl && [quality] == unique && [Flag] != Ethereal # # [tier] == 4
 [name] == heavygloves && [quality] == unique && [Flag] != Ethereal # [fhr] == 30 # [tier] == 5
-[name] == lightgauntlets && [quality] == unique && [Flag] != Ethereal # [fcr] == 20 # [tier] == 40 // Magefist
+[name] == lightgauntlets && [quality] == unique && [Flag] != Ethereal # [fcr] == 20 # [tier] == 90 // Magefist — FCR >> resist blues
 
 // --- belt ---
 [type] == belt && [quality] < magic && [Flag] != Ethereal # # [tier] == 1
@@ -47,10 +47,11 @@
 [name] == meshbelt && [quality] == set && [Flag] != Ethereal # [ItemMagicBonus] >= 10 # [tier] == 107  //Tal's
 
 // --- boots ---
+// Magic floor uses scorer (like gloves). Stamina/heal-only still ~2; 5/5 + ED beats it.
 [type] == boots && [quality] < magic && [Flag] != Ethereal # # [tier] == 1
-[type] == boots && [quality] == magic && [Flag] != Ethereal # # [tier] == 2
-[type] == boots && [quality] == rare && [Flag] != Ethereal # # [tier] == (typeof AutoGearScore!=='undefined'?AutoGearScore.forItem(item):5)
-[type] == boots && [Flag] != Ethereal # [maxhp] > 0 || [maxmana] > 0 || [fireresist]+[lightresist]+[coldresist] >= 10 || [fhr] > 0 || [frw] > 0 # [tier] == (typeof AutoGearScore!=='undefined'?AutoGearScore.forItem(item):5)
+[type] == boots && [quality] == magic && [Flag] != Ethereal # # [tier] == (typeof AutoGearScore!=='undefined'?Math.max(2,AutoGearScore.forItem(item)):(typeof Item!=='undefined'&&Item.bootTier?Math.max(2,Item.bootTier(item)):2))
+[type] == boots && [quality] == rare && [Flag] != Ethereal # # [tier] == (typeof AutoGearScore!=='undefined'?AutoGearScore.forItem(item):(typeof Item!=='undefined'&&Item.bootTier?Item.bootTier(item):5))
+[type] == boots && [Flag] != Ethereal # [maxhp] > 0 || [maxmana] > 0 || [fireresist]+[lightresist]+[coldresist] >= 5 || [fhr] > 0 || [frw] > 0 || [enhanceddefense] >= 10 # [tier] == (typeof AutoGearScore!=='undefined'?AutoGearScore.forItem(item):(typeof Item!=='undefined'&&Item.bootTier?Item.bootTier(item):5))
 // Early uniques (must have #tier or merc-slot gate leaves them on the ground)
 [name] == boots && [quality] == unique && [Flag] != Ethereal # # [tier] == 40 // Hotspur
 [name] == heavyboots && [quality] == unique && [Flag] != Ethereal # # [tier] == 55 // Gorefoot
@@ -86,12 +87,16 @@
 [name] == diadem && [quality] == unique && [Flag] != Ethereal # # [tier] == 100
 
 // --- amulet ---
+[type] == amulet && [quality] == magic # # [tier] == (typeof AutoGearScore!=='undefined'?Math.max(2,AutoGearScore.forItem(item)):2)
+[type] == amulet && [quality] == rare # # [tier] == (typeof AutoGearScore!=='undefined'?Math.max(3,AutoGearScore.forItem(item)):3)
 [type] == amulet # [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 5 || [maxhp] > 15 || [maxhp]+[maxmana] >= 30 || [fcr] >= 10 || [sorceressskills] > 0 || [coldskilltab]+[fireskilltab]+[lightningskilltab] > 0 # [tier] == (typeof AutoGearScore!=='undefined'?AutoGearScore.forItem(item):5)
 [type] == amulet && [quality] == unique # [itemallskills] == 1 # [tier] == 7
 [type] == amulet && [quality] == unique # [itemallskills] == 2 # [tier] == 100
 [Type] == Amulet && [Quality] == Set # [SorceressSkills] == 2 # [maxquantity] == 1 && [tier] == 101
 
 // --- ring ---
+[type] == ring && [quality] == magic # # [tier] == (typeof AutoGearScore!=='undefined'?Math.max(2,AutoGearScore.forItem(item)):2)
+[type] == ring && [quality] == rare # # [tier] == (typeof AutoGearScore!=='undefined'?Math.max(3,AutoGearScore.forItem(item)):3)
 [type] == ring # [fireresist]+[lightresist]+[coldresist]+[poisonresist] >= 5 || [maxhp] > 15 || [maxhp]+[maxmana] >= 30 || [fcr] >= 10 # [tier] == (typeof AutoGearScore!=='undefined'?AutoGearScore.forItem(item):5)
 [type] == ring && [quality] == unique # [itemallskills] == 1 # [tier] == 101 // soj
 

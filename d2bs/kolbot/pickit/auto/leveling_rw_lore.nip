@@ -1,0 +1,5 @@
+// Lore (Ort+Sol) — 2os helms/circlets (white/grey only).
+// Loaded for casters (via AutoGear) and poisonstrike necro (helm mid before uniques).
+// Keep ONE highest-def base (Runewords.cullWorseLoreBases). MiniShop: wantLoreShopBase.
+
+([Name] == Cap || [Name] == SkullCap || [Name] == Helm || [Name] == FullHelm || [Name] == GreatHelm || [Name] == Crown || [Name] == Mask || [Name] == BoneHelm || [Name] == WarHat || [Name] == Sallet || [Name] == Casque || [Name] == Basinet || [Name] == Circlet || [Name] == Coronet || [Name] == Tiara || [Name] == Diadem) && [Flag] != Ethereal && [quality] <= superior # [Sockets] == 2

@@ -1,0 +1,5 @@
+// Poison Strike mid armor — Treachery (Shael+Thul+Lem) in 3os chest.
+// Loaded from MidRW @35+ while Treachery not yet owned. Banks early (no runes required).
+// MaxQuantity 1 + Pickit demote after done / worse-than-banked. MiniShop only when runes ready.
+
+[type] == armor && [Flag] != Ethereal && [quality] <= superior # [Sockets] == 3 && [defense] > 120 # [MaxQuantity] == 1

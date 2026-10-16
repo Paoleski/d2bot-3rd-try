@@ -534,11 +534,12 @@ function LoadConfig() {
 	Config.DodgeHP = 100; // Dodge only if HP percent is less than or equal to Config.DodgeHP. 100 = always dodge.
 	Config.BossPriority = false; // Set to true to attack Unique/SuperUnique monsters first when clearing
 	Config.ClearType = 0; // 0 = all monsters (0xF skips normals — bad for leveling clears)
-	Config.DangerClear = { // peel melee-range mobs before walking on
+	Config.DangerClear = { // peel during TeleDelay gaps only (not Act1 walk-leveling)
 		Range: 8,
 		ClearRange: 12,
 		PollMs: 250,
-		WhileTeleporting: false
+		WhileTeleporting: false,
+		WhileWalking: false
 	};
 	Config.TeleStomp = false; // Use merc to attack bosses if they're immune to attacks, but not to physical damage
 

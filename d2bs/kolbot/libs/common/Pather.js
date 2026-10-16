@@ -4,22 +4,155 @@
 *	@desc		handle player movement
 */
 
-// Perform certain actions after moving to each node
-var NodeAction = {
-	// Run all the functions within NodeAction (except for itself)
-	go: function (arg) {
-		var i;
+// Lightweight stutter diagnostics — logs/stutter.<profile>.log (gaps >= 25ms + interrupts)
+var StutterLog = {
+	_count: 0,
+	_max: 400,
+	_lastCastEnd: 0,
+	_lastNodeEnd: 0,
+	_lastScan: 0,
+	scanThrottleMs: 1500,
 
-		for (i in this) {
-			if (this.hasOwnProperty(i) && typeof this[i] === "function" && i !== "go") {
-				this[i](arg);
+	path: function () {
+		var name = "unknown";
+
+		try {
+			if (typeof me !== "undefined" && me.profile) {
+				name = String(me.profile).replace(/[^\w\-]+/g, "_");
 			}
-		}
+		} catch (e0) {}
+
+		return "logs/stutter." + name + ".log";
 	},
 
-		// Kill monsters while pathing
-	killMonsters: function (arg) {
+	write: function (tag, data) {
+		var line, path, tick, payload;
+
+		try {
+			this._count += 1;
+
+			if (this._count > this._max) {
+				return;
+			}
+
+			tick = getTickCount();
+			payload = {
+				t: tick,
+				tag: tag,
+				area: (typeof me !== "undefined") ? me.area : -1,
+				mode: (typeof me !== "undefined") ? me.mode : -1,
+				lvl: (typeof me !== "undefined") ? me.charlvl : -1,
+				data: data || {}
+			};
+			line = JSON.stringify(payload) + "\n";
+			path = this.path();
+
+			if (typeof FileTools !== "undefined" && typeof FileTools.appendText === "function") {
+				FileTools.appendText(path, line);
+			}
+		} catch (e1) {}
+	},
+
+	// True if we may run a NodeAction object scan (chests/shrines/wells)
+	allowScan: function () {
+		var now = getTickCount();
+
+		if (now - this._lastScan < this.scanThrottleMs) {
+			return false;
+		}
+
+		this._lastScan = now;
+
+		return true;
+	}
+};
+
+// Perform certain actions after moving to each node
+var NodeAction = {
+	// Summoner / revive-heavy areas — SoloPlay shaman+unraveler priority while walking
+	_summonerAreas: [8, 3, 4, 38, 5, 6, 27, 28, 33, 37, 56, 57, 60, 59, 58, 66, 67, 68, 69, 70, 71, 72],
+	// Outdoor nest XP areas
+	_nestAreas: [4, 6, 43],
+
+	// Run all the functions within NodeAction (except for itself / walker-only hooks)
+	go: function (arg) {
+		var i, t0, t1, dt, name, slow;
+
+		t0 = getTickCount();
+		slow = [];
+		// One shared scan window per node — chests+shrines+wells don't each burn the throttle
+		this._doScan = StutterLog.allowScan();
+
+		for (i in this) {
+			if (this.hasOwnProperty(i) && typeof this[i] === "function" &&
+					i !== "go" && i !== "walkerPriority" && i !== "walkerNearGrab" &&
+					i !== "walkerAreaSpecials" && i !== "onPath" && i !== "monsterNear") {
+				name = i;
+				t1 = getTickCount();
+				this[i](arg);
+				dt = getTickCount() - t1;
+
+				if (dt >= 25) {
+					slow.push(name + ":" + dt);
+				}
+			}
+		}
+
+		dt = getTickCount() - t0;
+
+		if (dt >= 25 || slow.length) {
+			StutterLog.write("nodeAction", {ms: dt, slow: slow, clearPath: arg && arg.clearPath, scanned: !!this._doScan});
+		}
+
+		if (StutterLog._lastNodeEnd && (t0 - StutterLog._lastNodeEnd) < 80) {
+			StutterLog.write("gap.node", {sinceLastNode: t0 - StutterLog._lastNodeEnd, ms: dt});
+		}
+
+		StutterLog._lastNodeEnd = getTickCount();
+	},
+
+	// True if mon sits on the current node or next few path nodes (≤ pathRadius)
+	onPath: function (mon, node, pathAhead, pathRadius) {
+		var i, el, d, best, lim;
+
+		if (!mon || !node) {
+			return false;
+		}
+
+		if (pathRadius === undefined) {
+			pathRadius = 10;
+		}
+
+		best = getDistance(mon, node.x, node.y);
+		lim = pathAhead && pathAhead.length ? Math.min(3, pathAhead.length) : 0;
+
+		for (i = 0; i < lim; i += 1) {
+			el = pathAhead[i];
+
+			if (!el) {
+				continue;
+			}
+
+			d = getDistance(mon, el.x, el.y);
+
+			if (d < best) {
+				best = d;
+			}
+		}
+
+		return best <= pathRadius;
+	},
+
+	/**
+	 * Area specials walkers need when they skip full NodeAction.go (no shrine scans).
+	 * Countess ghosts / Claw Viper / Arcane — same gates as killMonsters.
+	 */
+	walkerAreaSpecials: function () {
 		var monList;
+
+		if (me.inTown || me.dead || Attack.clearing) {
+			return;
+		}
 
 		if (Config.Countess.KillGhosts && [21, 22, 23, 24, 25].indexOf(me.area) > -1) {
 			monList = Attack.getMob(38, 0, 30);
@@ -38,6 +171,183 @@ var NodeAction = {
 		if (me.area === 74 && !(Pather.teleport && Pather.canTeleport())) {
 			Attack.clear(15, 0);
 		}
+	},
+
+	/**
+	 * SoloPlay walker combat brain: kill on-path priority mobs, or peel when surrounded.
+	 * Does not run Attack.clear every node — keeps chain-handoff continuous on empty ground.
+	 * @param {object} node - current path node just walked
+	 * @param {Array} pathAhead - remaining path after shift
+	 * @returns {boolean} true if any monsters were cleared (caller should repath)
+	 */
+	walkerPriority: function (node, pathAhead) {
+		var mon, list, near, d, want, area, coll, peelR, hasShaman, gate;
+
+		if (Config.WalkerPriority === false || me.inTown || me.dead || Attack.clearing) {
+			return false;
+		}
+
+		if (Pather.canTeleport()) {
+			return false;
+		}
+
+		// Jail/Catacombs portcullis: Bone Archers shoot through bars — open first, don't peel forever
+		gate = Pather.findClosedDoorNear(me.x, me.y, 8, 6);
+
+		if (gate && Pather.interactDoor(gate)) {
+			return true;
+		}
+
+		area = me.area;
+		coll = 0x1; // BlockWall only — missiles pass Jail bars so 0x4 never fires
+		peelR = Attack.clearPeelRange();
+		list = [];
+		near = [];
+		mon = getUnit(1);
+
+		if (!mon) {
+			return false;
+		}
+
+		do {
+			if (!Attack.checkMonster(mon)) {
+				continue;
+			}
+
+			if (checkCollision(me, mon, coll)) {
+				continue;
+			}
+
+			// Behind a closed gate/door — skip (screenshot: endless Bone Archer through bars)
+			if (Pather.closedDoorBlocks(mon.x, mon.y)) {
+				continue;
+			}
+
+			d = getDistance(me, mon);
+
+			// Melee on us — peel before shaman hunts (even a single Fallen)
+			if (d <= peelR) {
+				near.push(copyUnit(mon));
+			}
+
+			want = false;
+
+			// Any area: blocker overlapping the current/next node (tight radius)
+			if (d <= 18 && this.onPath(mon, node, pathAhead, 5)) {
+				// Blood Moor: still ignore Fallen swarms unless right on the node
+				if (!(area === 2 && Attack.isFallen(mon) && getDistance(mon, node.x, node.y) > 3)) {
+					want = true;
+				}
+			}
+
+			// Blood Moor: anything except Fallen within ~25 on-path
+			if (!want && area === 2 && d <= 25 && !Attack.isFallen(mon) && this.onPath(mon, node, pathAhead, 10)) {
+				want = true;
+			}
+
+			// Summoner areas: shaman / unraveler within clear range only (no 30y dive)
+			if (!want && this._summonerAreas.indexOf(area) > -1 && d <= 18 &&
+					(Attack.isShaman(mon) || Attack.isUnraveler(mon)) &&
+					this.onPath(mon, node, pathAhead, 10)) {
+				want = true;
+			}
+
+			// Nest areas: monster nests within ~35 on-path
+			if (!want && this._nestAreas.indexOf(area) > -1 && d <= 35 &&
+					Attack.isMonsterNest(mon) && this.onPath(mon, node, pathAhead, 12)) {
+				want = true;
+			}
+
+			if (want) {
+				list.push(copyUnit(mon));
+			}
+		} while (mon.getNext());
+
+		// Trash already on us — never walk past them toward a shaman
+		if (near.length >= 1) {
+			if (typeof StutterLog !== "undefined") {
+				StutterLog.write("walker.surround", {
+					n: near.length,
+					name: near[0].name || "?",
+					id: near[0].classid,
+					d: Math.round(getDistance(me, near[0])),
+					area: area
+				});
+			}
+
+			print("ÿc4Patherÿc0 :: walker surround x" + near.length);
+			Attack.clear(15);
+
+			return true;
+		}
+
+		if (!list.length) {
+			return false;
+		}
+
+		hasShaman = false;
+
+		for (d = 0; d < list.length; d += 1) {
+			if (Attack.isShaman(list[d]) || Attack.isUnraveler(list[d])) {
+				hasShaman = true;
+				break;
+			}
+		}
+
+		if (typeof StutterLog !== "undefined") {
+			StutterLog.write("walker.priority", {
+				n: list.length,
+				name: list[0].name || "?",
+				id: list[0].classid,
+				d: Math.round(getDistance(me, list[0])),
+				area: area
+			});
+		}
+
+		print("ÿc4Patherÿc0 :: walker priority " + (list[0].name || "?") + " x" + list.length);
+
+		// Shamans / packs: Attack.clear so peel-sort includes trash mid-fight
+		if (hasShaman || list.length >= 2) {
+			Attack.clear(15);
+		} else {
+			Attack.clearList(list);
+		}
+
+		return true;
+	},
+
+	/**
+	 * Phase 2: grab shrine / well / pot only if already within ~5 yards (no detours).
+	 */
+	walkerNearGrab: function () {
+		if (me.inTown || me.dead) {
+			return;
+		}
+
+		// Throttle like shrine scans — avoid every-node overhead
+		if (!StutterLog.allowScan()) {
+			return;
+		}
+
+		try {
+			Misc.grabNearShrine(5);
+		} catch (eS) {}
+
+		try {
+			Misc.grabNearWell(5);
+		} catch (eW) {}
+
+		try {
+			Misc.grabNearEssentials(5);
+		} catch (eE) {}
+	},
+
+		// Kill monsters while pathing
+	killMonsters: function (arg) {
+		var spectype;
+
+		// Shared Countess / Claw Viper / Arcane specials (also used by walker branch)
+		this.walkerAreaSpecials();
 
 		if ((typeof Config.ClearPath === "number" || typeof Config.ClearPath === "object") && arg.clearPath === false) {
 			switch (typeof Config.ClearPath) {
@@ -55,37 +365,88 @@ var NodeAction = {
 		}
 
 		if (arg.clearPath !== false) {
-			Attack.clear(15, typeof arg.clearPath === "number" ? arg.clearPath : 0);
+			// Town never runs NodeAction — field walkers stuttered because clearPath:true
+			// did Attack.clear every node. Match town: walkers keep moving; clear at destinations.
+			// (Walkers now use walkerPriority from moveTo instead of this path.)
+			if (!Pather.canTeleport()) {
+				return;
+			}
+
+			spectype = typeof arg.clearPath === "number" ? arg.clearPath : 0;
+			Attack.clear(15, spectype);
 		} else if (Attack.shouldDangerClear()) {
 			var dMon = Attack.inDanger();
 
 			if (dMon) {
-				// Travel legs with clearPath=false still peel what's already on us
 				print("ÿc4Patherÿc0 :: danger " + (dMon.name || "?") + " d=" + Math.round(getDistance(me, dMon)) + " → clear");
 				Attack.clear(Attack.dangerClearRange());
 			}
 		}
 	},
 
+	// Cheap: nearest attackable monster within range (distance only — no clear/sort)
+	monsterNear: function (range) {
+		var mon, d, best, bestD;
+
+		best = null;
+		bestD = range + 1;
+		mon = getUnit(1);
+
+		if (!mon) {
+			return null;
+		}
+
+		do {
+			d = getDistance(me, mon);
+
+			if (d > range || d >= bestD) {
+				continue;
+			}
+
+			if (mon.hp !== undefined && mon.hp <= 0) {
+				continue;
+			}
+
+			if (mon.mode === 0 || mon.mode === 12) {
+				continue;
+			}
+
+			if (!Attack.checkMonster(mon)) {
+				continue;
+			}
+
+			bestD = d;
+			best = {name: mon.name || "?", d: Math.round(d)};
+		} while (mon.getNext());
+
+		return best;
+	},
+
 	// Open chests while pathing — only ones we walk past (no moveTo detours)
 	popChests: function () {
-		if (!!Config.OpenChests) {
-			Misc.openChests(5, {noMove: true});
+		if (!Config.OpenChests || !this._doScan) {
+			return;
 		}
+
+		Misc.openChests(5, {noMove: true});
 	},
 
-	// Scan shrines while pathing
+	// Scan shrines while pathing (throttled — was every walk node / ~5 yards)
 	getShrines: function () {
-		if (!!Config.ScanShrines && Config.ScanShrines.length > 0) {
-			Misc.scanShrines();
+		if (!Config.ScanShrines || !Config.ScanShrines.length || !this._doScan) {
+			return;
 		}
+
+		Misc.scanShrines();
 	},
 
-	// Use wells while pathing when low on life/mana
+	// Use wells while pathing when low on life/mana (throttled)
 	getWells: function () {
-		if (Config.UseWells !== false) {
-			Misc.scanWells();
+		if (Config.UseWells === false || !this._doScan) {
+			return;
 		}
+
+		Misc.scanWells();
 	}
 };
 
@@ -137,13 +498,35 @@ var PathDebug = {
 var Pather = {
 	teleport: true,
 	walkDistance: 5,
+	// Same as walkDistance — chain handoff keeps runs continuous; long nodes not needed
+	walkDistanceNoTele: 5,
 	teleDistance: 40,
 	_lastTeleTick: 0,
+	currentPath: null, // live moveTo path (SoloPlay-style); nested calls save/restore
 	cancelFlags: [0x01, 0x02, 0x04, 0x08, 0x14, 0x16, 0x0c, 0x0f, 0x17, 0x19, 0x1A],
 	wpAreas: [1, 3, 4, 5, 6, 27, 29, 32, 35, 40, 48, 42, 57, 43, 44, 52, 74, 46, 75, 76, 77, 78, 79, 80, 81, 83, 101, 103, 106, 107, 109, 111, 112, 113, 115, 123, 117, 118, 129],
 	recursion: true,
+	_moveDepth: 0, // nested moveTo (stuck-clear → Attack.clear → moveTo) — skip peel when > 1
+	moveTimeout: 40000, // hard abort so Barracks/etc. cannot retry forever
+	_doorOpened: false, // set by interactDoor — moveTo steps through then rebuilds
+	_lastDoorX: 0,
+	_lastDoorY: 0,
+	_moveGoalX: 0,
+	_moveGoalY: 0,
 	dangerCheck: false, // walkTo polls Attack.inDanger only when moveTo enables this
 	dangerHit: false,   // walkTo sets true when it aborts for melee danger
+	// Tele hop may not increase distance-to-goal by more than this (corridor slack).
+	// Keep loose — tight values reject valid wall-detours and stall mid-path.
+	_backteleTol: 28,
+
+	// Walk node spacing: longer when we have no teleport (fewer NodeAction seams)
+	getWalkDistance: function () {
+		if (!this.canTeleport() && this.walkDistanceNoTele) {
+			return this.walkDistanceNoTele;
+		}
+
+		return this.walkDistance;
+	},
 
 	// 54 = Sorc Teleport / oskill; 367 = Necro Blood Warp (PD2); 0 = none
 	teleSkill: function () {
@@ -289,12 +672,31 @@ var Pather = {
 			return false;
 		}
 
-		var i, path, adjustedNode, cleared, moved, dMon,
+		var i, path, adjustedNode, cleared, moved, dMon, snapIdx, meGoal, nodeGoal, didClear,
 			node = {x: x, y: y},
-			fail = 0;
+			fail = 0,
+			ok = false,
+			savedPath = this.currentPath,
+			backTol = this._backteleTol || 28,
+			started = getTickCount(),
+			maxMs = this.moveTimeout || 40000,
+			stuckClears = 0,
+			doorClaims = 0,
+			walkerClears = 0;
+
+		cleared = 0; // stuck-clear attempts this episode (reset on successful step)
+		this._doorOpened = false;
+		this._moveGoalX = x;
+		this._moveGoalY = y;
+
+		// Jail/Catacombs stairs can take longer; Barracks forge maze must not sit 90s
 
 		for (i = 0; i < this.cancelFlags.length; i += 1) {
 			if (getUIFlag(this.cancelFlags[i])) {
+				if (typeof StutterLog !== "undefined") {
+					StutterLog.write("cancel.ui", {flag: this.cancelFlags[i], where: "moveTo.entry"});
+				}
+
 				me.cancel();
 			}
 		}
@@ -345,8 +747,37 @@ var Pather = {
 			wantTele = false,
 			teleDist = ([58, 61, 62, 63, 64].indexOf(me.area) > -1 ? 30 : this.teleDistance);
 
+		var syncCurrentPath = function () {
+			Pather.currentPath = path;
+		};
+
+		// Drop leading tele nodes that would hop farther from the goal than we are now
+		var pruneBackteleNodes = function () {
+			var n, nGoal, mGoal;
+
+			if (!pathIsTele || !path || !path.length) {
+				syncCurrentPath();
+				return;
+			}
+
+			mGoal = getDistance(me, x, y);
+
+			while (path.length > 0) {
+				n = path[0];
+				nGoal = getDistance(n.x, n.y, x, y);
+
+				if (nGoal > mGoal + backTol) {
+					path.shift();
+				} else {
+					break;
+				}
+			}
+
+			syncCurrentPath();
+		};
+
 		var rebuildPath = function (useTele) {
-			var dist = useTele ? teleDist : Pather.walkDistance,
+			var dist = useTele ? teleDist : Pather.getWalkDistance(),
 				p = getPath(me.area, x, y, me.x, me.y, useTele ? 1 : 0, dist);
 
 			if (!p) {
@@ -363,172 +794,420 @@ var Pather = {
 			pathIsTele = useTele;
 			PathDebug.drawPath(path);
 
+			if (useTele) {
+				pruneBackteleNodes();
+			} else {
+				syncCurrentPath();
+			}
+
 			return true;
 		};
 
-		wantTele = this.useTeleport && this.canTeleportNow();
+		// After clear drift: nearest remaining node that still progresses toward goal
+		var findForwardSnapIndex = function (curNode) {
+			var j, el, d, toGoal, curToGoal, mGoal, bestJ = -1, bestD = 99999;
 
-		if (!rebuildPath(wantTele)) {
-			throw new Error("moveTo: Failed to generate path.");
-		}
-
-		if (this.useTeleport && Config.TeleSwitch) {
-			Misc.teleSwitch();
-		}
-
-		while (path.length > 0) {
-			if (me.dead) { // Abort if dead
-				return false;
+			if (!path || !path.length) {
+				return -1;
 			}
 
-			for (i = 0; i < this.cancelFlags.length; i += 1) {
-				if (getUIFlag(this.cancelFlags[i])) {
-					me.cancel();
+			curToGoal = getDistance(curNode.x, curNode.y, x, y);
+			mGoal = getDistance(me, x, y);
+
+			for (j = 0; j < path.length; j += 1) {
+				el = path[j];
+
+				if (!el) {
+					continue;
+				}
+
+				d = getDistance(me, el.x, el.y);
+				toGoal = getDistance(el.x, el.y, x, y);
+
+				// Already on/past this node — skip (we'll slice past it if a later snap wins)
+				if (d <= 5) {
+					continue;
+				}
+
+				// Must improve (or not worsen) progress vs where we stand and vs the old node
+				if (toGoal > mGoal + backTol) {
+					continue;
+				}
+
+				if (toGoal > curToGoal + backTol) {
+					continue;
+				}
+
+				if (d < bestD || (bestJ >= 0 && Math.abs(d - bestD) < 0.5 &&
+						toGoal < getDistance(path[bestJ].x, path[bestJ].y, x, y))) {
+					bestD = d;
+					bestJ = j;
 				}
 			}
 
-			// Tele ready again → jump spacing; on delay/OOM → walk + fight toward goal
+			return bestJ;
+		};
+
+		try {
+			this._moveDepth += 1;
 			wantTele = this.useTeleport && this.canTeleportNow();
 
-			if (wantTele !== pathIsTele) {
-				if (!rebuildPath(wantTele)) {
-					throw new Error("moveTo: Failed to generate path.");
-				}
-
-				if (!path.length) {
-					break;
-				}
+			if (!rebuildPath(wantTele)) {
+				throw new Error("moveTo: Failed to generate path.");
 			}
 
-			node = path.shift();
+			if (this.useTeleport && Config.TeleSwitch) {
+				Misc.teleSwitch();
+			}
 
-			/* Right now getPath's first node is our own position so it's not necessary to take it into account
-				This will be removed if getPath changes
-			*/
-			if (getDistance(me, node) > 2) {
-				// Tight areas: Maggot Lair + Claw Viper Temple
-				if ([58, 61, 62, 63, 64].indexOf(me.area) > -1) {
-					adjustedNode = this.getNearestWalkable(node.x, node.y, 15, 3, 0x1 | 0x4 | 0x800 | 0x1000);
+			while (path.length > 0) {
+				if (me.dead) { // Abort if dead
+					ok = false;
+					break;
+				}
 
-					if (adjustedNode) {
-						node.x = adjustedNode[0];
-						node.y = adjustedNode[1];
+				if (getTickCount() - started > maxMs) {
+					print("ÿc1Patherÿc0 :: moveTo abort — timeout " + maxMs + "ms @ " + me.x + "," + me.y +
+						" → " + x + "," + y + " (area " + me.area + ")");
+					ok = false;
+					break;
+				}
+
+				// Jail/Barracks: stair tiles block pathing — stop spinning when already next to goal
+				// so moveToExit can click the stairs (logs: abort 40yd from same-X exit forever)
+				if (!wantTele && fail >= 2 && getDistance(me, x, y) <= 30 &&
+						[28, 29, 30, 31, 32, 33, 34].indexOf(me.area) > -1) {
+					print("ÿc8Patherÿc0 :: moveTo near-goal abort d=" + Math.round(getDistance(me, x, y)) +
+						" @ " + me.x + "," + me.y + " → " + x + "," + y + " (area " + me.area + ")");
+					ok = getDistance(me, x, y) < 6;
+					break;
+				}
+
+				for (i = 0; i < this.cancelFlags.length; i += 1) {
+					if (getUIFlag(this.cancelFlags[i])) {
+						if (typeof StutterLog !== "undefined") {
+							StutterLog.write("cancel.ui", {flag: this.cancelFlags[i], where: "moveTo.loop"});
+						}
+
+						me.cancel();
 					}
 				}
 
-				// Only repath when we still have tele-spaced nodes on cooldown.
-				// Walk paths can have long gaps in town — walking them is fine; repath+continue spins forever.
-				if (!wantTele && pathIsTele && getDistance(me, node) > 12) {
-					if (!rebuildPath(false)) {
+				// Tele ready again → jump spacing; on delay/OOM → walk + fight toward goal
+				wantTele = this.useTeleport && this.canTeleportNow();
+
+				if (wantTele !== pathIsTele) {
+					if (!rebuildPath(wantTele)) {
 						throw new Error("moveTo: Failed to generate path.");
 					}
 
-					continue;
-				}
-
-				// Pre-node: peel melee threats before walking into the next node
-				if (!wantTele && Attack.shouldDangerClear()) {
-					dMon = Attack.inDanger();
-
-					if (dMon) {
-						print("ÿc4Patherÿc0 :: danger " + (dMon.name || "?") + " d=" + Math.round(getDistance(me, dMon)) + " → clear");
-						Attack.clear(Attack.dangerClearRange());
-					}
-				}
-
-				this.dangerHit = false;
-				this.dangerCheck = !wantTele && !me.inTown;
-
-				moved = wantTele ? this.teleportTo(node.x, node.y) : this.walkTo(node.x, node.y, (fail > 0 || me.inTown) ? 2 : 4);
-
-				this.dangerCheck = false;
-
-				if (!wantTele && this.dangerHit) {
-					this.dangerHit = false;
-					dMon = Attack.inDanger();
-
-					if (dMon) {
-						print("ÿc4Patherÿc0 :: danger " + (dMon.name || "?") + " d=" + Math.round(getDistance(me, dMon)) + " → clear");
-					}
-
-					if (Attack.shouldDangerClear() || dMon) {
-						Attack.clear(Attack.dangerClearRange() || 12);
-					}
-
-					path.unshift(node);
-					continue;
-				}
-
-				if (moved) {
-					if (wantTele) {
-						this._lastTeleTick = getTickCount();
-					}
-
-					if (!me.inTown) {
-						if (this.recursion) {
-							this.recursion = false;
-
-							// Always clear nearby during TeleDelay walks so we fight between teles
-							NodeAction.go({clearPath: clearPath || (this.useTeleport && !this.canTeleportNow())});
-
-							if (getDistance(me, node.x, node.y) > 5) {
-								this.moveTo(node.x, node.y);
-							}
-
-							this.recursion = true;
-						}
-
-						Misc.townCheck();
-					}
-				} else {
-					if (fail > 0 && !wantTele && !me.inTown) {
-						// Don't go berserk on longer paths
-						if (!cleared) {
-							Attack.clear(Attack.dangerClearRange() || 12);
-
-							cleared = true;
-						}
-
-						if (fail > 1 && me.getSkill(143, 1)) {
-							Skill.cast(143, 0, node.x, node.y);
-						}
-					}
-
-					// Retry with current mode (walk while delayed, tele when ready)
-					wantTele = this.useTeleport && this.canTeleportNow();
-					path = getPath(me.area, x, y, me.x, me.y, wantTele ? 1 : 0, wantTele ? rand(25, 35) : rand(10, 15));
-					fail += 1;
-
-					if (!path) {
-						throw new Error("moveTo: Failed to generate path.");
-					}
-
-					path.reverse();
-					pathIsTele = wantTele;
-					PathDebug.drawPath(path);
-
-					if (pop) {
-						path.pop();
-					}
-
-					print("move retry " + fail);
-
-					if (fail > 0 && fail >= retry) {
+					if (!path.length) {
 						break;
 					}
 				}
+
+				node = path.shift();
+				syncCurrentPath();
+
+				/* Right now getPath's first node is our own position so it's not necessary to take it into account
+					This will be removed if getPath changes
+				*/
+				if (getDistance(me, node) > 2) {
+					// Tight areas: Maggot Lair + Claw Viper Temple
+					if ([58, 61, 62, 63, 64].indexOf(me.area) > -1) {
+						adjustedNode = this.getNearestWalkable(node.x, node.y, 15, 3, 0x1 | 0x4 | 0x800 | 0x1000);
+
+						if (adjustedNode) {
+							node.x = adjustedNode[0];
+							node.y = adjustedNode[1];
+						}
+					}
+
+					// Only repath when we still have tele-spaced nodes on cooldown.
+					// Walk paths can have long gaps in town — walking them is fine; repath+continue spins forever.
+					if (!wantTele && pathIsTele && getDistance(me, node) > 12) {
+						if (!rebuildPath(false)) {
+							throw new Error("moveTo: Failed to generate path.");
+						}
+
+						continue;
+					}
+
+					// Goal-progress gate: never tele to a node farther from goal than we are
+					if (wantTele) {
+						meGoal = getDistance(me, x, y);
+						nodeGoal = getDistance(node.x, node.y, x, y);
+
+						if (nodeGoal > meGoal + backTol) {
+							continue;
+						}
+					}
+
+					// Pre-node: peel melee threats before walking into the next node.
+					// Never nest clears from moveTo-inside-clear (stack overflow).
+					if (this._moveDepth <= 1 && !Attack.clearing) {
+						if (!wantTele && Attack.shouldDangerClear()) {
+							dMon = Attack.inDanger();
+
+							if (dMon) {
+								print("ÿc4Patherÿc0 :: danger " + (dMon.name || "?") + " d=" + Math.round(getDistance(me, dMon)) + " → clear");
+								Attack.clear(Attack.dangerClearRange());
+							}
+						} else if (!wantTele && !this.canTeleport() && Attack.walkerTravelThreat()) {
+							print("ÿc4Patherÿc0 :: travel surround → clear");
+							Attack.clear(15);
+						}
+					}
+
+					this.dangerHit = false;
+					this.dangerCheck = !wantTele && !me.inTown;
+
+					// Jail etc: getPath hugs closed-door collision (left wall). Take the
+					// nearby doorway first — do not walkTo the wall node.
+					if (!wantTele && !me.inTown && doorClaims < 6 &&
+							[28, 29, 30, 31, 32, 33, 34, 35, 36].indexOf(me.area) > -1) {
+						if (this.takeProgressDoor()) {
+							doorClaims += 1;
+							this._doorOpened = false;
+							wantTele = this.useTeleport && this.canTeleportNow();
+							rebuildPath(wantTele);
+							continue;
+						}
+					}
+
+					// Walker chain: pass next path node so walkTo can click ahead before we idle at this node
+					if (wantTele) {
+						moved = this.teleportTo(node.x, node.y);
+					} else if (!me.inTown && path.length > 0) {
+						moved = this.walkTo(node.x, node.y, (fail > 0) ? 2 : 4, path[0].x, path[0].y);
+					} else {
+						moved = this.walkTo(node.x, node.y, (fail > 0 || me.inTown) ? 2 : 4);
+					}
+
+					this.dangerCheck = false;
+
+					if (!wantTele && this.dangerHit) {
+						this.dangerHit = false;
+
+						if (this._moveDepth <= 1 && !Attack.clearing) {
+							if (Attack.shouldDangerClear()) {
+								dMon = Attack.inDanger();
+
+								if (dMon) {
+									print("ÿc4Patherÿc0 :: danger " + (dMon.name || "?") + " d=" + Math.round(getDistance(me, dMon)) + " → clear");
+								}
+
+								Attack.clear(Attack.dangerClearRange() || 12);
+							} else {
+								print("ÿc4Patherÿc0 :: travel surround → clear");
+								Attack.clear(15);
+							}
+						}
+
+						path.unshift(node);
+						syncCurrentPath();
+						continue;
+					}
+
+					if (moved) {
+						if (wantTele) {
+							this._lastTeleTick = getTickCount();
+						}
+
+						cleared = 0;
+						doorClaims = 0;
+						walkerClears = 0;
+
+						// Door already crossed inside interactDoor. A second stepThrough
+						// aims at the far tile from the NEW side = back into the old room.
+						if (!wantTele && !me.inTown && (this._doorOpened || this.openDoors(node.x, node.y))) {
+							this._doorOpened = false;
+							doorClaims += 1;
+							wantTele = this.useTeleport && this.canTeleportNow();
+
+							if (doorClaims <= 4 && rebuildPath(wantTele)) {
+								continue;
+							}
+
+							if (!rebuildPath(wantTele)) {
+								path.unshift(node);
+								syncCurrentPath();
+							}
+
+							if (doorClaims > 4) {
+								fail += 1;
+								print("move retry " + fail + " (door spin)");
+
+								if (fail >= retry) {
+									break;
+								}
+							}
+
+							continue;
+						}
+
+						this._doorOpened = false;
+
+						if (!me.inTown) {
+							if (this.recursion) {
+								this.recursion = false;
+
+								try {
+									// Tele chars: full NodeAction (clearPath / shrine scans).
+									// Pure walkers: never NodeAction.go — clearPath:true used to skip
+									// walkerPriority and then killMonsters returned early (Inifuss surround).
+									if (this.canTeleport()) {
+										NodeAction.go({clearPath: clearPath || (this.useTeleport && !this.canTeleportNow())});
+									} else {
+										NodeAction.walkerAreaSpecials();
+
+										// Don't peel forever through Jail bars — 3 peels then keep walking
+										if (walkerClears < 3) {
+											didClear = NodeAction.walkerPriority(node, path);
+										} else {
+											didClear = false;
+										}
+
+										NodeAction.walkerNearGrab();
+
+										// After a pack peel, rebuild path — old corridor is often still blocked
+										if (didClear) {
+											walkerClears += 1;
+											wantTele = this.useTeleport && this.canTeleportNow();
+
+											if (!rebuildPath(wantTele)) {
+												throw new Error("moveTo: Failed to generate path.");
+											}
+
+											continue;
+										}
+									}
+
+									// SoloPlay-style: snap forward on remaining path — never return to old node
+									if (getDistance(me, node.x, node.y) > 5) {
+										// Drop nodes we already walked past while clearing
+										while (path.length > 0 && getDistance(me, path[0].x, path[0].y) <= 5) {
+											path.shift();
+										}
+
+										syncCurrentPath();
+										snapIdx = findForwardSnapIndex(node);
+
+										if (snapIdx > 0) {
+											path = path.slice(snapIdx);
+											syncCurrentPath();
+											continue;
+										}
+
+										if (snapIdx === 0) {
+											// Next node is already best — keep going (no backtrack)
+											continue;
+										}
+
+										// No forward snap — repath from here toward goal (never recursive return)
+										wantTele = this.useTeleport && this.canTeleportNow();
+
+										if (!rebuildPath(wantTele)) {
+											throw new Error("moveTo: Failed to generate path.");
+										}
+
+										continue;
+									}
+								} finally {
+									this.recursion = true;
+								}
+							}
+
+							Misc.townCheck();
+						}
+					} else {
+						if (!wantTele && !me.inTown) {
+							// SoloPlay stuck toolkit: door/barrel first, then peel mobs near me
+							if (this._doorOpened || (doorClaims < 5 && (this.openDoors(me.x, me.y) || this.openDoors(node.x, node.y) || this.kickBarrels(node.x, node.y)))) {
+								this._doorOpened = false;
+								doorClaims += 1;
+								wantTele = this.useTeleport && this.canTeleportNow();
+
+								if (!rebuildPath(wantTele)) {
+									path.unshift(node);
+									syncCurrentPath();
+								}
+
+								continue;
+							}
+
+							// First fail included — don't burn move retries while a pack is on us.
+							// Nested moveTo (peel → clear → moveTo) must not peel again — Barracks wall loop.
+							if (cleared < 2 && stuckClears < 4 && this._moveDepth <= 1 && !Attack.clearing) {
+								var blockMon = Attack.findNearestMonster(12);
+
+								if (blockMon) {
+									print("ÿc4Patherÿc0 :: stuck clear " + (blockMon.name || "?"));
+									Attack.clear(15);
+									cleared += 1;
+									stuckClears += 1;
+									path.unshift(node);
+									syncCurrentPath();
+									continue; // retry same node — no fail++ / move retry spam
+								}
+
+								if (typeof StutterLog !== "undefined") {
+									StutterLog.write("path.stuckNoMob", {fail: fail});
+								}
+							}
+
+							if (fail > 1 && me.getSkill(143, 1)) {
+								Skill.cast(143, 0, node.x, node.y);
+							}
+						}
+
+						// Retry with current mode (walk while delayed, tele when ready)
+						wantTele = this.useTeleport && this.canTeleportNow();
+						path = getPath(me.area, x, y, me.x, me.y, wantTele ? 1 : 0, wantTele ? rand(25, 35) : rand(10, 15));
+						fail += 1;
+
+						if (!path) {
+							throw new Error("moveTo: Failed to generate path.");
+						}
+
+						path.reverse();
+						pathIsTele = wantTele;
+						PathDebug.drawPath(path);
+
+						if (pop) {
+							path.pop();
+						}
+
+						if (wantTele) {
+							pruneBackteleNodes();
+						} else {
+							syncCurrentPath();
+						}
+
+						print("move retry " + fail);
+
+						if (fail > 0 && fail >= retry) {
+							break;
+						}
+					}
+				}
+
+				delay(5);
 			}
 
-			delay(5);
+			if (this.useTeleport && Config.TeleSwitch) {
+				Precast.weaponSwitch(Misc.oldSwitch);
+			}
+
+			PathDebug.removeHooks();
+
+			ok = getDistance(me, node.x, node.y) < 5;
+		} finally {
+			this.currentPath = savedPath;
+			this._moveDepth = Math.max(0, (this._moveDepth || 1) - 1);
 		}
 
-		if (this.useTeleport && Config.TeleSwitch) {
-			Precast.weaponSwitch(Misc.oldSwitch);
-		}
-
-		PathDebug.removeHooks();
-
-		return getDistance(me, node.x, node.y) < 5;
+		return ok;
 	},
 
 	/*
@@ -641,8 +1320,9 @@ var Pather = {
 		x - the x coord to walk to
 		y - the y coord to walk to
 		minDist - minimal distance from x/y before returning true
+		nextX/nextY - optional next path node; while still running, click ahead so we never stop at x/y
 	*/
-	walkTo: function (x, y, minDist) {
+	walkTo: function (x, y, minDist, nextX, nextY) {
 		while (!me.gameReady) {
 			delay(100);
 		}
@@ -651,17 +1331,24 @@ var Pather = {
 			minDist = me.inTown ? 2 : 4;
 		}
 
-		var i, angle, angles, nTimer, whereToClick, tick,
+		var i, angle, angles, whereToClick,
 			nFail = 0,
 			attemptCount = 0,
 			lastDangerPoll = 0,
 			nearEmpty = false,
-			pollMs, dMon;
+			pollMs, dMon, stamPct, lastDist, curDist, lastProgressTick, lastClickTick, lastDoorTick,
+			hasNext = (nextX !== undefined && nextY !== undefined),
+			handOff = Math.max(minDist + 6, 10),
+			tx = x,
+			ty = y,
+			chained = false;
 
-		// Poll Attack.inDanger on the PollMs cadence (backoff when area is empty).
+		// Poll threats on the PollMs cadence (backoff when area is empty).
 		// Only active when moveTo set Pather.dangerCheck (direct walkTo from getIntoPosition skips this).
+		// Tele chars: normal DangerClear. Pure walkers: surround-only (2+ in peel range) so WP/objective
+		// runs don't ignore packs, without lone-Fallen stutter from WhileWalking.
 		var pollDanger = function () {
-			if (!Pather.dangerCheck || me.inTown || Attack.clearing || !Attack.shouldDangerClear()) {
+			if (!Pather.dangerCheck || me.inTown || Attack.clearing) {
 				return false;
 			}
 
@@ -676,31 +1363,88 @@ var Pather = {
 			}
 
 			lastDangerPoll = getTickCount();
-			dMon = Attack.inDanger();
 
-			if (Attack._dangerCache) {
-				nearEmpty = !!Attack._dangerCache.nearEmpty;
+			if (Attack.shouldDangerClear()) {
+				dMon = Attack.inDanger();
+
+				if (Attack._dangerCache) {
+					nearEmpty = !!Attack._dangerCache.nearEmpty;
+				}
+
+				if (dMon) {
+					Pather.dangerHit = true;
+					Misc.click(0, 0, me.x, me.y); // stop walking
+
+					if (typeof StutterLog !== "undefined") {
+						StutterLog.write("stop.danger", {
+							name: dMon.name || "?",
+							d: Math.round(getDistance(me, dMon))
+						});
+					}
+
+					return true;
+				}
+
+				return false;
 			}
 
-			if (dMon) {
+			// Pure walker travel: only stop when surrounded
+			if (Attack.walkerTravelThreat()) {
+				nearEmpty = false;
 				Pather.dangerHit = true;
-				Misc.click(0, 0, me.x, me.y); // stop walking
+				Misc.click(0, 0, me.x, me.y);
+
+				if (typeof StutterLog !== "undefined") {
+					StutterLog.write("stop.surround", {
+						n: Attack.countNearMonsters(Attack.clearPeelRange()),
+						peel: Attack.clearPeelRange()
+					});
+				}
 
 				return true;
 			}
 
+			nearEmpty = Attack.countNearMonsters(Attack.clearPeelRange() * 2) === 0;
+
 			return false;
 		};
 
-		// Stamina handler and Charge
-		if (!me.inTown && !me.dead) {
-			if (me.runwalk === 1 && me.stamina / me.staminamax * 100 <= 20) {
-				me.runwalk = 0;
+		// Stamina run/walk hysteresis (field only; town always runs).
+		// Untoggle to walk when low so stam regenerates; only re-run after a wide recovery
+		// gap — the old ≤20%/≥50% flip on tiny early bars stuttered; ≥10% instant re-run
+		// never let walk stick at all. Drink pots via Config.UseStaminaPotion (ToolsThread).
+		var syncRunWalk = function () {
+			if (me.dead) {
+				return;
 			}
 
-			if (me.runwalk === 0 && me.stamina / me.staminamax * 100 >= 50) {
-				me.runwalk = 1;
+			if (me.inTown) {
+				if (me.runwalk === 0) {
+					me.runwalk = 1;
+				}
+
+				return;
 			}
+
+			stamPct = me.staminamax > 0 ? (me.stamina * 100 / me.staminamax) : 100;
+
+			if (stamPct <= 20 && me.runwalk === 1) {
+				me.runwalk = 0;
+
+				if (typeof StutterLog !== "undefined") {
+					StutterLog.write("runwalk.walk", {stamPct: Math.round(stamPct)});
+				}
+			} else if (stamPct >= 55 && me.runwalk === 0) {
+				me.runwalk = 1;
+
+				if (typeof StutterLog !== "undefined") {
+					StutterLog.write("runwalk.run", {stamPct: Math.round(stamPct)});
+				}
+			}
+		};
+
+		if (!me.inTown && !me.dead) {
+			syncRunWalk();
 
 			if (Config.Charge && me.classid === 3 && me.mp >= 9 && getDistance(me.x, me.y, x, y) > 8 && Skill.setSkill(107, 1)) {
 				if (Config.Vigor) {
@@ -719,85 +1463,573 @@ var Pather = {
 			me.runwalk = 1;
 		}
 
+		// Continuous run: click current node; when close + still moving + have next, redirect to next
+		// so the game never treats the path node as a final stop (that was the pathing stutter).
+		Misc.click(0, 0, tx, ty);
+		lastProgressTick = getTickCount();
+		lastClickTick = getTickCount();
+		lastDist = getDistance(me.x, me.y, x, y);
+		lastDoorTick = 0;
+
 		while (getDistance(me.x, me.y, x, y) > minDist && !me.dead) {
 			if (me.classid === 3 && Config.Vigor) {
 				Skill.setSkill(115, 0);
 			}
 
-			if (this.openDoors(x, y) && getDistance(me.x, me.y, x, y) <= minDist) {
+			syncRunWalk();
+
+			// Indoor + outdoor: open doors on the path. Do NOT takeProgressDoor every
+			// frame — that fights walkTo's wall-node clicks. moveTo owns the side-door.
+			if (me.inTown || [28, 29, 30, 31, 32, 33, 34, 35, 36].indexOf(me.area) > -1 ||
+					getTickCount() - lastDoorTick >= 150) {
+				lastDoorTick = getTickCount();
+
+				if (this.openDoors(me.x, me.y) || this.openDoors(x, y)) {
+					// Through the doorway — do not keep clicking the wall node
+					return true;
+				}
+			}
+
+			if (pollDanger()) {
 				return true;
 			}
 
-			Misc.click(0, 0, x, y);
+			curDist = getDistance(me.x, me.y, x, y);
 
-			attemptCount += 1;
-			nTimer = getTickCount();
+			// Chain handoff: still running, close to this node → aim at next so we don't idle here.
+			// Never chain along a wall past a side door, or toward a node 16yd+ through collision.
+			if (hasNext && !chained && !me.inTown && curDist <= handOff &&
+					(me.mode === 2 || me.mode === 3 || me.mode === 6)) {
+				if (this.closedDoorBlocks(nextX, nextY) ||
+						this.findProgressDoor(null, null, 18) ||
+						([28, 29, 30, 31, 32, 33, 34, 35, 36].indexOf(me.area) > -1 &&
+							getDistance(me, nextX, nextY) > 16)) {
+					if (getTickCount() - lastDoorTick >= 200) {
+						lastDoorTick = getTickCount();
 
-ModeLoop:
-			while (me.mode !== 2 && me.mode !== 3 && me.mode !== 6) {
-				if (me.dead) {
+						if (this.takeProgressDoor() || this.openDoors(me.x, me.y)) {
+							return true;
+						}
+					}
+					// stay on this node until door is open / crossed
+				} else {
+					Misc.click(0, 0, nextX, nextY);
+					lastClickTick = getTickCount();
+					chained = true;
+
+					if (typeof StutterLog !== "undefined") {
+						StutterLog.write("path.chain", {
+							dist: Math.round(curDist),
+							handOff: handOff,
+							mode: me.mode
+						});
+					}
+
+					return true;
+				}
+			}
+
+			if (curDist < lastDist - 0.5) {
+				lastProgressTick = getTickCount();
+				attemptCount = 0;
+			}
+
+			// Standing still while still far — re-issue click (only when actually idle)
+			if (me.mode === 1 || (me.inTown && me.mode === 5 && curDist >= lastDist - 0.5)) {
+				if (getTickCount() - lastClickTick > (me.inTown ? 400 : 250)) {
+					attemptCount += 1;
+
+					if (typeof StutterLog !== "undefined" && attemptCount <= 8) {
+						StutterLog.write("stop.reclick", {
+							attempt: attemptCount,
+							mode: me.mode,
+							dist: Math.round(curDist),
+							minDist: minDist,
+							stam: me.staminamax > 0 ? Math.round(me.stamina * 100 / me.staminamax) : -1,
+							runwalk: me.runwalk
+						});
+					}
+
+					Misc.click(0, 0, chained ? nextX : tx, chained ? nextY : ty);
+					lastClickTick = getTickCount();
+				}
+			}
+
+			lastDist = curDist;
+
+			// Stuck: no distance progress for 1.5s
+			if (getTickCount() - lastProgressTick > 1500) {
+				nFail += 1;
+
+				if (nFail >= 3) {
 					return false;
 				}
 
-				if (pollDanger()) {
+				// Stuck hugging a wall: door is beside us, not at the far node
+				this.kickBarrels(me.x, me.y);
+
+				if (this.takeProgressDoor() || this.openDoors(me.x, me.y)) {
 					return true;
 				}
 
-				if ((getTickCount() - nTimer) > 500) {
-					nFail += 1;
+				this.openDoors(x, y);
 
-					if (nFail >= 3) {
-						return false;
+				angle = Math.atan2(me.y - y, me.x - x);
+				angles = [Math.PI / 2, -Math.PI / 2];
+
+				for (i = 0; i < angles.length; i += 1) {
+					whereToClick = {
+						x: Math.round(Math.cos(angle + angles[i]) * 5 + me.x),
+						y: Math.round(Math.sin(angle + angles[i]) * 5 + me.y)
+					};
+
+					if (Attack.validSpot(whereToClick.x, whereToClick.y)) {
+						Misc.click(0, 0, whereToClick.x, whereToClick.y);
+						delay(200);
+						break;
 					}
-
-					angle = Math.atan2(me.y - y, me.x - x);
-					angles = [Math.PI / 2, -Math.PI / 2];
-
-					for (i = 0; i < angles.length; i += 1) {
-						// TODO: might need rework into getnearestwalkable
-						whereToClick = {
-							x: Math.round(Math.cos(angle + angles[i]) * 5 + me.x),
-							y: Math.round(Math.sin(angle + angles[i]) * 5 + me.y)
-						};
-
-						if (Attack.validSpot(whereToClick.x, whereToClick.y)) {
-							Misc.click(0, 0, whereToClick.x, whereToClick.y);
-
-							tick = getTickCount();
-
-							while (getDistance(me, whereToClick) > 2 && getTickCount() - tick < 1000) {
-								if (pollDanger()) {
-									return true;
-								}
-
-								delay(40);
-							}
-
-							break;
-						}
-					}
-
-					break ModeLoop;
 				}
 
-				delay(10);
+				Misc.click(0, 0, chained ? nextX : tx, chained ? nextY : ty);
+				lastClickTick = getTickCount();
+				lastProgressTick = getTickCount();
 			}
 
-			// Wait until we're done walking - idle or dead
-			while (getDistance(me.x, me.y, x, y) > minDist && me.mode !== 1 && me.mode !== 5 && !me.dead) {
-				if (pollDanger()) {
-					return true;
-				}
-
-				delay(10);
-			}
-
-			if (attemptCount >= 3) {
-				return false;
-			}
+			delay(10);
 		}
 
 		return !me.dead && getDistance(me.x, me.y, x, y) <= minDist;
+	},
+
+	// Confirmed door tiles (stutter logs: 25 cloister, 64/16 catacombs). Do NOT add 13–16 blindly —
+	// LoD 13–16 are urn/chest/barrel and steal Jail door clicks.
+	doorClassIds: [25, 59, 62, 64],
+
+	doorUnitName: function (unit) {
+		if (!unit || !unit.name) {
+			return "";
+		}
+
+		return String(unit.name).toLowerCase().replace(/ÿc[0-9a-z]/gi, "");
+	},
+
+	isClosedDoorUnit: function (unit) {
+		var name, cid;
+
+		if (!unit || unit.type !== 2) {
+			return false;
+		}
+
+		// Open
+		if (unit.mode === 2) {
+			return false;
+		}
+
+		name = this.doorUnitName(unit);
+		cid = unit.classid;
+
+		if (name.indexOf("barrel") > -1 || name.indexOf("chest") > -1 || name.indexOf("casket") > -1 ||
+				name.indexOf("urn") > -1 || name.indexOf("shrine") > -1 || name.indexOf("corpse") > -1) {
+			return false;
+		}
+
+		// Name is the reliable PD2 signal (classids shift). Closed = mode 0 (classic) or 1.
+		if (name.indexOf("door") > -1 || name.indexOf("gate") > -1 || name.indexOf("portcullis") > -1) {
+			return unit.mode === 0 || unit.mode === 1;
+		}
+
+		if (this.doorClassIds.indexOf(cid) > -1) {
+			return unit.mode === 0 || unit.mode === 1;
+		}
+
+		return false;
+	},
+
+	// Nearest closed door within playerRange of me, or nodeRange of (x,y) if given
+	findClosedDoorNear: function (x, y, playerRange, nodeRange) {
+		var unit, best, dMe, dNode, bestD;
+
+		if (playerRange === undefined) {
+			playerRange = 10;
+		}
+
+		if (nodeRange === undefined) {
+			nodeRange = 8;
+		}
+
+		best = null;
+		bestD = 999;
+		unit = getUnit(2);
+
+		if (!unit) {
+			return null;
+		}
+
+		do {
+			if (!this.isClosedDoorUnit(unit)) {
+				continue;
+			}
+
+			dMe = getDistance(me, unit);
+			dNode = (typeof x === "number" && typeof y === "number") ? getDistance(unit, x, y) : 999;
+
+			if (dMe > playerRange && dNode > nodeRange) {
+				continue;
+			}
+
+			if (dMe < bestD) {
+				bestD = dMe;
+				best = copyUnit(unit);
+			}
+		} while (unit.getNext());
+
+		return best;
+	},
+
+	// Nearest closed door in this room. Do not score by crow-flies-to-stairs —
+	// Jail L2: stairs are "left" along the wall, doorway is on the right.
+	findProgressDoor: function (gx, gy, range) {
+		var unit, best, dMe, bestD;
+
+		if (range === undefined) {
+			range = 20;
+		}
+
+		best = null;
+		bestD = 999;
+		unit = getUnit(2);
+
+		if (!unit) {
+			return null;
+		}
+
+		do {
+			if (!this.isClosedDoorUnit(unit)) {
+				continue;
+			}
+
+			dMe = getDistance(me, unit);
+
+			if (dMe <= range && dMe < bestD) {
+				bestD = dMe;
+				best = copyUnit(unit);
+			}
+		} while (unit.getNext());
+
+		return best;
+	},
+
+	takeProgressDoor: function () {
+		var door, ok;
+
+		if (me.inTown) {
+			return false;
+		}
+
+		door = this.findProgressDoor(null, null, 20);
+
+		if (!door) {
+			return false;
+		}
+
+		print("ÿc2Patherÿc0 :: side door id=" + door.classid + " d=" + Math.round(getDistance(me, door)));
+
+		ok = this.interactDoor(door);
+
+		if (typeof StutterLog !== "undefined") {
+			StutterLog.write("path.progressDoor", {
+				id: door.classid,
+				d: Math.round(getDistance(me, door)),
+				ok: ok ? 1 : 0
+			});
+		}
+
+		return ok;
+	},
+
+	_tileWalkable: function (tx, ty) {
+		var coll;
+
+		try {
+			coll = CollMap.getColl(tx, ty, false);
+		} catch (eColl) {
+			return false;
+		}
+
+		return !(coll & 0x1);
+	},
+
+	// Walkable tile beside a door. nearestToMe = our side of the doorway.
+	doorSideTile: function (door, nearestToMe) {
+		var r, i, j, tx, ty, d, best, bestD, mx, my, wx, wy;
+
+		if (!door) {
+			return null;
+		}
+
+		best = null;
+		bestD = nearestToMe ? 999 : -1;
+		mx = me.x - door.x;
+		my = me.y - door.y;
+
+		for (r = 2; r <= 6; r += 1) {
+			for (i = -r; i <= r; i += 1) {
+				for (j = -r; j <= r; j += 1) {
+					if (Math.abs(i) !== r && Math.abs(j) !== r) {
+						continue;
+					}
+
+					tx = Math.round(door.x + i);
+					ty = Math.round(door.y + j);
+
+					if (!this._tileWalkable(tx, ty)) {
+						continue;
+					}
+
+					wx = tx - door.x;
+					wy = ty - door.y;
+
+					if (nearestToMe) {
+						// Same side as us (not through the door)
+						if (wx * mx + wy * my <= 0) {
+							continue;
+						}
+
+						d = getDistance(me, tx, ty);
+
+						if (d < bestD) {
+							bestD = d;
+							best = {x: tx, y: ty};
+						}
+					} else if (wx * mx + wy * my < 0) {
+						d = getDistance(me, tx, ty);
+
+						if (d > bestD) {
+							bestD = d;
+							best = {x: tx, y: ty};
+						}
+					}
+				}
+			}
+
+			if (best) {
+				return best;
+			}
+		}
+
+		return best;
+	},
+
+	clickWalkTo: function (tx, ty, range, ms) {
+		var tick, lastClick;
+
+		if (typeof range !== "number") {
+			range = 3;
+		}
+
+		if (typeof ms !== "number") {
+			ms = 1800;
+		}
+
+		Misc.click(0, 0, tx, ty);
+		tick = getTickCount();
+		lastClick = tick;
+
+		while (getDistance(me, tx, ty) > range && getTickCount() - tick < ms && !me.dead) {
+			if ((me.mode === 1 || me.mode === 5) && getTickCount() - lastClick > 350) {
+				Misc.click(0, 0, tx, ty);
+				lastClick = getTickCount();
+			}
+
+			delay(40);
+		}
+
+		return getDistance(me, tx, ty) <= range + 2;
+	},
+
+	// Closed door roughly between me and (nx, ny) — blocks walk chain handoff
+	closedDoorBlocks: function (nx, ny) {
+		var door, dMe, dNode, span;
+
+		if (typeof nx !== "number" || typeof ny !== "number") {
+			return false;
+		}
+
+		door = this.findClosedDoorNear(nx, ny, 10, 8);
+
+		if (!door) {
+			return false;
+		}
+
+		dMe = getDistance(me, door);
+		dNode = getDistance(door, nx, ny);
+		span = getDistance(me, nx, ny);
+
+		// Door sits on the way to the next node (not behind us / off to the side)
+		return dMe + dNode <= span + 4;
+	},
+
+	// Resolve live door unit by gid (then classid near coords)
+	_freshDoor: function (door) {
+		var unit, best, d, bestD;
+
+		if (!door) {
+			return null;
+		}
+
+		try {
+			unit = getUnit(2, -1, -1, door.gid);
+
+			if (unit) {
+				return unit;
+			}
+		} catch (eGid) {}
+
+		unit = getUnit(2);
+
+		if (!unit) {
+			return null;
+		}
+
+		best = null;
+		bestD = 999;
+
+		do {
+			if (unit.gid === door.gid) {
+				return unit;
+			}
+
+			if (door.classid && unit.classid === door.classid) {
+				d = getDistance(unit, door.x, door.y);
+
+				if (d < bestD && d < 6) {
+					bestD = d;
+					best = unit;
+				}
+			}
+		} while (unit.getNext());
+
+		return best;
+	},
+
+	// Cross to the far side of the doorway. Never aim at far stairs (_moveGoal) —
+	// that heading is this room's left wall.
+	stepThroughDoor: function (door) {
+		var ox, oy, far, tx, ty, tick, dx, dy, len;
+
+		ox = (door && door.x) ? door.x : (this._lastDoorX || me.x);
+		oy = (door && door.y) ? door.y : (this._lastDoorY || me.y);
+		far = this.doorSideTile(door || {x: ox, y: oy}, false);
+
+		if (far) {
+			tx = far.x;
+			ty = far.y;
+		} else {
+			dx = ox - me.x;
+			dy = oy - me.y;
+			len = Math.sqrt(dx * dx + dy * dy) || 1;
+			tx = Math.round(ox + (dx / len) * 5);
+			ty = Math.round(oy + (dy / len) * 5);
+		}
+
+		try {
+			CollMap.reset();
+		} catch (eColl) {}
+
+		delay(80 + (me.ping || 0));
+		this.clickWalkTo(tx, ty, 4, 900);
+
+		if (typeof StutterLog !== "undefined") {
+			StutterLog.write("path.throughDoor", {tx: tx, ty: ty, d: Math.round(getDistance(me, tx, ty))});
+		}
+
+		return getDistance(me, tx, ty) < 10;
+	},
+
+	// Walk to a floor tile on OUR side of the door, then click it.
+	// Clicking the door unit from 8–12yd uses game pathing around its collision → left wall.
+	interactDoor: function (door) {
+		var i, fresh, approach, opened;
+
+		if (!door) {
+			return false;
+		}
+
+		this._lastDoorX = door.x;
+		this._lastDoorY = door.y;
+		opened = false;
+
+		if (getDistance(me, door) > 4) {
+			approach = this.doorSideTile(door, true);
+
+			if (approach) {
+				this.clickWalkTo(approach.x, approach.y, 2, 2000);
+			}
+
+			if (getDistance(me, door) > 4) {
+				// Step toward the door on open floor (don't click the door unit — that hugs)
+				this.clickWalkTo(
+					Math.round(me.x + (door.x - me.x) * 0.55),
+					Math.round(me.y + (door.y - me.y) * 0.55),
+					2,
+					1200
+				);
+			}
+		}
+
+		for (i = 0; i < 6; i += 1) {
+			fresh = this._freshDoor(door);
+
+			if (!fresh) {
+				delay(50);
+				continue;
+			}
+
+			if (!this.isClosedDoorUnit(fresh)) {
+				opened = true;
+				break;
+			}
+
+			if (i === 0 && me.getSkill(43, 1)) {
+				Skill.cast(43, 0, fresh);
+				delay(180 + me.ping);
+				fresh = this._freshDoor(door);
+
+				if (fresh && !this.isClosedDoorUnit(fresh)) {
+					opened = true;
+					break;
+				}
+			}
+
+			try {
+				sendPacket(1, 0x13, 4, fresh.type, 4, fresh.gid);
+			} catch (ePkt) {}
+
+			Misc.click(0, 0, fresh);
+			delay(200 + me.ping);
+			fresh = this._freshDoor(door);
+
+			if (fresh && !this.isClosedDoorUnit(fresh)) {
+				opened = true;
+				break;
+			}
+		}
+
+		if (!opened) {
+			return false;
+		}
+
+		me.overhead("Opened a door!");
+		Pather._doorOpened = true;
+
+		if (typeof StutterLog !== "undefined") {
+			StutterLog.write("path.openDoor", {id: door.classid, d: Math.round(getDistance(me, door))});
+		}
+
+		fresh = this._freshDoor(door) || door;
+		this.stepThroughDoor(fresh);
+
+		return true;
 	},
 
 	/*
@@ -806,26 +2038,66 @@ ModeLoop:
 		y - the y coord of the node close to the door
 	*/
 	openDoors: function (x, y) {
-		if (me.inTown) {
+		if (me.inTown && me.act !== 5) {
 			return false;
 		}
 
-		// Regular doors
-		var i, tick,
-			door = getUnit(2, "door", 0);
+		var i, p, tick, skill, door, gate, monstadoor, monstawall, opened;
+
+		opened = false;
+
+		// Classic kolbot: every closed "door" in range. Jail rooms: 12yd from player
+		// (screenshot door sat ~8–10yd on the right while we scanned 5yd and missed it).
+		door = getUnit(2, "door", 0);
 
 		if (door) {
 			do {
-				if ((getDistance(door, x, y) < 4 && getDistance(me, door) < 9) || getDistance(me, door) < 4) {
+				if (getDistance(me, door) < 18 || (getDistance(door, x, y) < 10 && getDistance(me, door) < 22)) {
+					if (this.interactDoor(copyUnit(door))) {
+						opened = true;
+					}
+				}
+			} while (door.getNext());
+		}
+
+		gate = getUnit(2, "gate", 0);
+
+		if (gate) {
+			do {
+				if (getDistance(me, gate) < 18 || (getDistance(gate, x, y) < 10 && getDistance(me, gate) < 22)) {
+					if (this.interactDoor(copyUnit(gate))) {
+						opened = true;
+					}
+				}
+			} while (gate.getNext());
+		}
+
+		door = this.findClosedDoorNear(x, y, 18, 12);
+
+		if (door && this.interactDoor(door)) {
+			opened = true;
+		}
+
+		if (opened) {
+			return true;
+		}
+
+		// Act 5 town / foothills gate
+		if (me.area === 109 || me.area === 110) {
+			gate = getUnit(2, "gate", 0);
+
+			if (gate) {
+				if ((getDistance(gate, x, y) < 6 && getDistance(me, gate) < 9) || getDistance(me, gate) < 4) {
 					for (i = 0; i < 3; i += 1) {
-						Misc.click(0, 0, door);
-						//door.interact();
+						Misc.click(0, 0, gate);
 
 						tick = getTickCount();
 
 						while (getTickCount() - tick < 1000) {
-							if (door.mode === 2) {
-								me.overhead("Opened a door!");
+							if (gate.mode) {
+								if (typeof StutterLog !== "undefined") {
+									StutterLog.write("path.openGate", {});
+								}
 
 								return true;
 							}
@@ -834,12 +2106,127 @@ ModeLoop:
 						}
 					}
 				}
-			} while (door.getNext());
+			}
 		}
 
-		// DO: Monsta doors (Barricaded)
+		// Barricaded doors / walls — configured attack skill only
+		skill = (Config.AttackSkill && Config.AttackSkill[1] >= 0) ? Config.AttackSkill[1] : 0;
+		monstadoor = getUnit(1, "barricaded door");
+
+		if (monstadoor) {
+			do {
+				if (monstadoor.hp > 0 &&
+						((getDistance(monstadoor, x, y) < 4 && getDistance(me, monstadoor) < 9) ||
+							getDistance(me, monstadoor) < 4)) {
+					for (p = 0; p < 20 && monstadoor.hp; p += 1) {
+						Skill.cast(skill, Skill.getHand(skill), monstadoor);
+					}
+
+					if (typeof StutterLog !== "undefined") {
+						StutterLog.write("path.barricadeDoor", {});
+					}
+
+					return true;
+				}
+			} while (monstadoor.getNext());
+		}
+
+		monstawall = getUnit(1, "barricade");
+
+		if (monstawall) {
+			do {
+				if (monstawall.hp > 0 &&
+						((getDistance(monstawall, x, y) < 4 && getDistance(me, monstawall) < 9) ||
+							getDistance(me, monstawall) < 4)) {
+					for (p = 0; p < 20 && monstawall.hp; p += 1) {
+						Skill.cast(skill, Skill.getHand(skill), monstawall);
+					}
+
+					if (typeof StutterLog !== "undefined") {
+						StutterLog.write("path.barricade", {});
+					}
+
+					return true;
+				}
+			} while (monstawall.getNext());
+		}
 
 		return false;
+	},
+
+	/*
+		Kick small breakables blocking a walk node (SoloPlay kickBarrels idea).
+	*/
+	kickBarrels: function (x, y) {
+		var i, unit, name, broke, barrels,
+			barrelNames = [
+				"ratnest", "goo pile", "barrel", "basket",
+				"largeurn", "jar3", "jar2", "jar1",
+				"urn", "jug", "barrel wilderness", "cocoon"
+			];
+
+		if (me.inTown) {
+			return false;
+		}
+
+		if (typeof x !== "number" || typeof y !== "number") {
+			x = me.x;
+			y = me.y;
+		}
+
+		broke = false;
+		barrels = [];
+		unit = getUnit(2);
+
+		if (!unit) {
+			return false;
+		}
+
+		do {
+			if (!unit.name || unit.mode !== 0) {
+				continue;
+			}
+
+			name = unit.name.toLowerCase();
+
+			if (barrelNames.indexOf(name) < 0) {
+				continue;
+			}
+
+			if (!((getDistance(unit, x, y) < 4 && getDistance(me, unit) < 9) || getDistance(me, unit) < 4)) {
+				continue;
+			}
+
+			barrels.push(copyUnit(unit));
+		} while (unit.getNext());
+
+		while (barrels.length > 0) {
+			barrels.sort(Sort.units);
+			unit = barrels.shift();
+
+			if (!unit || checkCollision(me, unit, 0x5)) {
+				continue;
+			}
+
+			try {
+				for (i = 0; i < 5; i += 1) {
+					Misc.click(0, 0, unit);
+
+					if (unit.mode) {
+						broke = true;
+						break;
+					}
+
+					delay(40);
+				}
+			} catch (eKick) {}
+		}
+
+		if (broke && typeof StutterLog !== "undefined") {
+			StutterLog.write("path.kickBarrel", {});
+		}
+
+		return broke;
 	},
 
 	/*
@@ -1172,8 +2559,53 @@ ModeLoop:
 					return false;
 				}
 
-				if (!this.moveTo(dest[0], dest[1], 3, clearPath)) {
-					return false;
+				// Jail/Barracks stairs: collision often marks the last tiles unwalkable.
+				// Logs show abort at ~40yd with same X as exit — don't burn 40–90s, use stairs.
+				exitDist = getDistance(me, currExit.x, currExit.y);
+				this.openDoors(me.x, me.y);
+				this.openDoors(currExit.x, currExit.y);
+
+				if (exitDist > 20) {
+					var oldTo = this.moveTimeout,
+						monastery = [28, 29, 30, 31, 32, 33, 34, 35].indexOf(me.area) > -1,
+						reached = false;
+
+					// Near stairs → short leash. Far Jail/Cata maze → 60s. Barracks stays 40s.
+					if (exitDist <= 55 && monastery) {
+						this.moveTimeout = 12000;
+					} else if (monastery && me.area !== 28) {
+						this.moveTimeout = Math.max(this.moveTimeout || 40000, 60000);
+					}
+
+					try {
+						reached = this.moveTo(dest[0], dest[1], 3, clearPath);
+					} finally {
+						this.moveTimeout = oldTo;
+					}
+
+					if (!reached) {
+						this.openDoors(me.x, me.y);
+						this.openDoors(currExit.x, currExit.y);
+						exitDist = getDistance(me, currExit.x, currExit.y);
+
+						print("ÿc8Pather.moveToExitÿc0 :: path incomplete " + me.area + " → " + areas[i] +
+							" dExit=" + Math.round(exitDist) + " — fallback (no stair hunt)");
+
+						if (use || i < areas.length - 1) {
+							if (this.useExitFallback(areas[i], currExit)) {
+								continue;
+							}
+
+							if (this.tryWalkThroughExit(areas[i], currExit)) {
+								continue;
+							}
+						}
+
+						return false;
+					}
+				} else {
+					print("ÿc8Pather.moveToExitÿc0 :: already at exit d=" + Math.round(exitDist) +
+						" — skip moveTo, use stairs");
 				}
 
 				/* i < areas.length - 1 is for crossing multiple areas.
@@ -1194,6 +2626,12 @@ ModeLoop:
 						break;
 					case 2: // stairs / cave mouth
 						if (!this.openExit(areas[i]) && !this.useUnit(5, currExit.tileid, areas[i])) {
+							// Jail L2+ / Catacombs stairs — not Barracks (PD2 has no "stair" object in 28)
+							if ([29, 30, 31, 33, 34, 35, 36].indexOf(me.area) > -1 &&
+									this.useUnit(2, "stair", areas[i])) {
+								break;
+							}
+
 							// PD2 Flayer Jungle: fort(53) vs hole(54) — try sibling warp id before fallback
 							if ((me.area === 78 && (areas[i] === 86 || areas[i] === 88)) ||
 									((me.area === 86 || me.area === 88) && areas[i] === 78)) {
@@ -1298,6 +2736,24 @@ ModeLoop:
 			return this.useUnit(2, 74, targetArea);
 		case 93:
 			return this.useUnit(2, 366, targetArea);
+		case 29: // Jail L1 from Barracks — PD2: no object named "stair"
+			if (me.area === 28) {
+				break;
+			}
+			// fall through for Jail L2+ / Catacombs
+		case 30:
+		case 31:
+		case 32:
+		case 33:
+		case 34:
+		case 35:
+		case 36:
+		case 37:
+			if ([29, 30, 31, 33, 34, 35, 36].indexOf(me.area) > -1) {
+				return this.useUnit(2, "stair", targetArea);
+			}
+
+			break;
 		case 94:
 		case 95:
 		case 96:
@@ -1849,7 +3305,10 @@ ModeLoop:
 									return true;
 								}
 
-								throw new Error("Pather.useWaypoint: Failed to go to waypoint");
+								// Soft-fail — throw killed AutoSmurf and looked like a client crash loop
+								print("ÿc1Pather.useWaypointÿc0 :: Failed to go to waypoint " + targetArea + " (area " + me.area + ")");
+
+								return false;
 							}
 
 							break;

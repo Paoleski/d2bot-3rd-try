@@ -4292,6 +4292,37 @@ var Pd2Stack = {
 
 	// --- PD2 junk jewels + key → Jewel Fragments (1–15 jewels + key) ---
 
+	// Plain one-line mod dump for junk→jewf logs (before the item is destroyed)
+	describeJunkJewel: function (unit) {
+		var desc, q, name;
+
+		if (!unit) {
+			return "?";
+		}
+
+		q = unit.quality === 6 ? "rare" : unit.quality === 4 ? "magic" : ("q" + (unit.quality || "?"));
+
+		try {
+			if (typeof Misc !== "undefined" && typeof Misc.getItemDesc === "function") {
+				desc = Misc.getItemDesc(unit).split("\n").join(" | ")
+					.replace(/(\\xff|ÿ)c[0-9a-z!"+<:;.*]/gi, "").replace(/^\s+|\s+$/g, "");
+
+				if (desc) {
+					return desc;
+				}
+			}
+		} catch (eDesc) {}
+
+		try {
+			name = String(unit.fname || unit.name || "Jewel").split("\n").reverse().join(" ")
+				.replace(/ÿc[0-9a-z]/gi, "").replace(/^\s+|\s+$/g, "");
+		} catch (eName) {
+			name = "Jewel";
+		}
+
+		return q + " " + name + " ilvl" + (unit.ilvl || "?");
+	},
+
 	listJunkJewels: function () {
 		var items, i, out = [];
 
@@ -4330,7 +4361,8 @@ var Pd2Stack = {
 	 * Call after Cubing.doCubing so craft recipes get jewels first.
 	 */
 	cubeJunkJewelsAtStash: function () {
-		var jewels, keyItem, cube, made, batch, i, jew, moved, before, after, passes;
+		var jewels, keyItem, cube, made, batch, i, jew, moved, before, after, passes,
+			batchDescs, detail;
 
 		if (typeof Config !== "undefined" && Config.Pd2CubeJunkJewels === false) {
 			return false;
@@ -4403,6 +4435,7 @@ var Pd2Stack = {
 
 			moved = 0;
 			batch = Math.min(15, jewels.length);
+			batchDescs = [];
 
 			this.log("ÿc4Pd2Stackÿc0 :: cubeJunkJewels " + batch + " jewel(s) + key");
 
@@ -4413,11 +4446,23 @@ var Pd2Stack = {
 					continue;
 				}
 
+				// Snapshot mods before cube move (item gone after transmute)
+				detail = {
+					desc: this.describeJunkJewel(jew),
+					quality: jew.quality || 0,
+					qualityName: jew.quality === 6 ? "rare" : jew.quality === 4 ? "magic" : String(jew.quality || ""),
+					ilvl: jew.ilvl || 0,
+					classid: jew.classid,
+					gid: jew.gid,
+					code: jew.code || ""
+				};
+
 				if (!Storage.Cube.MoveTo(jew)) {
 					this.log("ÿc1Pd2Stackÿc0 :: cubeJunkJewels — move jewel failed");
 					break;
 				}
 
+				batchDescs.push(detail);
 				moved += 1;
 				delay(40 + me.ping);
 			}
@@ -4456,7 +4501,16 @@ var Pd2Stack = {
 				break;
 			}
 
+			for (i = 0; i < batchDescs.length; i += 1) {
+				this.log("ÿc4Pd2Stackÿc0 :: junk→jewf " + batchDescs[i].desc);
+			}
+
 			this.log("ÿc2Pd2Stackÿc0 :: cubeJunkJewels " + moved + " → jewf (total≈" + after + ")");
+
+			if (typeof CompLog !== "undefined" && typeof CompLog.onJunkJewels === "function") {
+				CompLog.onJunkJewels(batchDescs, { jewfBefore: before, jewfAfter: after });
+			}
+
 			made += 1;
 		}
 

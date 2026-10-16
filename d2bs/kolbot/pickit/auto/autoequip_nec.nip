@@ -209,8 +209,10 @@
 [type] == gloves && [quality] < normal # # [tier] == 1
 [type] == gloves && [quality] == normal # # [tier] == 2
 [type] == gloves && [quality] == superior # # [tier] == 3
+// Magic floor — was missing; whites/superior stuck forever without it (JS gloveTier also fills)
+[type] == gloves && [quality] == magic # # [tier] == (typeof Item!=='undefined'&&Item.gloveTier?Item.gloveTier(item):4)
 // Rare floor — unid / junk-mod yellows (same as sorc boots/armor)
-[type] == gloves && [quality] == rare # # [tier] == 5
+[type] == gloves && [quality] == rare # # [tier] == (typeof Item!=='undefined'&&Item.gloveTier?Math.max(5,Item.gloveTier(item)):5)
 [type] == gloves && ([quality] == magic || [quality] == rare) # ([hpregen] + [maxmana] > 0 && [strength] + [dexterity] == 0) || ([hpregen] + [maxmana] == 0 && [strength] + [dexterity] > 0) && [coldresist] + [fireresist] + [lightresist] < 20 	# [tier] == 4
 [type] == gloves && ([quality] == magic || [quality] == rare) # [hpregen] + [maxmana] > 0 && [strength] + [dexterity] > 0 && [coldresist] + [fireresist] + [lightresist] + [poisonresist] < 20 														# [tier] == 5
 

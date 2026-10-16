@@ -1,10 +1,7 @@
-// Caster leveling RW bases — Stealth + Lore.
+// Caster leveling RW bases — Stealth (+ Lore via leveling_rw_lore.nip).
 // Loaded from AutoGear.js for sorc + caster necro (not poisonstrike / melee).
-// Fire Leaf: leveling_rw_leaf.nip. Cold/light Spirit bases: leveling_rw_spirit.nip (early pick).
+// Lore: leveling_rw_lore.nip (also used by poisonstrike). Fire Leaf / Spirit: separate nips.
 // MiniShop: Runewords.wantStealthShopBase / wantLoreShopBase.
 
 // Stealth (Tal+Eth) — Breast Plate / Light Plate only (light armor, good def, low str)
 ([Name] == BreastPlate || [Name] == LightPlate) && [Flag] != Ethereal && [quality] <= superior # [Sockets] == 2
-
-// Lore (Ort+Sol) — 2os helms/circlets (white/grey only). Keep ONE highest-def base (Runewords.cullWorseLoreBases).
-([Name] == Cap || [Name] == SkullCap || [Name] == Helm || [Name] == FullHelm || [Name] == GreatHelm || [Name] == Crown || [Name] == Mask || [Name] == BoneHelm || [Name] == WarHat || [Name] == Sallet || [Name] == Casque || [Name] == Basinet || [Name] == Circlet || [Name] == Coronet || [Name] == Tiara || [Name] == Diadem) && [Flag] != Ethereal && [quality] <= superior # [Sockets] == 2

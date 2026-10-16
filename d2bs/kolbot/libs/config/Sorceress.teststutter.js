@@ -662,8 +662,8 @@ function LoadConfig() {
 
 	} else if (SORC_BUILD === "light") {
 		/* Lightning / Charged Bolt (screenshot)
-		 * 20 CB, 20 Lightning, 20 TK, 20 LM, 1+ TP, 1 Shiver, 1+ Warmth.
-		 * Static added for bosses. Vit rest, energy 0.
+		 * Early: max Charged Bolt. Act 3 Nightmare: Akara respec → Lightning-first
+		 * (same end game: 20 Light / 20 LM / 20 CB / 20 TK).
 		 * IDs: CB 38, Lightning 49, TK 43, LM 63, TP 54, Warmth 37, Cold Enchant 40, Shiver 50, Static 42
 		 * Early: AttackSkill = Fire Bolt (36) from staff soft; ClassAttack switches to CB when hard CB > 0.
 		 */
@@ -676,6 +676,29 @@ function LoadConfig() {
 		Config.AttackSkill[6] = -1;
 		Config.LowManaSkill[0] = 0; // OOM → normal attack through early levels
 		Config.LowManaSkill[1] = -1;
+
+		Config.AutoSkill.NmAct3LightningRespec = true; // Act 3 NM: Akara reset → Lightning primary
+		// Post-respec spend order (AutoSmurf / chores swap Build to this at Act 3 NM)
+		// End game: 20 Lightning → 20 LM → 20 Chain Lightning → 20 Charged Bolt (synergy)
+		Config.AutoSkill.LightningFirstBuild = [
+			[37, 1, true],     // Warmth
+			[38, 1, true],     // Charged Bolt (prereq / synergy seed)
+			[42, 1, false],    // Static Field
+			[43, 1, true],     // Telekinesis
+			[54, 1, true],     // Teleport
+			[40, 1, false],    // Cold Enchant
+			[50, 1, false],    // Shiver Armor
+			[48, 1, false, 23], // Nova
+			[49, 1, false, 23], // Lightning unlock
+			[57, 1, false, 24], // Thunder Storm
+			[53, 1, false, 24], // Chain Lightning unlock
+			[63, 1, true, 30],  // Lightning Mastery unlock
+			[49, 20, false],   // max Lightning first
+			[63, 20, false],   // max Lightning Mastery
+			[53, 20, false],   // max Chain Lightning
+			[38, 20, false],   // max Charged Bolt (synergy)
+			[43, 20, false]    // max Telekinesis
+		];
 
 		Config.AutoSkill.DumpSkill = 38; // Charged Bolt while waiting on level gates
 		Config.AutoSkill.Build = [
@@ -708,6 +731,34 @@ function LoadConfig() {
 			["strength", 80], ["vitality", 90], // ~lvl 50
 			["vitality", "all"]
 		];
+		// Post-respec (Act 3 NM Lightning rebuild): same str/vit targets, 0 energy
+		Config.AutoStat.LightningFirstBuild = [
+			["strength", 20], ["vitality", 20],
+			["strength", 30], ["vitality", 30],
+			["strength", 45], ["vitality", 40],
+			["strength", 55], ["vitality", 50],
+			["strength", 65], ["vitality", 70],
+			["strength", 80], ["vitality", 90],
+			["vitality", "all"]
+		];
+
+		// Act 3+ NM (or already Lightning-invested): always Lightning-first Build
+		// so chores can't dump a manual Akara wipe back into Charged Bolt before the Act 3 hook.
+		if (me.diff === 1 && (
+				me.act >= 3 ||
+				(typeof Pather !== "undefined" && Pather.accessToAct && Pather.accessToAct(3)) ||
+				(me.getSkill(49, 0) || 0) > (me.getSkill(38, 0) || 0)
+			)) {
+			Config.AttackSkill[1] = 49;
+			Config.AttackSkill[3] = 49;
+			Config.AutoSkill.DumpSkill = 49;
+			if (Config.AutoSkill.LightningFirstBuild && Config.AutoSkill.LightningFirstBuild.length) {
+				Config.AutoSkill.Build = Config.AutoSkill.LightningFirstBuild;
+			}
+			if (Config.AutoStat.LightningFirstBuild && Config.AutoStat.LightningFirstBuild.length) {
+				Config.AutoStat.Build = Config.AutoStat.LightningFirstBuild;
+			}
+		}
 
 	} else {
 		/* Cold / Frozen Orb
